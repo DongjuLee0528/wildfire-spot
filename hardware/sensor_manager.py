@@ -10,14 +10,29 @@ import time
 
 class SensorManager:
     def __init__(self):
-        self._i2c = busio.I2C(I2C_SCL, I2C_SDA)
+        self._available = True
 
-        self._ads1_1 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_1)
-        self._ads1_2 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_2)
-        self._mq2_chan1 = AnalogIn(self._ads1_1, ADS.P0)
-        self._mq2_chan2 = AnalogIn(self._ads1_2, ADS.P0)
+        try:
+            self._i2c = busio.I2C(I2C_SCL, I2C_SDA)
+        except:
+            print("I2C initialization failed")
+            self._available = False
+            return
 
-        self._sht31 = adafruit_sht31d.SHT31D(self._i2c, address=SHT31_ADDRESS)
+        try:
+            self._ads1_1 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_1)
+            self._ads1_2 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_2)
+            self._mq2_chan1 = AnalogIn(self._ads1_1, ADS.P0)
+            self._mq2_chan2 = AnalogIn(self._ads1_2, ADS.P0)
+        except:
+            print("ADS1115 initialization failed")
+            self._available = False
+
+        try:
+            self._sht31 = adafruit_sht31d.SHT31D(self._i2c, address=SHT31_ADDRESS)
+        except:
+            print("SHT31 initialization failed")
+            self._available = False
 
         GPIO.setmode(GPIO.BOARD)
 
@@ -31,14 +46,24 @@ class SensorManager:
             GPIO.setup(HCSR04_ECHO_PIN, GPIO.IN)
 
     def read_mq2(self):
-        value1 = self._mq2_chan1.value
-        value2 = self._mq2_chan2.value
-        return int((value1 + value2) / 2)
+        if not self._available:
+            return 0
+        try:
+            value1 = self._mq2_chan1.value
+            value2 = self._mq2_chan2.value
+            return int((value1 + value2) / 2)
+        except:
+            return 0
 
     def read_sht31(self):
-        temperature = self._sht31.temperature
-        humidity = self._sht31.relative_humidity
-        return (temperature, humidity)
+        if not self._available:
+            return (0.0, 0.0)
+        try:
+            temperature = self._sht31.temperature
+            humidity = self._sht31.relative_humidity
+            return (temperature, humidity)
+        except:
+            return (0.0, 0.0)
 
     def read_ky026(self):
         flame_detected = []

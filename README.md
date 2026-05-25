@@ -18,13 +18,29 @@
 4. Software Structure
 - Display folder structure as tree
 
-5. Based On
+5. Datasets
+- FASDD (Flame and Smoke Detection Dataset)
+  - 100,000+ flame and smoke images
+  - YOLO format supported
+  - https://doi.org/10.57760/sciencedb.j00104.00103
+
+- Pyro-SDIS by PyroNear
+  - 33,636 wildfire smoke images
+  - YOLO format supported
+  - https://huggingface.co/datasets/pyronear/pyro-sdis
+
+- AI Hub Wildfire Detection Dataset
+  - Korean forest wildfire dataset
+  - Collected from actual fire simulations in Korean terrain
+  - https://aihub.or.kr/aihubdata/data/view.do?dataSetSn=71330
+
+6. Based On
 - Based on SpotMicroJetson by Road-Balance
   https://github.com/Road-Balance/SpotMicroJetson
 - Originally forked from FlorianWilk's SpotMicroAI
   https://github.com/FlorianWilk/SpotMicroAI
 
-6. License
+7. License
 - MIT License
 
 ## Rules

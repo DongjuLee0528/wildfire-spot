@@ -65,24 +65,27 @@ class Controllers:
         self.angleToServo(thetas)
 
         for x in range(len(self._val_list)):
-            if (self._val_list[x] > 180):
+            if (self._val_list[x] > SERVO_ANGLE_MAX):
                 print("Over 180!!")
-                self._val_list[x] = 179
-            if (self._val_list[x] <= 0):
+                self._val_list[x] = SERVO_ANGLE_MAX - 1
+            if (self._val_list[x] <= SERVO_ANGLE_MIN):
                 print("Under 0!!")
-                self._val_list[x] = 1
+                self._val_list[x] = SERVO_ANGLE_MIN + 1
             self._servos[x].angle = float(self._val_list[x])
 
+    def set_camera_pan(self, angle):
+        if angle < SERVO_ANGLE_MIN:
+            angle = SERVO_ANGLE_MIN
+        if angle > SERVO_ANGLE_MAX:
+            angle = SERVO_ANGLE_MAX
+        self._pan_servo.angle = float(angle)
 
-    def pan_tilt(self, pan_angle, tilt_angle):
-        if pan_angle < SERVO_ANGLE_MIN or pan_angle > SERVO_ANGLE_MAX:
-            print("Pan angle out of range!")
-            return
-        if tilt_angle < SERVO_ANGLE_MIN or tilt_angle > SERVO_ANGLE_MAX:
-            print("Tilt angle out of range!")
-            return
-        self._pan_servo.angle = float(pan_angle)
-        self._tilt_servo.angle = float(tilt_angle)
+    def set_camera_tilt(self, angle):
+        if angle < SERVO_ANGLE_MIN:
+            angle = SERVO_ANGLE_MIN
+        if angle > SERVO_ANGLE_MAX:
+            angle = SERVO_ANGLE_MAX
+        self._tilt_servo.angle = float(angle)
 
 if __name__=="__main__":
     legEndpoints=np.array([[100,-100,87.5,1],[100,-100,-87.5,1],[-100,-100,87.5,1],[-100,-100,-87.5,1]])
