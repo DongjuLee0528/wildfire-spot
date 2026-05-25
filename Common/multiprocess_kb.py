@@ -1,33 +1,19 @@
-'''
-Multiprocess Keyboard Interrupt Handler
-You can get Keyboard inputs while running 
-another endless Loops 
-'''
-
+from utils.config import *
 import time
 import keyboard
 from multiprocessing import Process, Queue
-
-
-# keyboard Initialisation
-# Dictionary of keyboard controller buttons we want to include.
 key_value_default = {'w': 0, 'a': 0, 's': 0, 'd': 0, 'q': 0, 'e': 0, 'move': False }
 control_offset = {'IDstepLength': 0.0, 'IDstepWidth': 0.0, 'IDstepAlpha': 0.0, 'StartStepping': False }
 
-class KeyInterrupt(): 
+class KeyInterrupt():
 
-    def __init__(self): 
-        # How many times Keys Pushed
+    def __init__(self):
         self.key_status = Queue()
         self.key_status.put(key_value_default)
-        
-        # Calculate Offset based on Key Status
+
         self.command_status = Queue()
         self.command_status.put(control_offset)
-
-        # Offsets for Robot Control
-        # Search calcRbStep for Usage
-        self.X_STEP = 10.0
+        self.X_STEP = FORWARD_DISTANCE / 12.0
         self.Y_STEP = 5.0
         self.YAW_STEP = 3.0
 
@@ -41,8 +27,6 @@ class KeyInterrupt():
         result_dict['move'] = True
         self.key_status.put(result_dict)
 
-    # Calculate Robot Velocity
-    # Supports Linear X, Linear Y and Angular Yaw Control Now.
     def calcRbStep(self):
         result_dict = self.key_status.get()
         command_dict = self.command_status.get()
@@ -58,8 +42,6 @@ class KeyInterrupt():
         self.key_status.put(result_dict)
         self.command_status.put(command_dict)
 
-    # Activated when Key Pressed, Doesn't support Hotkey 
-    # Doesn't support more than two key pressing
     def keyInterrupt(self, id, key_status, command_status):
         
         was_pressed = False
@@ -98,15 +80,12 @@ class KeyInterrupt():
 
             self.calcRbStep()
 
-# Test Endless While Loop
 def testWhile(id, command_status):
     while True:
         result_dict = command_status.get()
         print(result_dict)
         command_status.put(result_dict)
         time.sleep(1)
-
-# Basic Usage
 if __name__ == "__main__":
     try:
         KeyTest = KeyInterrupt()
