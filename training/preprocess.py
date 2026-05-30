@@ -140,8 +140,9 @@ class DatasetProcessor:
         print("Processing AI Hub dataset...")
         ai_hub_path = f"{BASE}/265.지역안전재난(산불) 방재의 고도화를 위한 대규모 인공지능 데이터베이스 구축/01-1.정식개방데이터"
 
-        temp_dir = f"{OUTPUT_DIR}/aihub_temp"
-        os.makedirs(f"{temp_dir}/labels", exist_ok=True)
+        aihub_dir = f"{OUTPUT_DIR}/aihub"
+        os.makedirs(f"{aihub_dir}/images/train", exist_ok=True)
+        os.makedirs(f"{aihub_dir}/labels/train", exist_ok=True)
 
         for split in ['Training', 'Validation']:
             img_dir = f"{ai_hub_path}/{split}/01.원천데이터"
@@ -178,8 +179,8 @@ class DatasetProcessor:
 
                                 annotations = [ann for ann in data['annotations'] if ann['image_id'] == img_info['id']]
 
-                                label_name = f"aihub_{img_name.replace('.jpg', '.txt')}"
-                                label_path = f"{temp_dir}/labels/{label_name}"
+                                label_name = img_name.replace('.jpg', '.txt')
+                                label_path = f"{aihub_dir}/labels/train/{label_name}"
 
                                 has_fire = False
                                 has_smoke = False
@@ -208,7 +209,11 @@ class DatasetProcessor:
                                         has_objects = True
 
                                 if has_objects:
-                                    self.all_image_paths.append((img_path, label_path))
+                                    symlink_img_path = f"{aihub_dir}/images/train/{img_name}"
+                                    if not os.path.exists(symlink_img_path):
+                                        os.symlink(img_path, symlink_img_path)
+
+                                    self.all_image_paths.append((symlink_img_path, label_path))
                                     if has_fire:
                                         self.stats['fire_images'] += 1
                                     if has_smoke:
