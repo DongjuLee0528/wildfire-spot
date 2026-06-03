@@ -7,3 +7,6 @@ __pycache__/
 *.log
 .ipynb_checkpoints/
 .idea/
+training/runs/
+training/yolov10n.pt
+*.pt
