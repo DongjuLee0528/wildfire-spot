@@ -60,27 +60,27 @@ class KinematicMotion:
 class TrottingGait:
     
     def __init__(self):
-        self.step_gain = 0.8
-        self.maxSl=2
-        self.bodyPos=(0,100,0)
-        self.bodyRot=(0,0,0)
-        self.t0=300
-        self.t1=1200
-        self.t2=300
-        self.t3=200
-        self.Sl=0.0
-        self.Sw=0
+        self.step_gain = GAIT_STEP_GAIN
+        self.maxSl=GAIT_MAX_SL
+        self.bodyPos=GAIT_BODY_POS
+        self.bodyRot=GAIT_BODY_ROT
+        self.t0=GAIT_TIMING[0]
+        self.t1=GAIT_TIMING[1]
+        self.t2=GAIT_TIMING[2]
+        self.t3=GAIT_TIMING[3]
+        self.Sl=GAIT_INITIAL_VALUES[0]
+        self.Sw=GAIT_INITIAL_VALUES[1]
         self.Sh=STEP_HEIGHT
-        self.Sa=0
-        self.Spf=87
-        self.Spr=77
+        self.Sa=GAIT_INITIAL_VALUES[2]
+        self.Spf=GAIT_FOOT_POSITIONS[0]
+        self.Spr=GAIT_FOOT_POSITIONS[1]
         self.Fo=FORWARD_DISTANCE
         self.Ro=abs(BACKWARD_DISTANCE)
 
-        self.Rc=[-50,0,0,1]
+        self.Rc=GAIT_RC
     def calcLeg(self,t,x,y,z):
         startLp=np.array([x-self.Sl/2.0,y,z-self.Sw,1])
-        endY=0
+        endY=GAIT_END_Y
         endLp=np.array([x+self.Sl/2,y+endY,z+self.Sw,1])
         
         if(t<self.t0):
@@ -91,7 +91,7 @@ class TrottingGait:
             tp=1/(self.t1/td)
             diffLp=endLp-startLp
             curLp=startLp+diffLp*tp
-            psi=-((math.pi/180*self.Sa)/2)+(math.pi/180*self.Sa)*tp
+            psi=-((math.pi/LIDAR_REVERSE_DIRECTION*self.Sa)/2)+(math.pi/LIDAR_REVERSE_DIRECTION*self.Sa)*tp
             Ry = np.array([[np.cos(psi),0,np.sin(psi),0],
                     [0,1,0,0],
                     [-np.sin(psi),0,np.cos(psi),0],[0,0,0,1]])
@@ -126,10 +126,10 @@ class TrottingGait:
         Tt=(self.t0+self.t1+self.t2+self.t3)
         Tt2=Tt/2
         rd=0
-        td=(t*1000)%Tt
-        t2=(t*1000-Tt2)%Tt
-        rtd=(t*1000-rd)%Tt
-        rt2=(t*1000-Tt2-rd)%Tt
+        td=(t*GAIT_TOTAL_TIME_CALC)%Tt
+        t2=(t*GAIT_TOTAL_TIME_CALC-Tt2)%Tt
+        rtd=(t*GAIT_TOTAL_TIME_CALC-rd)%Tt
+        rt2=(t*GAIT_TOTAL_TIME_CALC-Tt2-rd)%Tt
         Fx=self.Fo
         Rx=-1*self.Ro
         Fy=-100
