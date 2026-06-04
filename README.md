@@ -34,14 +34,20 @@
   - Collected from actual fire simulations in Korean terrain
   - https://aihub.or.kr/aihubdata/data/view.do?dataSetSn=71330
 
-6. Based On
-- Based on SpotMicroJetson by Road-Balance
-  https://github.com/Road-Balance/SpotMicroJetson
-- Originally forked from FlorianWilk's SpotMicroAI
-  https://github.com/FlorianWilk/SpotMicroAI
+## Based On
+- Based on [SpotMicroJetson](https://github.com/Road-Balance/SpotMicroJetson) by Road-Balance (GPL-3.0)
+- Originally forked from [FlorianWilk's SpotMicroAI](https://github.com/FlorianWilk/SpotMicroAI)
 
-7. License
-- MIT License
+## Copyright
+Copyright (C) 2026 Dongjoo Lee
+
+This is a modified version of the original work.
+Major modifications include wildfire detection modules,
+sensor integration, and YOLOv10n-based vision system.
+
+## License
+This project is licensed under the GNU General Public License v3.0.
+See the [LICENSE](LICENSE) file for details.
 
 ## Rules
 - Write in English
