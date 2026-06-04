@@ -11,22 +11,26 @@ import time
 
 class Controllers:
     def __init__(self):
-        print("Initializing Servos")
-        self._i2c_bus0=(busio.I2C(I2C_SCL, I2C_SDA))
-        print("Initializing ServoKit")
-        self._pca_1 = PCA9685(self._i2c_bus0, address=PCA9685_FRONT_LEGS)
-        self._pca_1.frequency = PWM_FREQUENCY
-        self._pca_2 = PCA9685(self._i2c_bus0, address=PCA9685_BACK_LEGS)
-        self._pca_2.frequency = PWM_FREQUENCY
-        self._pca_3 = PCA9685(self._i2c_bus0, address=PCA9685_CAMERA)
-        self._pca_3.frequency = PWM_FREQUENCY
+        try:
+            print("Initializing Servos")
+            self._i2c_bus0=(busio.I2C(I2C_SCL, I2C_SDA))
+            print("Initializing ServoKit")
+            self._pca_1 = PCA9685(self._i2c_bus0, address=PCA9685_FRONT_LEGS)
+            self._pca_1.frequency = PWM_FREQUENCY
+            self._pca_2 = PCA9685(self._i2c_bus0, address=PCA9685_BACK_LEGS)
+            self._pca_2.frequency = PWM_FREQUENCY
+            self._pca_3 = PCA9685(self._i2c_bus0, address=PCA9685_CAMERA)
+            self._pca_3.frequency = PWM_FREQUENCY
+        except Exception as e:
+            print(f"I2C initialization failed: {e}")
+            raise
 
         self._servos = list()
-        for i in range(0, 12):
-            if i<6:
+        for i in range(0, SERVO_CHANNELS):
+            if i<FRONT_LEG_CHANNELS:
                 self._servos.append(servo.Servo(self._pca_1.channels[i], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
             else:
-                self._servos.append(servo.Servo(self._pca_2.channels[i], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
+                self._servos.append(servo.Servo(self._pca_2.channels[i-FRONT_LEG_CHANNELS], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
 
         self._pan_servo = servo.Servo(self._pca_3.channels[CAMERA_PAN], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
         self._tilt_servo = servo.Servo(self._pca_3.channels[CAMERA_TILT], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
@@ -35,7 +39,7 @@ class Controllers:
 
         self._servo_offsets = SERVO_OFFSETS
 
-        self._val_list = [ x for x in range(12) ]
+        self._val_list = [ x for x in range(SERVO_CHANNELS) ]
         self._thetas = []
 
     def getDegreeAngles(self, La):
