@@ -96,3 +96,30 @@ GAIT_RC = [-50, 0, 0, 1]
 GAIT_ANGLE_STEP = 0.5
 GAIT_END_Y = 0
 GAIT_TOTAL_TIME_CALC = 1000
+
+ROBOT_L1 = 50
+ROBOT_L2 = 20
+ROBOT_L3 = 100
+ROBOT_L4 = 100
+ROBOT_L = 140
+ROBOT_W = 75
+
+ROBOT_LEG_FRONT = 0
+ROBOT_LEG_BACK = 2
+ROBOT_LEG_LEFT = 0
+ROBOT_LEG_RIGHT = 1
+
+ROBOT_BODY_HEIGHT = -100
+
+KB_KEY_VALUES = {'w': 0, 'a': 0, 's': 0, 'd': 0, 'q': 0, 'e': 0, 'move': False}
+KB_CONTROL_OFFSET = {'IDstepLength': 0.0, 'IDstepWidth': 0.0, 'IDstepAlpha': 0.0, 'StartStepping': False}
+KB_X_STEP_DIVISOR = 12.0
+KB_Y_STEP = 5.0
+KB_YAW_STEP = 3.0
+
+MATH_PI_DIVISOR = 180
+
+DATASET_BASE_PATH = "/Users/dongjulee/Documents/AIdatasets/wildfire-dataset"
+DATASET_OUTPUT_PATH = "/Users/dongjulee/Documents/AIdatasets/wildfire-dataset/unified_dataset"
+
+KB_TEST_SLEEP_TIME = 1
