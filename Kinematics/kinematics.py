@@ -1,239 +1,229 @@
-from mpl_toolkits import mplot3d
 import numpy as np
-from math import *
-import random
-
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-
 from mpl_toolkits.mplot3d import Axes3D
+from math import sqrt, atan2, acos, sin, cos, pi
 
-fig = plt.figure()
-data = np.random.rand(2, 25)
+try:
+    from utils.config import *
+except ImportError:
+    ROBOT_L1 = 50
+    ROBOT_L2 = 20
+    ROBOT_L3 = 100
+    ROBOT_L4 = 100
+    ROBOT_L = 140
+    ROBOT_W = 75
+    ROBOT_LEG_FRONT = 0
+    ROBOT_LEG_BACK = 2
+    ROBOT_LEG_LEFT = 0
+    ROBOT_LEG_RIGHT = 1
 
-def setupView(limit):
+
+def setup_3d_view(axis_limit):
     ax = plt.axes(projection="3d")
-    ax.set_xlim(-limit, limit)
-    ax.set_ylim(-limit, limit)
-    ax.set_zlim(-limit, limit)
+    ax.set_xlim(-axis_limit, axis_limit)
+    ax.set_ylim(-axis_limit, axis_limit)
+    ax.set_zlim(-axis_limit, axis_limit)
     ax.set_xlabel("X")
     ax.set_ylabel("Z")
     ax.set_zlabel("Y")
     return ax
 
-class Kinematic:
+
+class QuadrupedKinematics:
 
     def __init__(self):
-        self.l1=50
-        self.l2=20
-        self.l3=100
-        self.l4=100
+        self.link1 = ROBOT_L1
+        self.link2 = ROBOT_L2
+        self.link3 = ROBOT_L3
+        self.link4 = ROBOT_L4
+        self.body_length = ROBOT_L
+        self.body_width = ROBOT_W
 
-        self.L = 140
-        self.W = 75
-        
-        #leg iterators. ex. LEG_BACK + LEG_LEFT -> array[2]
-        self.LEG_FRONT = 0
-        self.LEG_BACK = 2
-        self.LEG_LEFT = 0
-        self.LEG_RIGHT =1
+        self.leg_front = ROBOT_LEG_FRONT
+        self.leg_back = ROBOT_LEG_BACK
+        self.leg_left = ROBOT_LEG_LEFT
+        self.leg_right = ROBOT_LEG_RIGHT
 
-        #thetas, which will be used on controllers
-        self.thetas = np.array([[0, 0, 0],[0, 0, 0],[0, 0, 0],[0, 0, 0]], dtype=np.float64)
+        self.joint_angles = np.zeros((4, 3), dtype=np.float64)
 
-    def bodyIK(self,omega,phi,psi,xm,ym,zm):
-        Rx = np.array([[1,0,0,0],
-                    [0,np.cos(omega),-np.sin(omega),0],
-                    [0,np.sin(omega),np.cos(omega),0],[0,0,0,1]])
-        Ry = np.array([[np.cos(phi),0,np.sin(phi),0],
-                    [0,1,0,0],
-                    [-np.sin(phi),0,np.cos(phi),0],[0,0,0,1]])
-        Rz = np.array([[np.cos(psi),-np.sin(psi),0,0],
-                    [np.sin(psi),np.cos(psi),0,0],[0,0,1,0],[0,0,0,1]])
-        Rxyz = Rx.dot(Ry.dot(Rz))
+    def leg_ik(self, target_point):
+        x, y, z = target_point[0], target_point[1], target_point[2]
+        l1, l2, l3, l4 = self.link1, self.link2, self.link3, self.link4
 
-        T = np.array([[0,0,0,xm],[0,0,0,ym],[0,0,0,zm],[0,0,0,0]])
-        Tm = T+Rxyz
-
-        sHp=np.sin(pi/2)
-        cHp=np.cos(pi/2)
-        (L,W)=(self.L,self.W)
-
-        return([Tm.dot(np.array([[cHp,0,sHp,L/2],[0,1,0,0],[-sHp,0,cHp,W/2],[0,0,0,1]])),
-                Tm.dot(np.array([[cHp,0,sHp,L/2],[0,1,0,0],[-sHp,0,cHp,-W/2],[0,0,0,1]])),
-                Tm.dot(np.array([[cHp,0,sHp,-L/2],[0,1,0,0],[-sHp,0,cHp,W/2],[0,0,0,1]])),
-                Tm.dot(np.array([[cHp,0,sHp,-L/2],[0,1,0,0],[-sHp,0,cHp,-W/2],[0,0,0,1]]))])
-
-    def legIK(self,point):
-        (x,y,z)=(point[0],point[1],point[2])
-        (l1,l2,l3,l4)=(self.l1,self.l2,self.l3,self.l4)
-        try:        
-            F=sqrt(x**2+y**2-l1**2)
+        try:
+            F = sqrt(x**2 + y**2 - l1**2)
         except ValueError:
-            print("Error in legIK with x {} y {} and l1 {}".format(x,y,l1))
-            F=l1
-        G=F-l2  
-        H=sqrt(G**2+z**2)
-        theta1=-atan2(y,x)-atan2(F,-l1)
-        
-        D=(H**2-l3**2-l4**2)/(2*l3*l4)
-        try:        
-            theta3=acos(D) 
+            F = l1
+
+        G = F - l2
+        H = sqrt(G**2 + z**2)
+        theta1 = -atan2(y, x) - atan2(F, -l1)
+
+        D = (H**2 - l3**2 - l4**2) / (2 * l3 * l4)
+        try:
+            theta3 = acos(D)
         except ValueError:
-            print("Error in legIK with x {} y {} and D {}".format(x,y,D))
-            theta3=0
-        theta2=atan2(z,G)-atan2(l4*sin(theta3),l3+l4*cos(theta3))
-        
-        return(theta1,theta2,theta3)
+            theta3 = 0
 
-    def calcLegPoints(self,angles):
-        (l1,l2,l3,l4)=(self.l1,self.l2,self.l3,self.l4)
-        (theta1,theta2,theta3)=angles
-        theta23=theta2+theta3
+        theta2 = atan2(z, G) - atan2(l4 * sin(theta3), l3 + l4 * cos(theta3))
 
-        T0=np.array([0,0,0,1])
-        T1=T0+np.array([-l1*cos(theta1),l1*sin(theta1),0,0])
-        T2=T1+np.array([-l2*sin(theta1),-l2*cos(theta1),0,0])
-        T3=T2+np.array([-l3*sin(theta1)*cos(theta2),-l3*cos(theta1)*cos(theta2),l3*sin(theta2),0])
-        T4=T3+np.array([-l4*sin(theta1)*cos(theta23),-l4*cos(theta1)*cos(theta23),l4*sin(theta23),0])
-            
-        return np.array([T0,T1,T2,T3,T4])
+        return (theta1, theta2, theta3)
 
-    def drawLegPoints(self,p):
-        # draw basic position
-        plt.plot([x[0] for x in p],[x[2] for x in p],[x[1] for x in p], 'k-', lw=3)
-        
-        #draw body points
-        plt.plot([p[0][0]],[p[0][2]],[p[0][1]],'bo',lw=2)
-        
-        # draw end points
-        plt.plot([p[4][0]],[p[4][2]],[p[4][1]],'ro',lw=2)    
+    def leg_fk(self, joint_angles):
+        l1, l2, l3, l4 = self.link1, self.link2, self.link3, self.link4
+        theta1, theta2, theta3 = joint_angles
+        theta23 = theta2 + theta3
 
-    #edited by shson98
-    def drawLegPair(self,Tl,Tr,Ll,Lr, LEG_FR):
-        Ix=np.array([[-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
-        self.drawLegPoints([Tl.dot(x) for x in self.calcLegPoints(self.legIK(np.linalg.inv(Tl).dot(Ll)))])
-        self.drawLegPoints([Tr.dot(Ix.dot(x)) for x in self.calcLegPoints(self.legIK(Ix.dot(np.linalg.inv(Tr).dot(Lr))))])
-        
-        # print(self.legIK(np.linalg.inv(Tl).dot(Ll)))
-        self.thetas[LEG_FR+self.LEG_LEFT]=np.array(self.legIK(np.linalg.inv(Tl).dot(Ll)))
+        p0 = np.array([0, 0, 0, 1])
+        p1 = p0 + np.array([-l1 * cos(theta1), l1 * sin(theta1), 0, 0])
+        p2 = p1 + np.array([-l2 * sin(theta1), -l2 * cos(theta1), 0, 0])
+        p3 = p2 + np.array([-l3 * sin(theta1) * cos(theta2),
+                           -l3 * cos(theta1) * cos(theta2),
+                           l3 * sin(theta2), 0])
+        p4 = p3 + np.array([-l4 * sin(theta1) * cos(theta23),
+                           -l4 * cos(theta1) * cos(theta23),
+                           l4 * sin(theta23), 0])
 
-        # print(self.legIK(Ix.dot(np.linalg.inv(Tr).dot(Lr))))
-        self.thetas[LEG_FR+self.LEG_RIGHT]=np.array(self.legIK(Ix.dot(np.linalg.inv(Tr).dot(Lr))))
+        return np.array([p0, p1, p2, p3, p4])
 
-    def drawRobot(self,Lp,angles,center):
-        (omega,phi,psi)=angles
-        (xm,ym,zm)=center
-        
-        FP=[0,0,0,1]
-        (Tlf,Trf,Tlb,Trb)= self.bodyIK(omega,phi,psi,xm,ym,zm)
-        CP=[x.dot(FP) for x in [Tlf,Trf,Tlb,Trb]]
+    def body_ik(self, roll, pitch, yaw, x_offset, y_offset, z_offset):
+        Rx = np.array([[1, 0, 0, 0],
+                      [0, cos(roll), -sin(roll), 0],
+                      [0, sin(roll), cos(roll), 0],
+                      [0, 0, 0, 1]])
 
-        CPs=[CP[x] for x in [0,1,3,2,0]]
+        Ry = np.array([[cos(pitch), 0, sin(pitch), 0],
+                      [0, 1, 0, 0],
+                      [-sin(pitch), 0, cos(pitch), 0],
+                      [0, 0, 0, 1]])
 
-        # draw body points with body edges
-        plt.plot([x[0] for x in CPs],[x[2] for x in CPs],[x[1] for x in CPs], 'bo-', lw=2)
+        Rz = np.array([[cos(yaw), -sin(yaw), 0, 0],
+                      [sin(yaw), cos(yaw), 0, 0],
+                      [0, 0, 1, 0],
+                      [0, 0, 0, 1]])
 
-        self.drawLegPair(Tlf,Trf,Lp[0],Lp[1], self.LEG_FRONT)
-        self.drawLegPair(Tlb,Trb,Lp[2],Lp[3], self.LEG_BACK)
+        rotation_matrix = Rx.dot(Ry.dot(Rz))
 
-    # La: Leg Angles
-    def drawRobotbyAngles(self,La,angles,center):
-        Ix=np.array([[-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
-        (omega,phi,psi)=angles
-        (xm,ym,zm)=center
-        
-        FP=[0,0,0,1]
-        (Tlf,Trf,Tlb,Trb)= self.bodyIK(omega,phi,psi,xm,ym,zm)
-        CP=[x.dot(FP) for x in [Tlf,Trf,Tlb,Trb]]
+        translation_matrix = np.array([[0, 0, 0, x_offset],
+                                     [0, 0, 0, y_offset],
+                                     [0, 0, 0, z_offset],
+                                     [0, 0, 0, 0]])
 
-        CPs=[CP[x] for x in [0,1,3,2,0]]
+        body_transform = translation_matrix + rotation_matrix
 
-        # draw body points with body edges
-        plt.plot([x[0] for x in CPs],[x[2] for x in CPs],[x[1] for x in CPs], 'bo-', lw=2)
+        half_pi_sin = sin(pi/2)
+        half_pi_cos = cos(pi/2)
+        L, W = self.body_length, self.body_width
 
-        # Draw LEG_FRONT
-        self.drawLegPoints([Tlf.dot(x) for x in self.calcLegPoints(tuple(La[0]))])
-        self.drawLegPoints([Trf.dot(Ix.dot(x)) for x in self.calcLegPoints(tuple(La[1]))])
+        front_left = body_transform.dot(np.array([[half_pi_cos, 0, half_pi_sin, L/2],
+                                                 [0, 1, 0, 0],
+                                                 [-half_pi_sin, 0, half_pi_cos, W/2],
+                                                 [0, 0, 0, 1]]))
 
-        # Draw LEG_BACK
-        self.drawLegPoints([Tlb.dot(x) for x in self.calcLegPoints((tuple(La[2])))])
-        self.drawLegPoints([Trb.dot(Ix.dot(x)) for x in self.calcLegPoints(tuple(La[3]))])
+        front_right = body_transform.dot(np.array([[half_pi_cos, 0, half_pi_sin, L/2],
+                                                  [0, 1, 0, 0],
+                                                  [-half_pi_sin, 0, half_pi_cos, -W/2],
+                                                  [0, 0, 0, 1]]))
 
-    def calcIK(self,Lp,angles,center):
-        (omega,phi,psi)=angles
-        (xm,ym,zm)=center
-        
-        (Tlf,Trf,Tlb,Trb)= self.bodyIK(omega,phi,psi,xm,ym,zm)
+        back_left = body_transform.dot(np.array([[half_pi_cos, 0, half_pi_sin, -L/2],
+                                                [0, 1, 0, 0],
+                                                [-half_pi_sin, 0, half_pi_cos, W/2],
+                                                [0, 0, 0, 1]]))
 
-        Ix=np.array([[-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
-        return np.array([self.legIK(np.linalg.inv(Tlf).dot(Lp[0])),
-        self.legIK(Ix.dot(np.linalg.inv(Trf).dot(Lp[1]))),
-        self.legIK(np.linalg.inv(Tlb).dot(Lp[2])),
-        self.legIK(Ix.dot(np.linalg.inv(Trb).dot(Lp[3])))])
+        back_right = body_transform.dot(np.array([[half_pi_cos, 0, half_pi_sin, -L/2],
+                                                 [0, 1, 0, 0],
+                                                 [-half_pi_sin, 0, half_pi_cos, -W/2],
+                                                 [0, 0, 0, 1]]))
 
-# Inverse Kinematics
-def initIK(Lp):
-    setupView(200).view_init(elev=12., azim=28)
-    moduleKinematics = Kinematic()
-    moduleKinematics.drawRobot(Lp,(0,0,0),(0,0,0))
-    
-    return moduleKinematics.thetas
+        return [front_left, front_right, back_left, back_right]
 
-# Forward Kinematics
-def initFK(La):
-    setupView(200).view_init(elev=12., azim=28)
-    moduleKinematics = Kinematic()
-    moduleKinematics.drawRobotbyAngles(La,(0,0,0),(0,0,0))
+    def calc_ik(self, foot_positions, body_position, body_rotation):
+        roll, pitch, yaw = body_rotation
+        x_pos, y_pos, z_pos = body_position
 
-    return moduleKinematics.thetas
+        leg_transforms = self.body_ik(roll, pitch, yaw, x_pos, y_pos, z_pos)
 
-def update_lines(i, Lp, angles):
-    initIK(Lp)
+        mirror_matrix = np.array([[-1, 0, 0, 0],
+                                 [0, 1, 0, 0],
+                                 [0, 0, 1, 0],
+                                 [0, 0, 0, 1]])
 
-def animationKinecatics(Lp):
-    angles=[0]
-    lines_ani = FuncAnimation(fig, update_lines, frames=1000, fargs=(Lp, angles), interval=100)
-    plt.show()
-    
-    return lines_ani
+        angles = np.zeros((4, 3))
 
-def plotKinematics():
-    plt.show()
+        angles[0] = self.leg_ik(np.linalg.inv(leg_transforms[0]).dot(foot_positions[0]))
+        angles[1] = self.leg_ik(mirror_matrix.dot(np.linalg.inv(leg_transforms[1]).dot(foot_positions[1])))
+        angles[2] = self.leg_ik(np.linalg.inv(leg_transforms[2]).dot(foot_positions[2]))
+        angles[3] = self.leg_ik(mirror_matrix.dot(np.linalg.inv(leg_transforms[3]).dot(foot_positions[3])))
 
-if __name__=="__main__":
-    Lp=np.array([[100,-100,100,1], \
-                [100,-100,-100,1], \
-                [-100,-100,100,1], \
-                [-100,-100,-100,1]])
+        return angles
 
-    # case #1
-    '''
-    La = [ [ 0.12074281628178252, -0.7609430170197956, 2.187424485337152 ],
-        [ 0.12074281628178252, -0.7609430170197956, 2.187424485337152 ],
-        [ 0.12074281628178252, -1.4264814683173563, 2.187424485337152 ],
-        [ 0.12074281628178252, -1.4264814683173563, 2.187424485337152 ] ]
-    '''
-    # # case #2
-    # # First 3 seconds position in simulation
-    # La = [[-0.041886,   -0.65947755,  1.3189551 ], \
-    #         [-0.041886,   -0.65947755,  1.3189551 ], \
-    #         [-0.041886,   -0.82366283,  1.27219102], \
-    #         [-0.041886,   -0.82366283,  1.27219102]]
+    def init_ik(self, foot_positions):
+        ax = setup_3d_view(200)
+        ax.view_init(elev=12., azim=28)
 
-    # # case #3
-    # # All Zeros
-    # La =   [[0,   0,  0 ], \
-    #         [0,   0,  0 ], \
-    #         [0,   0,  0 ], \
-    #         [0,   0,  0]]
+        self.joint_angles = self.calc_ik(foot_positions, (0, 0, 0), (0, 0, 0))
+        self.visualize_robot(foot_positions, (0, 0, 0), (0, 0, 0))
 
-    # Pose Visualization
+        return self.joint_angles
 
-    initIK(Lp)
-    # plotKinematics()
+    def visualize_robot(self, foot_positions, body_position, body_rotation):
+        roll, pitch, yaw = body_rotation
+        x_pos, y_pos, z_pos = body_position
 
-    # Or 
+        home_point = [0, 0, 0, 1]
+        leg_transforms = self.body_ik(roll, pitch, yaw, x_pos, y_pos, z_pos)
+        corner_points = [transform.dot(home_point) for transform in leg_transforms]
 
-    # initFK(La)
-    plotKinematics()
+        body_outline = [corner_points[i] for i in [0, 1, 3, 2, 0]]
+
+        plt.plot([p[0] for p in body_outline],
+                [p[2] for p in body_outline],
+                [p[1] for p in body_outline], 'bo-', lw=2)
+
+        self.render_leg_pair(leg_transforms[0], leg_transforms[1],
+                            foot_positions[0], foot_positions[1],
+                            self.leg_front)
+
+        self.render_leg_pair(leg_transforms[2], leg_transforms[3],
+                            foot_positions[2], foot_positions[3],
+                            self.leg_back)
+
+    def render_leg_pair(self, left_transform, right_transform, left_foot, right_foot, leg_group):
+        mirror_matrix = np.array([[-1, 0, 0, 0],
+                                 [0, 1, 0, 0],
+                                 [0, 0, 1, 0],
+                                 [0, 0, 0, 1]])
+
+        left_angles = self.leg_ik(np.linalg.inv(left_transform).dot(left_foot))
+        right_angles = self.leg_ik(mirror_matrix.dot(np.linalg.inv(right_transform).dot(right_foot)))
+
+        self.joint_angles[leg_group + self.leg_left] = np.array(left_angles)
+        self.joint_angles[leg_group + self.leg_right] = np.array(right_angles)
+
+        left_points = [left_transform.dot(point) for point in self.leg_fk(left_angles)]
+        right_points = [right_transform.dot(mirror_matrix.dot(point)) for point in self.leg_fk(right_angles)]
+
+        self.draw_leg_structure(left_points)
+        self.draw_leg_structure(right_points)
+
+    def draw_leg_structure(self, joint_points):
+        plt.plot([p[0] for p in joint_points],
+                [p[2] for p in joint_points],
+                [p[1] for p in joint_points], 'k-', lw=3)
+
+        plt.plot([joint_points[0][0]], [joint_points[0][2]], [joint_points[0][1]], 'bo', lw=2)
+        plt.plot([joint_points[4][0]], [joint_points[4][2]], [joint_points[4][1]], 'ro', lw=2)
+
+    def plot(self):
+        plt.show()
+
+
+if __name__ == "__main__":
+    foot_positions = np.array([[100, -100, 100, 1],
+                              [100, -100, -100, 1],
+                              [-100, -100, 100, 1],
+                              [-100, -100, -100, 1]])
+
+    robot_kinematics = QuadrupedKinematics()
+    calculated_angles = robot_kinematics.init_ik(foot_positions)
+    robot_kinematics.plot()
