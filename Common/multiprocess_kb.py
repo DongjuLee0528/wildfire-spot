@@ -2,8 +2,8 @@ from utils.config import *
 import time
 import keyboard
 from multiprocessing import Process, Queue
-key_value_default = {'w': 0, 'a': 0, 's': 0, 'd': 0, 'q': 0, 'e': 0, 'move': False }
-control_offset = {'IDstepLength': 0.0, 'IDstepWidth': 0.0, 'IDstepAlpha': 0.0, 'StartStepping': False }
+key_value_default = KB_KEY_VALUES
+control_offset = KB_CONTROL_OFFSET
 
 class KeyInterrupt():
 
@@ -13,9 +13,9 @@ class KeyInterrupt():
 
         self.command_status = Queue()
         self.command_status.put(control_offset)
-        self.X_STEP = FORWARD_DISTANCE / 12.0
-        self.Y_STEP = 5.0
-        self.YAW_STEP = 3.0
+        self.X_STEP = FORWARD_DISTANCE / KB_X_STEP_DIVISOR
+        self.Y_STEP = KB_Y_STEP
+        self.YAW_STEP = KB_YAW_STEP
 
     def resetStatus(self):
         result_dict = self.key_status.get()
@@ -85,7 +85,7 @@ def testWhile(id, command_status):
         result_dict = command_status.get()
         print(result_dict)
         command_status.put(result_dict)
-        time.sleep(1)
+        time.sleep(KB_TEST_SLEEP_TIME)
 if __name__ == "__main__":
     try:
         KeyTest = KeyInterrupt()
