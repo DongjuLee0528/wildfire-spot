@@ -26,7 +26,6 @@ class KinematicLegMotion:
         diff=time.time()-self.startTime
         ldiff=self.targetLLp-self.startLLp
         tdiff=self.endTime-self.startTime
-        ldiff/(tdiff*diff)
         p=1/tdiff*diff
 
         if time.time()>self.endTime and self.running:
@@ -91,7 +90,7 @@ class TrottingGait:
             tp=1/(self.t1/td)
             diffLp=endLp-startLp
             curLp=startLp+diffLp*tp
-            psi=-((math.pi/LIDAR_REVERSE_DIRECTION*self.Sa)/2)+(math.pi/LIDAR_REVERSE_DIRECTION*self.Sa)*tp
+            psi=-((math.pi/MATH_PI_DIVISOR*self.Sa)/2)+(math.pi/MATH_PI_DIVISOR*self.Sa)*tp
             Ry = np.array([[np.cos(psi),0,np.sin(psi),0],
                     [0,1,0,0],
                     [-np.sin(psi),0,np.cos(psi),0],[0,0,0,1]])
@@ -132,7 +131,7 @@ class TrottingGait:
         rt2=(t*GAIT_TOTAL_TIME_CALC-Tt2-rd)%Tt
         Fx=self.Fo
         Rx=-1*self.Ro
-        Fy=-100
-        Ry=-100
+        Fy=ROBOT_BODY_HEIGHT
+        Ry=ROBOT_BODY_HEIGHT
         r=np.array([self.calcLeg(td,Fx,Fy,spf),self.calcLeg(t2,Fx,Fy,-spf),self.calcLeg(rt2,Rx,Ry,spr),self.calcLeg(rtd,Rx,Ry,-spr)])
         return r
