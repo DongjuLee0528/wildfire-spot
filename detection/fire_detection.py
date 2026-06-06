@@ -1,14 +1,18 @@
 from utils.config import *
 from hardware.sensor_manager import SensorManager
 from hardware.gps_manager import GPSManager
+from hardware.pan_tilt_controller import PanTiltController
+import time
 
 
 class FireDetector:
-    def __init__(self, sensor_manager, gps_manager):
+    def __init__(self, sensor_manager, gps_manager, pan_tilt_controller):
         self.sensor_manager = sensor_manager
         self.gps_manager = gps_manager
+        self.pan_tilt_controller = pan_tilt_controller
         self.camera_detected = False
         self.sensor_detected = False
+        self.detection_log = []
 
     def detect_by_sensor(self):
         try:
@@ -35,19 +39,75 @@ class FireDetector:
     def detect_by_camera(self):
         return False
 
+    def track_fire_direction(self, sensor_data):
+        try:
+            flame_sensors = sensor_data.get('ky026_flame', [False, False, False, False])
+
+            if any(flame_sensors):
+                detected_directions = []
+                for i, detected in enumerate(flame_sensors):
+                    if detected:
+                        detected_directions.append(i * 90)
+
+                if detected_directions:
+                    avg_direction = sum(detected_directions) / len(detected_directions)
+                    self.pan_tilt_controller.rotate_to_angle(avg_direction, 0)
+                    return avg_direction
+
+            return None
+
+        except Exception as e:
+            return None
+
+    def log_detection(self, location, direction, sensor_data):
+        try:
+            detection_record = {
+                "timestamp": time.time(),
+                "latitude": location[0] if location else 0.0,
+                "longitude": location[1] if location else 0.0,
+                "direction": direction if direction else 0.0,
+                "smoke": sensor_data.get('mq2_smoke', 0),
+                "temperature": sensor_data.get('temperature', 0.0),
+                "humidity": sensor_data.get('humidity', 0.0),
+                "flame": sensor_data.get('ky026_flame', [False, False, False, False])
+            }
+            self.detection_log.append(detection_record)
+
+        except Exception as e:
+            pass
+
+    def get_strongest_direction(self):
+        try:
+            if not self.detection_log:
+                return None
+
+            strongest_record = max(self.detection_log, key=lambda x: x['smoke'])
+            return strongest_record['direction']
+
+        except Exception as e:
+            return None
+
     def is_fire_detected(self):
         try:
             camera_detection = self.detect_by_camera()
             sensor_detection = self.detect_by_sensor()
 
-            if camera_detection and sensor_detection:
-                return True
-            elif camera_detection and not self.sensor_detected:
-                return self.detect_by_sensor()
-            elif sensor_detection and not self.camera_detected:
-                return self.detect_by_camera()
+            fire_detected = False
 
-            return False
+            if camera_detection and sensor_detection:
+                fire_detected = True
+            elif camera_detection and not self.sensor_detected:
+                fire_detected = self.detect_by_sensor()
+            elif sensor_detection and not self.camera_detected:
+                fire_detected = self.detect_by_camera()
+
+            if fire_detected:
+                sensor_data = self.sensor_manager.read_all_sensors()
+                location = self.gps_manager.get_coordinates()
+                direction = self.track_fire_direction(sensor_data)
+                self.log_detection(location, direction, sensor_data)
+
+            return fire_detected
 
         except Exception as e:
             return False
