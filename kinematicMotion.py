@@ -2,6 +2,7 @@ from utils.config import *
 import time
 import numpy as np
 import math
+import logging
 
 class KinematicLegMotion:
 
@@ -26,7 +27,10 @@ class KinematicLegMotion:
         diff=time.time()-self.startTime
         ldiff=self.targetLLp-self.startLLp
         tdiff=self.endTime-self.startTime
-        p=1/tdiff*diff
+        try:
+            p=1/tdiff*diff
+        except ZeroDivisionError:
+            p=1
 
         if time.time()>self.endTime and self.running:
             self.running=False
@@ -87,23 +91,42 @@ class TrottingGait:
         elif(t<self.t0+self.t1):
 
             td=t-self.t0
-            tp=1/(self.t1/td)
+            try:
+                tp=1/(self.t1/td)
+            except ZeroDivisionError:
+                tp=0
             diffLp=endLp-startLp
             curLp=startLp+diffLp*tp
-            psi=-((math.pi/MATH_PI_DIVISOR*self.Sa)/2)+(math.pi/MATH_PI_DIVISOR*self.Sa)*tp
-            Ry = np.array([[np.cos(psi),0,np.sin(psi),0],
-                    [0,1,0,0],
-                    [-np.sin(psi),0,np.cos(psi),0],[0,0,0,1]])
-            curLp=Ry.dot(curLp)
+            try:
+                psi=-((math.pi/MATH_PI_DIVISOR*self.Sa)/2)+(math.pi/MATH_PI_DIVISOR*self.Sa)*tp
+            except (ZeroDivisionError, ValueError):
+                psi=0
+            try:
+                Ry = np.array([[np.cos(psi),0,np.sin(psi),0],
+                        [0,1,0,0],
+                        [-np.sin(psi),0,np.cos(psi),0],[0,0,0,1]])
+            except (ValueError, OverflowError):
+                Ry = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
+            try:
+                curLp=Ry.dot(curLp)
+            except (ValueError, np.linalg.LinAlgError):
+                logging.warning('Matrix operation failed, using original position')
+                curLp=startLp
             return curLp
         elif(t<self.t0+self.t1+self.t2):
             return endLp
         elif(t<self.t0+self.t1+self.t2+self.t3):
             td=t-(self.t0+self.t1+self.t2)
-            tp=1/(self.t3/td)
+            try:
+                tp=1/(self.t3/td)
+            except ZeroDivisionError:
+                tp=0
             diffLp=startLp-endLp
             curLp=endLp+diffLp*tp
-            curLp[1]+=self.Sh*math.sin(math.pi*tp)
+            try:
+                curLp[1]+=self.Sh*math.sin(math.pi*tp)
+            except (ValueError, OverflowError, IndexError):
+                pass
             return curLp
             
     def stepLength(self,len):
