@@ -97,7 +97,7 @@ class SensorManager:
 
         return round(distance, 2)
 
-    def read_all(self):
+    def read_all_sensors(self):
         smoke = self.read_mq2()
         temperature, humidity = self.read_sht31()
         flame = self.read_ky026()
