@@ -35,6 +35,9 @@ class GPSManager:
     def is_available(self):
         return self._available
 
+    def get_coordinates(self):
+        return self.get_location()
+
     def close(self):
         if self._serial is not None:
             self._serial.close()
