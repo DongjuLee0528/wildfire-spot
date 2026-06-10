@@ -41,5 +41,17 @@ class PanTiltController:
         time.sleep(TIME_SLEEP_SCAN[1])
         self.center()
 
+    def rotate_to_angle(self, pan_speed, tilt_angle):
+        try:
+            if tilt_angle < SERVO_ANGLE_MIN:
+                tilt_angle = SERVO_ANGLE_MIN
+            if tilt_angle > SERVO_ANGLE_MAX:
+                tilt_angle = SERVO_ANGLE_MAX
+
+            self.pan(pan_speed)
+            self.tilt(tilt_angle)
+        except Exception as e:
+            print(f"Rotate to angle failed: {e}")
+
     def reset(self):
         self.center()
