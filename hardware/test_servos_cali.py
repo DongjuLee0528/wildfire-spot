@@ -28,8 +28,8 @@ cur_angle = None
 if __name__ == '__main__':
 
     while True:
-        # motro_num is index of motor to rotate
-        motro_num=int(input("Enter Servo to rotate (0-11): "))
+        # motor_num is index of motor to rotate
+        motor_num=int(input("Enter Servo to rotate (0-11): "))
         
         # new angle to be written on selected motor
         cur_angle=int(input("Enter new angles (0-180): "))
@@ -39,16 +39,16 @@ if __name__ == '__main__':
             sweep = range(prev_angle, cur_angle, 1) if (prev_angle < cur_angle) else range(prev_angle, cur_angle, -1)
 
             for degree in sweep:
-                if motro_num < 6:
-                    kit.servo[int(motro_num%6)].angle = cur_angle
+                if motor_num < 6:
+                    kit.servo[int(motor_num%6)].angle = cur_angle
                 else:
-                    kit2.servo[int(motro_num%6)].angle = cur_angle
+                    kit2.servo[int(motor_num%6)].angle = cur_angle
                 time.sleep(0.01)
         else:
-            if motro_num < 6:
-                kit.servo[int(motro_num%6)].angle = cur_angle
+            if motor_num < 6:
+                kit.servo[int(motor_num%6)].angle = cur_angle
             else:
-                kit2.servo[int(motro_num%6)].angle = cur_angle
+                kit2.servo[int(motor_num%6)].angle = cur_angle
 
 
-        prev_angle = val_list[motro_num]
+        prev_angle = val_list[motor_num]
