@@ -48,11 +48,11 @@ class FireDetector:
                 detected_directions = []
                 for i, detected in enumerate(flame_sensors):
                     if detected:
-                        detected_directions.append(i * 90)
+                        detected_directions.append(i * DIRECTION_ANGLE_MULTIPLIER)
 
                 if detected_directions:
                     avg_direction = sum(detected_directions) / len(detected_directions)
-                    self.pan_tilt_controller.rotate_to_angle(avg_direction, 0)
+                    self.pan_tilt_controller.rotate_to_angle(avg_direction, DEFAULT_DIRECTION_VALUE)
                     return avg_direction
 
             return None
@@ -64,9 +64,9 @@ class FireDetector:
         try:
             detection_record = {
                 "timestamp": time.time(),
-                "latitude": location[0] if location else 0.0,
-                "longitude": location[1] if location else 0.0,
-                "direction": direction if direction else 0.0,
+                "latitude": location[0] if location else DEFAULT_DIRECTION_VALUE,
+                "longitude": location[1] if location else DEFAULT_DIRECTION_VALUE,
+                "direction": direction if direction else DEFAULT_DIRECTION_VALUE,
                 "smoke": sensor_data.get('mq2_smoke', 0),
                 "temperature": sensor_data.get('temperature', 0.0),
                 "humidity": sensor_data.get('humidity', 0.0),
@@ -95,12 +95,13 @@ class FireDetector:
 
             fire_detected = False
 
-            if camera_detection and sensor_detection:
+            if sensor_detection:
                 fire_detected = True
-            elif camera_detection and not self.sensor_detected:
-                fire_detected = self.detect_by_sensor()
-            elif sensor_detection and not self.camera_detected:
-                fire_detected = self.detect_by_camera()
+                if camera_detection:
+                    self.camera_detected = True
+            elif camera_detection:
+                fire_detected = True
+                self.camera_detected = True
 
             if fire_detected:
                 sensor_data = self.sensor_manager.read_all_sensors()

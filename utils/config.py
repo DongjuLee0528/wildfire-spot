@@ -124,3 +124,8 @@ DATASET_BASE_PATH = "/Users/dongjulee/Documents/AIdatasets/wildfire-dataset"
 DATASET_OUTPUT_PATH = "/Users/dongjulee/Documents/AIdatasets/wildfire-dataset/unified_dataset"
 
 KB_TEST_SLEEP_TIME = 1
+
+ULTRASONIC_DISTANCE_MULTIPLIER = 17150
+DIRECTION_ANGLE_MULTIPLIER = 90
+DEFAULT_DIRECTION_VALUE = 0.0
+SERVO_TEST_ENDPOINT_VALUES = [[100, -100, 87.5, 1], [100, -100, -87.5, 1], [-100, -100, 87.5, 1], [-100, -100, -87.5, 1]]
