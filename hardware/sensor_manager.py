@@ -15,7 +15,7 @@ class SensorManager:
 
         try:
             self._i2c = busio.I2C(I2C_SCL, I2C_SDA)
-        except:
+        except Exception as e:
             print("I2C initialization failed")
             self._available = False
             return
@@ -25,13 +25,13 @@ class SensorManager:
             self._ads1_2 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_2)
             self._mq2_chan1 = AnalogIn(self._ads1_1, ADS.P0)
             self._mq2_chan2 = AnalogIn(self._ads1_2, ADS.P0)
-        except:
+        except Exception as e:
             print("ADS1115 initialization failed")
             self._available = False
 
         try:
             self._sht31 = adafruit_sht31d.SHT31D(self._i2c, address=SHT31_ADDRESS)
-        except:
+        except Exception as e:
             print("SHT31 initialization failed")
             self._available = False
 
@@ -53,7 +53,7 @@ class SensorManager:
             value1 = self._mq2_chan1.value
             value2 = self._mq2_chan2.value
             return int((value1 + value2) / 2)
-        except:
+        except Exception as e:
             return 0
 
     def read_sht31(self):
@@ -63,7 +63,7 @@ class SensorManager:
             temperature = self._sht31.temperature
             humidity = self._sht31.relative_humidity
             return (temperature, humidity)
-        except:
+        except Exception as e:
             return (0.0, 0.0)
 
     def read_ky026(self):
@@ -94,7 +94,7 @@ class SensorManager:
             pulse_end = time.time()
 
         pulse_duration = pulse_end - pulse_start
-        distance = pulse_duration * 17150
+        distance = pulse_duration * ULTRASONIC_DISTANCE_MULTIPLIER
 
         return round(distance, 2)
 
@@ -105,9 +105,9 @@ class SensorManager:
         distance = self.read_hcsr04()
 
         return {
-            "smoke": smoke,
+            "mq2_smoke": smoke,
             "temperature": temperature,
             "humidity": humidity,
-            "flame": flame,
+            "ky026_flame": flame,
             "distance": distance
         }

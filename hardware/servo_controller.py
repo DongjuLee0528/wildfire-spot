@@ -98,10 +98,11 @@ class Controllers:
         self._tilt_servo.angle = float(angle)
 
 if __name__=="__main__":
-    legEndpoints=np.array([[100,-100,87.5,1],[100,-100,-87.5,1],[-100,-100,87.5,1],[-100,-100,-87.5,1]])
-    thetas = kn.initIK(legEndpoints)
+    legEndpoints=np.array(SERVO_TEST_ENDPOINT_VALUES)
+    robot_kinematics = kn.QuadrupedKinematics()
+    thetas = robot_kinematics.init_ik(legEndpoints)
     controller = Controllers()
     controller.servoRotate(thetas)
     svAngle = controller.getServoAngles()
     print(svAngle)
-    kn.plotKinematics()
+    robot_kinematics.plot()

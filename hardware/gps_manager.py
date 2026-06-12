@@ -8,7 +8,7 @@ class GPSManager:
         try:
             self._serial = serial.Serial(GPS_UART_PORT, GPS_BAUDRATE, timeout=1)
             self._available = True
-        except:
+        except Exception as e:
             self._serial = None
             self._available = False
 
@@ -22,7 +22,7 @@ class GPSManager:
                 msg = pynmea2.parse(line)
                 if msg.status == 'A':
                     return (msg.latitude, msg.longitude)
-        except:
+        except Exception as e:
             pass
 
         return (None, None)

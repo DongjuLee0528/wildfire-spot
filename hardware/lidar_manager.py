@@ -6,11 +6,18 @@ from utils.config import *
 class LidarManager:
 
     def __init__(self):
-        self.serial_port = serial.Serial(LIDAR_UART_PORT, LIDAR_BAUDRATE, timeout=1)
+        try:
+            self.serial_port = serial.Serial(LIDAR_UART_PORT, LIDAR_BAUDRATE, timeout=1)
+            self._available = True
+        except Exception as e:
+            self.serial_port = None
+            self._available = False
         self.obstacle_threshold = LIDAR_OBSTACLE_THRESHOLD
         self.directions = LIDAR_DIRECTION_ANGLES
 
     def read_scan(self):
+        if not self._available or self.serial_port is None:
+            return {}
         try:
             distance_data = {}
             while True:
@@ -88,5 +95,6 @@ class LidarManager:
         return min_distance > threshold_mm
 
     def close(self):
-        if self.serial_port.is_open:
+        if self._available and self.serial_port is not None and self.serial_port.is_open:
             self.serial_port.close()
+            self._available = False
