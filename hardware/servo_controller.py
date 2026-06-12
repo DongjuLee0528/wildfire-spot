@@ -1,19 +1,3 @@
-"""
-Servo Controller Module for Quadruped Robot
-
-This module provides servo control functionality for a quadruped robot with 12 servo motors
-(3 per leg) and camera pan/tilt servos. It handles conversion from joint angles to servo
-positions, applies calibration offsets, and manages PWM control via PCA9685 controllers.
-
-Classes:
-    Controllers: Main servo control interface for robot joints and camera
-
-Dependencies:
-    - Adafruit PCA9685 PWM controller
-    - I2C communication for servo control
-    - Kinematics module for angle calculations
-"""
-
 from utils.config import *
 
 import Kinematics.kinematics as kn
@@ -26,35 +10,13 @@ import busio
 import time
 
 class Controllers:
-    """
-    Servo controller class for quadruped robot joint and camera control.
-
-    Manages 12 servo motors (3 per leg) and camera pan/tilt servos using multiple
-    PCA9685 PWM controllers. Handles angle-to-PWM conversion, calibration offsets,
-    and safety limits.
-
-    Attributes:
-        _i2c_bus0: I2C bus for communication with PCA9685 controllers
-        _pca_1: PCA9685 controller for front legs
-        _pca_2: PCA9685 controller for back legs
-        _pca_3: PCA9685 controller for camera servos
-        _servos: List of servo objects for all 12 leg joints
-        _pan_servo: Camera pan servo object
-        _tilt_servo: Camera tilt servo object
-        _servo_offsets: Calibration offset values for each servo
-        _val_list: Current servo angle values
-        _thetas: Joint angles in degrees
-    """
 
     def __init__(self):
-        """Initialize servo controllers and create servo objects for all joints."""
         try:
             print("Initializing Servos")
-            # Set up I2C communication bus
             self._i2c_bus0=(busio.I2C(I2C_SCL, I2C_SDA))
             print("Initializing ServoKit")
 
-            # Initialize PCA9685 controllers for different servo groups
             self._pca_1 = PCA9685(self._i2c_bus0, address=PCA9685_FRONT_LEGS)
             self._pca_1.frequency = PWM_FREQUENCY
             self._pca_2 = PCA9685(self._i2c_bus0, address=PCA9685_BACK_LEGS)
@@ -65,115 +27,63 @@ class Controllers:
             print(f"I2C initialization failed: {e}")
             raise
 
-        # Create servo objects for all 12 leg joints
         self._servos = list()
         for i in range(0, SERVO_CHANNELS):
             if i < FRONT_LEG_CHANNELS:
-                # Front legs use first PCA9685 controller
                 self._servos.append(servo.Servo(self._pca_1.channels[i], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
             else:
-                # Back legs use second PCA9685 controller
                 self._servos.append(servo.Servo(self._pca_2.channels[i-FRONT_LEG_CHANNELS], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
 
-        # Create camera servo objects
         self._pan_servo = servo.Servo(self._pca_3.channels[CAMERA_PAN], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
         self._tilt_servo = servo.Servo(self._pca_3.channels[CAMERA_TILT], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
 
         print("Done initializing")
 
-        # Load servo calibration offsets from config
         self._servo_offsets = SERVO_OFFSETS
 
-        # Initialize servo angle storage
-        self._val_list = [ x for x in range(SERVO_CHANNELS) ]  # Current servo angles
-        self._thetas = []  # Joint angles in degrees
+        self._val_list = [ x for x in range(SERVO_CHANNELS) ]
+        self._thetas = []
 
     def getDegreeAngles(self, La):
-        """
-        Convert joint angles from radians to degrees and store them.
-
-        Args:
-            La (np.ndarray): Joint angles in radians [4x3] for all legs
-        """
-        La *= 180/np.pi  # Convert radians to degrees
-        La = [ [ int(x) for x in y ] for y in La ]  # Convert to integer degrees
+        La *= 180/np.pi
+        La = [ [ int(x) for x in y ] for y in La ]
         self._thetas = La
 
     def angleToServo(self, La):
-        """
-        Convert joint angles to servo positions with calibration offsets.
-
-        Converts kinematics joint angles to actual servo angles by applying
-        calibration offsets and accounting for servo mounting orientations.
-
-        Args:
-            La (np.ndarray): Joint angles in radians [4x3]
-                - La[leg][joint]: angles for each joint of each leg
-                - Joint order: [hip_yaw, hip_pitch, knee]
-        """
         self.getDegreeAngles(La)
 
-        # Front left leg (leg 0): hip_yaw=2, hip_pitch=1, knee=0
-        self._val_list[0] = self._servo_offsets[0] - self._thetas[0][2]  # Knee (inverted)
-        self._val_list[1] = self._servo_offsets[1] - self._thetas[0][1]  # Hip pitch (inverted)
-        self._val_list[2] = self._servo_offsets[2] + self._thetas[0][0]  # Hip yaw
+        self._val_list[0] = self._servo_offsets[0] - self._thetas[0][2]
+        self._val_list[1] = self._servo_offsets[1] - self._thetas[0][1]
+        self._val_list[2] = self._servo_offsets[2] + self._thetas[0][0]
 
-        # Front right leg (leg 1)
-        self._val_list[3] = self._servo_offsets[3] + self._thetas[1][2]  # Knee
-        self._val_list[4] = self._servo_offsets[4] + self._thetas[1][1]  # Hip pitch
-        self._val_list[5] = self._servo_offsets[5] - self._thetas[1][0]  # Hip yaw (inverted)
+        self._val_list[3] = self._servo_offsets[3] + self._thetas[1][2]
+        self._val_list[4] = self._servo_offsets[4] + self._thetas[1][1]
+        self._val_list[5] = self._servo_offsets[5] - self._thetas[1][0]
 
-        # Back left leg (leg 2)
-        self._val_list[6] = self._servo_offsets[6] - self._thetas[2][2]  # Knee (inverted)
-        self._val_list[7] = self._servo_offsets[7] - self._thetas[2][1]  # Hip pitch (inverted)
-        self._val_list[8] = self._servo_offsets[8] - self._thetas[2][0]  # Hip yaw (inverted)
+        self._val_list[6] = self._servo_offsets[6] - self._thetas[2][2]
+        self._val_list[7] = self._servo_offsets[7] - self._thetas[2][1]
+        self._val_list[8] = self._servo_offsets[8] - self._thetas[2][0]
 
-        # Back right leg (leg 3)
-        self._val_list[9] = self._servo_offsets[9] + self._thetas[3][2]   # Knee
-        self._val_list[10] = self._servo_offsets[10] + self._thetas[3][1] # Hip pitch
-        self._val_list[11] = self._servo_offsets[11] + self._thetas[3][0] # Hip yaw     
+        self._val_list[9] = self._servo_offsets[9] + self._thetas[3][2]
+        self._val_list[10] = self._servo_offsets[10] + self._thetas[3][1]
+        self._val_list[11] = self._servo_offsets[11] + self._thetas[3][0]
 
     def getServoAngles(self):
-        """
-        Get current servo angle values.
-
-        Returns:
-            list: Current servo angles for all 12 servos in degrees
-        """
         return self._val_list
 
     def servoRotate(self, thetas):
-        """
-        Rotate all servo motors to specified joint angles with safety limits.
-
-        Converts joint angles to servo positions and applies safety limits to prevent
-        servo damage from over-rotation.
-
-        Args:
-            thetas (np.ndarray): Target joint angles in radians [4x3]
-        """
         self.angleToServo(thetas)
 
-        # Apply safety limits and set servo positions
         for x in range(len(self._val_list)):
-            # Check upper angle limit
             if (self._val_list[x] > SERVO_ANGLE_MAX):
                 print("Over 180!!")
                 self._val_list[x] = SERVO_ANGLE_MAX - 1
-            # Check lower angle limit
             if (self._val_list[x] <= SERVO_ANGLE_MIN):
                 print("Under 0!!")
                 self._val_list[x] = SERVO_ANGLE_MIN + 1
-            # Set servo to calculated angle
             self._servos[x].angle = float(self._val_list[x])
 
     def set_camera_pan(self, angle):
-        """
-        Set camera pan servo angle with safety limits.
-
-        Args:
-            angle (float): Desired pan angle in degrees (0-180)
-        """
         if angle < SERVO_ANGLE_MIN:
             angle = SERVO_ANGLE_MIN
         if angle > SERVO_ANGLE_MAX:
@@ -181,12 +91,6 @@ class Controllers:
         self._pan_servo.angle = float(angle)
 
     def set_camera_tilt(self, angle):
-        """
-        Set camera tilt servo angle with safety limits.
-
-        Args:
-            angle (float): Desired tilt angle in degrees (0-180)
-        """
         if angle < SERVO_ANGLE_MIN:
             angle = SERVO_ANGLE_MIN
         if angle > SERVO_ANGLE_MAX:
