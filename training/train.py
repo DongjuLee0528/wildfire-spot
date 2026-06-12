@@ -31,7 +31,7 @@ def main():
 
     results = model.train(
         data='/workspace/wildfire-dataset/data.yaml',
-        epochs=150,
+        epochs=200,
         batch=64,
         imgsz=1280,
         save_period=10,
@@ -41,8 +41,10 @@ def main():
         name='wildfire_v1',
         workers=16,
         augment=True,
-        hsv_h=0.015,
-        hsv_s=0.7,
+        mosaic=1.0,
+        hsv_h=0.02,
+        hsv_s=0.8,
+        hsv_v=0.4,
         flipud=0.5,
         fliplr=0.5
     )
