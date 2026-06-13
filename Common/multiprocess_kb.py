@@ -2,98 +2,96 @@ from utils.config import *
 import time
 import keyboard
 from multiprocessing import Process, Queue
-key_value_default = KB_KEY_VALUES
-control_offset = KB_CONTROL_OFFSET
 
-class KeyInterrupt():
+class RobotKeyboardController:
 
     def __init__(self):
-        self.key_status = Queue()
-        self.key_status.put(key_value_default)
+        self.movement_data = Queue()
+        self.movement_data.put(KB_KEY_VALUES)
 
-        self.command_status = Queue()
-        self.command_status.put(control_offset)
-        self.X_STEP = FORWARD_DISTANCE / KB_X_STEP_DIVISOR
-        self.Y_STEP = KB_Y_STEP
-        self.YAW_STEP = KB_YAW_STEP
+        self.robot_commands = Queue()
+        self.robot_commands.put(KB_CONTROL_OFFSET)
+        self.forward_step = FORWARD_DISTANCE / KB_X_STEP_DIVISOR
+        self.lateral_step = KB_Y_STEP
+        self.rotation_step = KB_YAW_STEP
 
-    def resetStatus(self):
-        result_dict = self.key_status.get()
-        self.key_status.put(key_value_default)
+    def reset_movement(self):
+        current_data = self.movement_data.get()
+        self.movement_data.put(KB_KEY_VALUES)
 
-    def keyCounter(self, character):
-        result_dict = self.key_status.get()
-        result_dict[character] += 1
-        result_dict['move'] = True
-        self.key_status.put(result_dict)
+    def register_key(self, key_char):
+        current_data = self.movement_data.get()
+        current_data[key_char] += 1
+        current_data['move'] = True
+        self.movement_data.put(current_data)
 
-    def calcRbStep(self):
-        result_dict = self.key_status.get()
-        command_dict = self.command_status.get()
-        command_dict['IDstepLength'] = self.X_STEP * result_dict['s'] - self.X_STEP * result_dict['w']
-        command_dict['IDstepWidth'] = self.Y_STEP * result_dict['d'] - self.Y_STEP * result_dict['a']
-        command_dict['IDstepAlpha'] = self.YAW_STEP * result_dict['q'] - self.YAW_STEP * result_dict['e']
-        
-        if result_dict['move']:
-            command_dict['StartStepping'] = True
+    def calculate_movement(self):
+        current_data = self.movement_data.get()
+        command_data = self.robot_commands.get()
+        command_data['IDstepLength'] = self.forward_step * current_data['s'] - self.forward_step * current_data['w']
+        command_data['IDstepWidth'] = self.lateral_step * current_data['d'] - self.lateral_step * current_data['a']
+        command_data['IDstepAlpha'] = self.rotation_step * current_data['q'] - self.rotation_step * current_data['e']
+
+        if current_data['move']:
+            command_data['StartStepping'] = True
         else:
-            command_dict['StartStepping'] = False
+            command_data['StartStepping'] = False
 
-        self.key_status.put(result_dict)
-        self.command_status.put(command_dict)
+        self.movement_data.put(current_data)
+        self.robot_commands.put(command_data)
 
-    def keyInterrupt(self, id, key_status, command_status):
-        
-        was_pressed = False
+    def start_listening(self, process_id, movement_queue, command_queue):
+        key_pressed = False
 
         while True:
             if keyboard.is_pressed('w'):
-                if not was_pressed:
-                    self.keyCounter('w')
-                    was_pressed = True
+                if not key_pressed:
+                    self.register_key('w')
+                    key_pressed = True
             elif keyboard.is_pressed('a'):
-                if not was_pressed:
-                    self.keyCounter('a')
-                    was_pressed = True
+                if not key_pressed:
+                    self.register_key('a')
+                    key_pressed = True
             elif keyboard.is_pressed('s'):
-                if not was_pressed:
-                    self.keyCounter('s')
-                    was_pressed = True
+                if not key_pressed:
+                    self.register_key('s')
+                    key_pressed = True
             elif keyboard.is_pressed('d'):
-                if not was_pressed:
-                    self.keyCounter('d')
-                    was_pressed = True
+                if not key_pressed:
+                    self.register_key('d')
+                    key_pressed = True
             elif keyboard.is_pressed('q'):
-                if not was_pressed:
-                    self.keyCounter('q')
-                    was_pressed = True
+                if not key_pressed:
+                    self.register_key('q')
+                    key_pressed = True
             elif keyboard.is_pressed('e'):
-                if not was_pressed:
-                    self.keyCounter('e')
-                    was_pressed = True
+                if not key_pressed:
+                    self.register_key('e')
+                    key_pressed = True
             elif keyboard.is_pressed('space'):
-                if not was_pressed:
-                    self.resetStatus()
-                    was_pressed = True
+                if not key_pressed:
+                    self.reset_movement()
+                    key_pressed = True
             else:
-                was_pressed = False
+                key_pressed = False
 
-            self.calcRbStep()
+            self.calculate_movement()
 
-def testWhile(id, command_status):
+def monitor_commands(process_id, command_queue):
     while True:
-        result_dict = command_status.get()
-        print(result_dict)
-        command_status.put(result_dict)
+        command_data = command_queue.get()
+        print(command_data)
+        command_queue.put(command_data)
         time.sleep(KB_TEST_SLEEP_TIME)
+
 if __name__ == "__main__":
     try:
-        KeyTest = KeyInterrupt()
-        KeyProcess = Process(target=KeyTest.keyInterrupt, args=(1, KeyTest.key_status, KeyTest.command_status))
+        controller = RobotKeyboardController()
+        keyboard_process = Process(target=controller.start_listening, args=(1, controller.movement_data, controller.robot_commands))
 
-        KeyProcess.start()
+        keyboard_process.start()
 
-        testWhile(2, KeyTest.command_status)
+        monitor_commands(2, controller.robot_commands)
     except Exception as e:
         print(e)
     finally:
