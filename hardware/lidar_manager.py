@@ -1,6 +1,4 @@
 import serial
-import math
-import numpy as np
 import time
 from utils.config import (LIDAR_UART_PORT, LIDAR_BAUDRATE, LIDAR_OBSTACLE_THRESHOLD,
                          LIDAR_DIRECTION_ANGLES, LIDAR_DATA_SIZE, LIDAR_PACKET_HEADER,
@@ -32,11 +30,11 @@ class LidarManager:
                 data = self.serial_port.read(LIDAR_DATA_SIZE)
 
                 if len(data) == LIDAR_DATA_SIZE and data[0] == LIDAR_PACKET_HEADER[0] and data[1] == LIDAR_PACKET_HEADER[1]:
-                    angle = (data[4] | (data[5] << 8)) / 100.0
+                    angle = ((data[4] | (data[5] << 8)) / 100.0) % 360
 
                     for i in range(12):
                         point_distance = data[6 + 3*i] | (data[7 + 3*i] << 8)
-                        point_angle = angle + i * 0.5
+                        point_angle = (angle + i * 0.5) % 360
                         if point_distance > 0:
                             distance_data[point_angle] = point_distance
 
@@ -49,7 +47,7 @@ class LidarManager:
     def get_obstacle_direction(self):
         scan_data = self.read_scan()
         if not scan_data:
-            return [False] * 8
+            return [False] * LIDAR_DIRECTION_COUNT
 
         obstacles = [False] * LIDAR_DIRECTION_COUNT
         for i, direction in enumerate(self.directions):
@@ -103,6 +101,10 @@ class LidarManager:
         return min_distance > threshold_mm
 
     def close(self):
-        if self._available and self.serial_port is not None and self.serial_port.is_open:
-            self.serial_port.close()
-            self._available = False
+        if self._available and self.serial_port is not None:
+            try:
+                if self.serial_port.is_open:
+                    self.serial_port.close()
+                self._available = False
+            except (OSError, serial.SerialException) as e:
+                pass

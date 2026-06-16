@@ -27,7 +27,7 @@ class QuadrupedServoManager:
             self._rear_driver.frequency = PWM_FREQUENCY
             self._camera_driver = PCA9685(self._i2c_interface, address=PCA9685_CAMERA)
             self._camera_driver.frequency = PWM_FREQUENCY
-        except Exception:
+        except (ValueError, RuntimeError, OSError) as e:
             print("Servo driver initialization failed")
             raise
 
@@ -49,12 +49,16 @@ class QuadrupedServoManager:
         self._joint_angles = []
 
     def convert_to_degrees(self, angle_radians):
-        angle_radians *= 180/np.pi
-        angle_radians = [[int(value) for value in row] for row in angle_radians]
-        self._joint_angles = angle_radians
+        angle_degrees = angle_radians * 180/np.pi
+        angle_degrees_int = [[int(value) for value in row] for row in angle_degrees]
+        self._joint_angles = angle_degrees_int
 
     def process_angle_mapping(self, angle_radians):
         self.convert_to_degrees(angle_radians)
+
+        if len(self._joint_angles) < 4 or any(len(leg) < 3 for leg in self._joint_angles):
+            print("Invalid joint angles array size")
+            return
 
         self._angle_array[0] = self._offset_values[0] - self._joint_angles[0][2]
         self._angle_array[1] = self._offset_values[1] - self._joint_angles[0][1]
@@ -102,9 +106,18 @@ class QuadrupedServoManager:
         self._tilt_motor.angle = float(target_angle)
 
     def shutdown_servos(self):
-        self._front_driver.deinit()
-        self._rear_driver.deinit()
-        self._camera_driver.deinit()
+        try:
+            self._front_driver.deinit()
+        except (ValueError, RuntimeError, AttributeError) as e:
+            pass
+        try:
+            self._rear_driver.deinit()
+        except (ValueError, RuntimeError, AttributeError) as e:
+            pass
+        try:
+            self._camera_driver.deinit()
+        except (ValueError, RuntimeError, AttributeError) as e:
+            pass
 
 if __name__=="__main__":
     test_endpoints = np.array(SERVO_TEST_ENDPOINT_VALUES)
@@ -114,4 +127,5 @@ if __name__=="__main__":
     servo_manager.execute_servo_motion(calculated_angles)
     current_angles = servo_manager.get_current_angles()
     print(current_angles)
+    servo_manager.shutdown_servos()
     kinematics_solver.plot()

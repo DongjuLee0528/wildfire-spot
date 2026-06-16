@@ -38,15 +38,24 @@ class DHParameterSolver:
         x, y, z = end_effector_pos[0], end_effector_pos[1], end_effector_pos[2]
         L1, L2, L3, L4 = self.L1, self.L2, self.L3, self.L4
 
-        F = sqrt(x**2 + y**2 - L1**2)
-        G = F - L2
-        H = sqrt(G**2 + z**2)
-        theta1 = -atan2(y, x) - atan2(F, -L1)
-        D = (H**2 - L3**2 - L4**2) / (2 * L3 * L4)
-        theta3 = acos(D)
-        theta2 = atan2(z, G) - atan2(L4*sin(theta3), L3+L4*cos(theta3))
+        try:
+            F = sqrt(max(0, x**2 + y**2 - L1**2))
+            G = F - L2
+            H = sqrt(G**2 + z**2)
+            theta1 = -atan2(y, x) - atan2(F, -L1)
 
-        return (theta1, theta2, theta3)
+            if abs(L3 * L4) < 1e-10:
+                return (0, 0, 0)
+
+            D = (H**2 - L3**2 - L4**2) / (2 * L3 * L4)
+            D = max(-1, min(1, D))
+
+            theta3 = acos(D)
+            theta2 = atan2(z, G) - atan2(L4*sin(theta3), L3+L4*cos(theta3))
+
+            return (theta1, theta2, theta3)
+        except (ValueError, ZeroDivisionError) as e:
+            return (0, 0, 0)
 
     def forward_kinematics_dh_method(self, joint_angles):
         L1, L2, L3, L4 = self.L1, self.L2, self.L3, self.L4
@@ -236,7 +245,6 @@ class DHParameterSolver:
             print(f"  Foot position: x={foot_pos[0]}, y={foot_pos[1]}, z={foot_pos[2]}")
             print(f"  Joint angles: θ1={angles_deg[0]:.1f}°, θ2={angles_deg[1]:.1f}°, θ3={angles_deg[2]:.1f}°")
 
-            # Check if angles are in reasonable range
             valid_angles = all(-180 <= angle <= 180 for angle in angles_deg)
             print(f"  Valid range (-180° to 180°): {valid_angles}")
 
@@ -244,7 +252,6 @@ class DHParameterSolver:
                 out_of_range = [f"θ{j+1}={angles_deg[j]:.1f}°" for j in range(3) if not (-180 <= angles_deg[j] <= 180)]
                 print(f"  Out of range: {', '.join(out_of_range)}")
 
-        # Check overall validity
         all_valid = all(all(-180 <= angle <= 180 for angle in leg) for leg in joint_angles_degrees)
 
         print(f"\nOverall validation: {'PASSED' if all_valid else 'FAILED'}")
@@ -253,7 +260,6 @@ class DHParameterSolver:
         else:
             print("Some joint angles exceed reasonable servo limits")
 
-        # Compare with init_ik method
         print("\nComparing with init_ik() method:")
         init_ik_angles = self.init_ik(test_foot_positions)
         init_ik_degrees = init_ik_angles * 180/pi

@@ -2,7 +2,7 @@ import os
 import json
 import pandas as pd
 import random
-from typing import Dict, List, Tuple
+from PIL import Image
 from utils.config import (DATASET_BASE_PATH, DATASET_OUTPUT_PATH, DATASET_TRAIN_RATIO,
                          DATASET_VAL_RATIO, AIHUB_DATASET_SUBPATH)
 
@@ -51,7 +51,10 @@ class DatasetProcessor:
                                         lines = content.split('\n')
                                         for label_line in lines:
                                             if label_line.strip():
-                                                class_id = int(label_line.split()[0])
+                                                label_parts = label_line.split()
+                                                if not label_parts:
+                                                    continue
+                                                class_id = int(label_parts[0])
                                                 if class_id == 0:
                                                     self.stats['fire_images'] += 1
                                                 elif class_id == 1:
@@ -90,7 +93,10 @@ class DatasetProcessor:
                                         lines = content.split('\n')
                                         for label_line in lines:
                                             if label_line.strip():
-                                                class_id = int(label_line.split()[0])
+                                                label_parts = label_line.split()
+                                                if not label_parts:
+                                                    continue
+                                                class_id = int(label_parts[0])
                                                 if class_id == 0:
                                                     self.stats['fire_images'] += 1
                                                 elif class_id == 1:
@@ -104,8 +110,12 @@ class DatasetProcessor:
         print("Processing PyroNear dataset...")
         pyronear_path = f"{BASE}/PyroNear/data"
 
-        train_files = [f for f in os.listdir(pyronear_path) if f.startswith('train-')]
-        val_files = [f for f in os.listdir(pyronear_path) if f.startswith('val-')]
+        try:
+            train_files = [f for f in os.listdir(pyronear_path) if f.startswith('train-')]
+            val_files = [f for f in os.listdir(pyronear_path) if f.startswith('val-')]
+        except OSError as e:
+            print(f"Error reading PyroNear directory {pyronear_path}: {e}")
+            return
 
         temp_dir = f"{OUTPUT_DIR}/pyronear_temp"
         os.makedirs(f"{temp_dir}/images", exist_ok=True)
@@ -116,9 +126,9 @@ class DatasetProcessor:
                 try:
                     df = pd.read_parquet(f"{pyronear_path}/{file}")
                     for idx, row in df.iterrows():
-                        if 'image' in row and 'objects' in row:
-                            img_data = row['image']
-                            objects = row['objects']
+                        img_data = row.get('image')
+                        objects = row.get('objects')
+                        if img_data is not None and objects is not None:
 
                             img_name = f"pyronear_{split}_{file}_{idx}.jpg"
                             img_path = f"{temp_dir}/images/{img_name}"
@@ -129,25 +139,26 @@ class DatasetProcessor:
                                     with open(img_path, 'wb') as f:
                                         f.write(img_data['bytes'])
 
-                                    from PIL import Image
-                                    img = Image.open(img_path)
-                                    img_width, img_height = img.size
+                                    with Image.open(img_path) as img:
+                                        img_width, img_height = img.size
 
-                                    has_objects = False
-                                    with open(label_path, 'w') as f:
-                                        if objects and 'bbox' in objects:
-                                            for bbox in objects['bbox']:
-                                                x, y, width, height = bbox
-                                                cx = (x + width/2) / img_width
-                                                cy = (y + height/2) / img_height
-                                                w = width / img_width
-                                                h = height / img_height
-                                                f.write(f"1 {cx} {cy} {w} {h}\n")
-                                                has_objects = True
+                                        has_objects = False
+                                        with open(label_path, 'w') as f:
+                                            if objects and 'bbox' in objects:
+                                                for bbox in objects['bbox']:
+                                                    if len(bbox) < 4:
+                                                        continue
+                                                    x, y, width, height = bbox
+                                                    cx = (x + width/2) / img_width
+                                                    cy = (y + height/2) / img_height
+                                                    w = width / img_width
+                                                    h = height / img_height
+                                                    f.write(f"1 {cx} {cy} {w} {h}\n")
+                                                    has_objects = True
 
-                                    if has_objects:
-                                        self.all_image_paths.append((img_path, label_path))
-                                        self.stats['smoke_images'] += 1
+                                        if has_objects:
+                                            self.all_image_paths.append((img_path, label_path))
+                                            self.stats['smoke_images'] += 1
                                 except (IOError, ValueError) as e:
                                     print(f"Error processing image {img_path}: {e}")
 
@@ -209,6 +220,9 @@ class DatasetProcessor:
                                         category_id = ann['category_id']
                                         bbox = ann['bbox']
 
+                                        if len(bbox) < 4:
+                                            continue
+
                                         if category_id == 3:
                                             class_id = 0
                                             has_fire = True
@@ -229,7 +243,11 @@ class DatasetProcessor:
                                 if has_objects:
                                     symlink_img_path = f"{aihub_dir}/images/train/{img_name}"
                                     if not os.path.exists(symlink_img_path):
-                                        os.symlink(img_path, symlink_img_path)
+                                        try:
+                                            os.symlink(img_path, symlink_img_path)
+                                        except OSError as e:
+                                            print(f"Error creating symlink {symlink_img_path}: {e}")
+                                            continue
 
                                     self.all_image_paths.append((symlink_img_path, label_path))
                                     if has_fire:
@@ -242,6 +260,9 @@ class DatasetProcessor:
 
     def split_and_create_files(self):
         print("Creating train/val/test split files...")
+
+        if DATASET_TRAIN_RATIO + DATASET_VAL_RATIO > 1.0:
+            raise ValueError(f"Invalid dataset ratios: train={DATASET_TRAIN_RATIO}, val={DATASET_VAL_RATIO}, sum > 1.0")
 
         random.shuffle(self.all_image_paths)
         total = len(self.all_image_paths)

@@ -34,7 +34,7 @@ class LegMotionController:
 
         try:
             progress_ratio = elapsed_time / total_duration
-        except ZeroDivisionError:
+        except ZeroDivisionError as e:
             progress_ratio = 1
 
         if time.time() > self.motion_end_time and self.is_active:
@@ -105,7 +105,7 @@ class QuadrupedGaitPattern:
             delta_time = time_param - self.phase_0_time
             try:
                 time_progress = delta_time / self.phase_1_time
-            except ZeroDivisionError:
+            except ZeroDivisionError as e:
                 time_progress = 0
 
             position_difference = end_position - start_position
@@ -113,7 +113,7 @@ class QuadrupedGaitPattern:
 
             try:
                 rotation_angle = -((math.pi/MATH_PI_DIVISOR*self.stride_angle)/2) + (math.pi/MATH_PI_DIVISOR*self.stride_angle)*time_progress
-            except (ZeroDivisionError, ValueError):
+            except (ZeroDivisionError, ValueError) as e:
                 rotation_angle = 0
 
             try:
@@ -121,12 +121,12 @@ class QuadrupedGaitPattern:
                                           [0, 1, 0, 0],
                                           [-np.sin(rotation_angle), 0, np.cos(rotation_angle), 0],
                                           [0, 0, 0, 1]])
-            except (ValueError, OverflowError):
+            except (ValueError, OverflowError) as e:
                 rotation_matrix = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
 
             try:
                 current_position = rotation_matrix.dot(current_position)
-            except (ValueError, np.linalg.LinAlgError):
+            except (ValueError, np.linalg.LinAlgError) as e:
                 current_position = start_position
             return current_position
 
@@ -137,7 +137,7 @@ class QuadrupedGaitPattern:
             delta_time = time_param - (self.phase_0_time + self.phase_1_time + self.phase_2_time)
             try:
                 time_progress = delta_time / self.phase_3_time
-            except ZeroDivisionError:
+            except ZeroDivisionError as e:
                 time_progress = 0
 
             position_difference = start_position - end_position
@@ -145,7 +145,7 @@ class QuadrupedGaitPattern:
 
             try:
                 current_position[1] += self.lift_height * math.sin(math.pi * time_progress)
-            except (ValueError, OverflowError, IndexError):
+            except (ValueError, OverflowError, IndexError) as e:
                 pass
             return current_position
 
@@ -156,16 +156,20 @@ class QuadrupedGaitPattern:
         front_foot_spacing = self.front_spacing
         rear_foot_spacing = self.rear_spacing
 
-        if list(keyboard_input.values()) == [0.0, 0.0, 0.0]:
+        if keyboard_input and all(v == 0.0 for k, v in keyboard_input.items() if k in ['IDstepLength', 'IDstepWidth', 'IDstepAlpha']):
             self.stride_length = 0.0
             self.stride_width = 0.0
             self.stride_angle = 0.0
         else:
-            self.stride_length = keyboard_input['IDstepLength']
-            self.stride_width = keyboard_input['IDstepWidth']
-            self.stride_angle = keyboard_input['IDstepAlpha']
+            self.stride_length = keyboard_input.get('IDstepLength', 0.0)
+            self.stride_width = keyboard_input.get('IDstepWidth', 0.0)
+            self.stride_angle = keyboard_input.get('IDstepAlpha', 0.0)
 
         total_period = (self.phase_0_time + self.phase_1_time + self.phase_2_time + self.phase_3_time)
+
+        if total_period == 0:
+            return np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]])
+
         half_period = total_period / 2
         phase_offset = 0
 

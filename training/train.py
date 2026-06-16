@@ -1,6 +1,11 @@
 import subprocess
 import sys
 import os
+from utils.config import (WANDB_PROJECT, WANDB_ENTITY, TRAIN_MODEL_PATH, TRAIN_DATA_YAML,
+                         TRAIN_OUTPUT_DIR, TRAIN_EPOCHS, TRAIN_BATCH_SIZE, TRAIN_IMAGE_SIZE,
+                         TRAIN_SAVE_PERIOD, TRAIN_PATIENCE, TRAIN_DEVICE, TRAIN_RUN_NAME,
+                         TRAIN_WORKERS, TRAIN_AUGMENT, TRAIN_MOSAIC, TRAIN_HSV_H, TRAIN_HSV_S,
+                         TRAIN_HSV_V, TRAIN_FLIPUD, TRAIN_FLIPLR)
 
 def install_package(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
@@ -17,36 +22,40 @@ except ImportError:
     install_package("wandb")
     import wandb
 
-if 'WANDB_API_KEY' in os.environ:
-    wandb.login(key=os.environ['WANDB_API_KEY'])
+wandb_api_key = os.environ.get('WANDB_API_KEY')
+if wandb_api_key:
+    wandb.login(key=wandb_api_key)
 
 from ultralytics import YOLO
 
 def main():
-    wandb.init(project="wildfire-detection", entity="dozoo0528-")
+    wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY)
 
     print("Starting wildfire detection training with YOLOv10s...")
 
-    model = YOLO('yolov10s.pt')
+    if not os.path.exists(TRAIN_MODEL_PATH):
+        raise FileNotFoundError(f"Model file not found: {TRAIN_MODEL_PATH}")
+
+    model = YOLO(TRAIN_MODEL_PATH)
 
     results = model.train(
-        data='/workspace/wildfire-dataset/data.yaml',
-        epochs=200,
-        batch=64,
-        imgsz=1280,
-        save_period=10,
-        patience=30,
-        device='cuda',
-        project='/workspace/runs',
-        name='wildfire_v1',
-        workers=16,
-        augment=True,
-        mosaic=1.0,
-        hsv_h=0.02,
-        hsv_s=0.8,
-        hsv_v=0.4,
-        flipud=0.5,
-        fliplr=0.5
+        data=TRAIN_DATA_YAML,
+        epochs=TRAIN_EPOCHS,
+        batch=TRAIN_BATCH_SIZE,
+        imgsz=TRAIN_IMAGE_SIZE,
+        save_period=TRAIN_SAVE_PERIOD,
+        patience=TRAIN_PATIENCE,
+        device=TRAIN_DEVICE,
+        project=TRAIN_OUTPUT_DIR,
+        name=TRAIN_RUN_NAME,
+        workers=TRAIN_WORKERS,
+        augment=TRAIN_AUGMENT,
+        mosaic=TRAIN_MOSAIC,
+        hsv_h=TRAIN_HSV_H,
+        hsv_s=TRAIN_HSV_S,
+        hsv_v=TRAIN_HSV_V,
+        flipud=TRAIN_FLIPUD,
+        fliplr=TRAIN_FLIPLR
     )
 
     print("Training completed successfully!")

@@ -155,9 +155,25 @@ DATASET_VAL_RATIO = 0.1
 
 AIHUB_DATASET_SUBPATH = "regional-safety-disaster-wildfire/01-1.official-open-data"
 WANDB_PROJECT = "wildfire-detection"
-WANDB_ENTITY = "ai-team"
+WANDB_ENTITY = os.environ.get('WANDB_ENTITY', 'dozoo0528-')
+TRAIN_MODEL_PATH = "yolov10s.pt"
 TRAIN_DATA_YAML = "/workspace/wildfire-dataset/data.yaml"
 TRAIN_OUTPUT_DIR = "/workspace/runs"
+TRAIN_EPOCHS = 200
+TRAIN_BATCH_SIZE = 64
+TRAIN_IMAGE_SIZE = 1280
+TRAIN_SAVE_PERIOD = 10
+TRAIN_PATIENCE = 30
+TRAIN_DEVICE = "cuda"
+TRAIN_RUN_NAME = "wildfire_v1"
+TRAIN_WORKERS = 16
+TRAIN_AUGMENT = True
+TRAIN_MOSAIC = 1.0
+TRAIN_HSV_H = 0.02
+TRAIN_HSV_S = 0.8
+TRAIN_HSV_V = 0.4
+TRAIN_FLIPUD = 0.5
+TRAIN_FLIPLR = 0.5
 
 KINEMATICS_L1_DEFAULT = 50
 KINEMATICS_L2_DEFAULT = 20
