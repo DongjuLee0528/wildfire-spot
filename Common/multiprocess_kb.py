@@ -2,7 +2,7 @@ from utils.config import (KB_KEY_VALUES, KB_CONTROL_OFFSET, FORWARD_DISTANCE,
                          KB_X_STEP_DIVISOR, KB_Y_STEP, KB_YAW_STEP, KB_TEST_SLEEP_TIME)
 import time
 import keyboard
-from multiprocessing import Process, Queue, Lock
+from multiprocessing import Process, Queue, Lock, Value
 
 class RobotKeyboardController:
 
@@ -17,7 +17,7 @@ class RobotKeyboardController:
         self.rotation_step = KB_YAW_STEP
         self.movement_lock = Lock()
         self.command_lock = Lock()
-        self._running = True
+        self._running = Value('b', True)
 
     def reset_movement(self):
         with self.movement_lock:
@@ -49,7 +49,7 @@ class RobotKeyboardController:
             self.movement_data.put(current_data)
 
     def stop(self):
-        self._running = False
+        self._running.value = False
 
     def cleanup(self):
         if hasattr(self, 'movement_data'):
@@ -60,7 +60,7 @@ class RobotKeyboardController:
     def start_listening(self, process_id, movement_queue, command_queue):
         key_pressed = False
 
-        while self._running:
+        while self._running.value:
             if keyboard.is_pressed('w'):
                 if not key_pressed:
                     self.register_key('w')
@@ -94,8 +94,8 @@ class RobotKeyboardController:
 
             self.calculate_movement()
 
-def monitor_commands(process_id, command_queue):
-    while True:
+def monitor_commands(process_id, command_queue, running_flag):
+    while running_flag.value:
         command_data = command_queue.get()
         print(command_data)
         command_queue.put(command_data)
@@ -104,17 +104,20 @@ def monitor_commands(process_id, command_queue):
 if __name__ == "__main__":
     controller = None
     keyboard_process = None
+    running = Value('b', True)
     try:
         controller = RobotKeyboardController()
         keyboard_process = Process(target=controller.start_listening, args=(1, controller.movement_data, controller.robot_commands))
 
         keyboard_process.start()
 
-        monitor_commands(2, controller.robot_commands)
+        monitor_commands(2, controller.robot_commands, running)
     except (ImportError, OSError, KeyboardInterrupt):
         print("Exception occurred")
+        running.value = False
     finally:
         print("Done... ")
+        running.value = False
         if keyboard_process is not None:
             keyboard_process.terminate()
             keyboard_process.join()
