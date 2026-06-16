@@ -63,14 +63,15 @@ wildfire_spot/
 
 - Architecture: YOLOv10s
 - Classes: fire, smoke
-- Training: 150 epochs, imgsz=1280, batch=64
+- Training: 200 epochs, imgsz=1280, batch=64
 - Training Platform: Vast.ai (A100 80GB)
 - Datasets: FASDD + Pyro-SDIS + AI Hub (301,060 images total)
 
 ## Hardware References
 
-- 3D Model: [SpotMicro](https://www.thingiverse.com/thing:3445283) by KDY0523 (Thingiverse)
-- Modified for JX CLS6336HV servos and LiDAR mount
+- Original 3D Model: [SpotMicro](https://www.thingiverse.com/thing:3445283) by KDY0523 (CC BY 4.0)
+- Modified by [Road-Balance](https://github.com/Road-Balance/SpotMicroJetson) (CC BY 4.0)
+- Further modified by Dongju Lee (CC BY 4.0)
 
 ## Based On
 
@@ -87,5 +88,7 @@ sensor integration, and YOLOv10s-based vision system.
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0.
+- Hardware (STL files): CC BY 4.0
+- Software: GNU General Public License v3.0
+
 See the [LICENSE](LICENSE) file for details.

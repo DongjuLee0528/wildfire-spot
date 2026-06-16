@@ -9,13 +9,12 @@ import board
 import time
 
 class SensorManager:
-
     def __init__(self):
         self._available = True
 
         try:
             self._i2c = busio.I2C(I2C_SCL, I2C_SDA)
-        except Exception as e:
+        except:
             print("I2C initialization failed")
             self._available = False
             return
@@ -25,13 +24,13 @@ class SensorManager:
             self._ads1_2 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_2)
             self._mq2_chan1 = AnalogIn(self._ads1_1, ADS.P0)
             self._mq2_chan2 = AnalogIn(self._ads1_2, ADS.P0)
-        except Exception as e:
+        except:
             print("ADS1115 initialization failed")
             self._available = False
 
         try:
             self._sht31 = adafruit_sht31d.SHT31D(self._i2c, address=SHT31_ADDRESS)
-        except Exception as e:
+        except:
             print("SHT31 initialization failed")
             self._available = False
 
@@ -53,7 +52,7 @@ class SensorManager:
             value1 = self._mq2_chan1.value
             value2 = self._mq2_chan2.value
             return int((value1 + value2) / 2)
-        except Exception as e:
+        except:
             return 0
 
     def read_sht31(self):
@@ -63,7 +62,7 @@ class SensorManager:
             temperature = self._sht31.temperature
             humidity = self._sht31.relative_humidity
             return (temperature, humidity)
-        except Exception as e:
+        except:
             return (0.0, 0.0)
 
     def read_ky026(self):
@@ -94,20 +93,20 @@ class SensorManager:
             pulse_end = time.time()
 
         pulse_duration = pulse_end - pulse_start
-        distance = pulse_duration * ULTRASONIC_DISTANCE_MULTIPLIER
+        distance = pulse_duration * 17150
 
         return round(distance, 2)
 
-    def read_all_sensors(self):
+    def read_all(self):
         smoke = self.read_mq2()
         temperature, humidity = self.read_sht31()
         flame = self.read_ky026()
         distance = self.read_hcsr04()
 
         return {
-            "mq2_smoke": smoke,
+            "smoke": smoke,
             "temperature": temperature,
             "humidity": humidity,
-            "ky026_flame": flame,
+            "flame": flame,
             "distance": distance
         }

@@ -1,4 +1,5 @@
-from utils.config import *
+from utils.config import (MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
+                         DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE)
 from hardware.sensor_manager import SensorManager
 from hardware.gps_manager import GPSManager
 from hardware.pan_tilt_controller import PanTiltController
@@ -23,6 +24,8 @@ class FireDetector:
             temperature = sensor_data.get('temperature', 0)
             humidity = sensor_data.get('humidity', 100)
             flame_detected = sensor_data.get('ky026_flame', False)
+            if isinstance(flame_detected, list):
+                flame_detected = any(flame_detected)
 
             if (smoke_level > MQ2_SMOKE_THRESHOLD or
                 temperature > TEMP_THRESHOLD or
@@ -34,7 +37,7 @@ class FireDetector:
             self.sensor_detected = False
             return False
 
-        except Exception as e:
+        except Exception:
             return False
 
     def detect_by_camera(self):
@@ -57,7 +60,7 @@ class FireDetector:
 
             return None
 
-        except Exception as e:
+        except Exception:
             return None
 
     def log_detection(self, location, direction, sensor_data):
@@ -74,7 +77,7 @@ class FireDetector:
             }
             self.detection_log.append(detection_record)
 
-        except Exception as e:
+        except Exception:
             pass
 
     def get_strongest_direction(self):
@@ -85,7 +88,7 @@ class FireDetector:
             strongest_record = max(self.detection_log, key=lambda x: x['smoke'])
             return strongest_record['direction']
 
-        except Exception as e:
+        except Exception:
             return None
 
     def is_fire_detected(self):
@@ -111,7 +114,7 @@ class FireDetector:
 
             return fire_detected
 
-        except Exception as e:
+        except Exception:
             return False
 
     def get_fire_location(self):
@@ -119,5 +122,5 @@ class FireDetector:
             if self.is_fire_detected():
                 return self.gps_manager.get_coordinates()
             return None
-        except Exception as e:
+        except Exception:
             return None
