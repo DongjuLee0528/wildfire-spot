@@ -3,6 +3,8 @@ import termios
 import tty
 import select
 import time
+import re
+import json
 from pathlib import Path
 from hardware.gps_manager import GPSManager
 from utils.config import PATROL_ZONE_MAX_POINTS
@@ -54,9 +56,13 @@ class PatrolZoneCalibrator:
             print("GPS coordinates not available, try again")
             return
 
+        if not isinstance(coordinates, (tuple, list)) or len(coordinates) < 2:
+            print("Invalid GPS coordinates format, try again")
+            return
+
         self._collected_points.append(coordinates)
         point_number = len(self._collected_points)
-        lat, lon = coordinates
+        lat, lon = coordinates[0], coordinates[1]
         print(f"Point {point_number} recorded: ({lat:.6f}, {lon:.6f})")
 
         if point_number >= PATROL_ZONE_MAX_POINTS:
@@ -69,20 +75,28 @@ class PatrolZoneCalibrator:
 
     def _update_config_file(self):
         config_path = Path(__file__).parent / 'utils' / 'config.py'
+        pattern = re.compile(r'^PATROL_ZONE\s*=')
 
-        with open(config_path, 'r') as file:
-            lines = file.readlines()
+        try:
+            with open(config_path, 'r') as file:
+                lines = file.readlines()
 
-        for i, line in enumerate(lines):
-            if line.strip().startswith('PATROL_ZONE = '):
-                lines[i] = f'PATROL_ZONE = {self._collected_points}\n'
-                break
+            for i, line in enumerate(lines):
+                if pattern.match(line.strip()):
+                    lines[i] = f'PATROL_ZONE = {json.dumps(self._collected_points)}\n'
+                    break
 
-        with open(config_path, 'w') as file:
-            file.writelines(lines)
+            with open(config_path, 'w') as file:
+                file.writelines(lines)
+        except (IOError, OSError) as e:
+            print(f"Failed to update config file: {e}")
 
     def is_calibration_mode(self):
         return self._calibration_mode
+
+    def cleanup(self):
+        if hasattr(self, '_gps') and self._gps is not None:
+            self._gps.close()
 
 def main():
     calibrator = PatrolZoneCalibrator()
@@ -117,7 +131,7 @@ def main():
     finally:
         if keyboard_input is not None:
             keyboard_input.restore()
-        calibrator._gps.close()
+        calibrator.cleanup()
 
 if __name__ == "__main__":
     main()
