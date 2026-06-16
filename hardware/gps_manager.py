@@ -1,6 +1,7 @@
 from utils.config import GPS_UART_PORT, GPS_BAUDRATE, GPS_READ_MAX_ATTEMPTS
 import serial
 import pynmea2
+import time
 
 class GPSManager:
 
@@ -14,22 +15,23 @@ class GPSManager:
 
     def get_location(self):
         if not self._available or self._serial is None:
-            return (None, None)
+            return None
 
         try:
             line = self._serial.readline().decode('ascii', errors='replace')
             if line.startswith('$GPRMC'):
                 msg = pynmea2.parse(line)
-                if msg.status == 'A':
-                    return (msg.latitude, msg.longitude)
-        except (serial.SerialException, UnicodeDecodeError, pynmea2.ParseError):
+                if msg.status == 'A' and msg.latitude is not None and msg.longitude is not None:
+                    return (float(msg.latitude), float(msg.longitude))
+        except (serial.SerialException, UnicodeDecodeError, pynmea2.ParseError, ValueError):
             pass
 
-        return (None, None)
+        return None
 
     def get_location_string(self):
-        lat, lon = self.get_location()
-        if lat is not None and lon is not None:
+        coords = self.get_location()
+        if coords is not None:
+            lat, lon = coords
             return f"{lat},{lon}"
         return "N/A"
 
@@ -49,8 +51,10 @@ class GPSManager:
                     line = self._serial.readline().decode('ascii', errors='replace')
                     if line.startswith('$GPRMC'):
                         msg = pynmea2.parse(line)
-                        if msg.status == 'A' and msg.latitude and msg.longitude:
+                        if msg.status == 'A' and msg.latitude is not None and msg.longitude is not None:
                             return (float(msg.latitude), float(msg.longitude))
+                else:
+                    time.sleep(0.01)
         except (serial.SerialException, UnicodeDecodeError, pynmea2.ParseError, ValueError):
             pass
 
@@ -58,5 +62,8 @@ class GPSManager:
 
     def close(self):
         if self._serial is not None:
-            self._serial.close()
-            self._available = False
+            try:
+                self._serial.close()
+                self._available = False
+            except (OSError, serial.SerialException) as e:
+                pass
