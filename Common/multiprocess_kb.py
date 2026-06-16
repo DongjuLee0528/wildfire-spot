@@ -2,7 +2,7 @@ from utils.config import (KB_KEY_VALUES, KB_CONTROL_OFFSET, FORWARD_DISTANCE,
                          KB_X_STEP_DIVISOR, KB_Y_STEP, KB_YAW_STEP, KB_TEST_SLEEP_TIME)
 import time
 import keyboard
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Lock
 
 class RobotKeyboardController:
 
@@ -15,31 +15,41 @@ class RobotKeyboardController:
         self.forward_step = FORWARD_DISTANCE / KB_X_STEP_DIVISOR
         self.lateral_step = KB_Y_STEP
         self.rotation_step = KB_YAW_STEP
+        self.movement_lock = Lock()
+        self.command_lock = Lock()
+        self._running = True
 
     def reset_movement(self):
-        current_data = self.movement_data.get()
-        self.movement_data.put(KB_KEY_VALUES)
+        with self.movement_lock:
+            current_data = self.movement_data.get()
+            self.movement_data.put(KB_KEY_VALUES)
 
     def register_key(self, key_char):
-        current_data = self.movement_data.get()
-        current_data[key_char] += 1
-        current_data['move'] = True
-        self.movement_data.put(current_data)
+        with self.movement_lock:
+            current_data = self.movement_data.get()
+            current_data[key_char] = current_data.get(key_char, 0) + 1
+            current_data['move'] = True
+            self.movement_data.put(current_data)
 
     def calculate_movement(self):
-        current_data = self.movement_data.get()
-        command_data = self.robot_commands.get()
-        command_data['IDstepLength'] = self.forward_step * current_data['s'] - self.forward_step * current_data['w']
-        command_data['IDstepWidth'] = self.lateral_step * current_data['d'] - self.lateral_step * current_data['a']
-        command_data['IDstepAlpha'] = self.rotation_step * current_data['q'] - self.rotation_step * current_data['e']
+        with self.movement_lock:
+            current_data = self.movement_data.get()
+            with self.command_lock:
+                command_data = self.robot_commands.get()
+                command_data['IDstepLength'] = self.forward_step * current_data.get('s', 0) - self.forward_step * current_data.get('w', 0)
+                command_data['IDstepWidth'] = self.lateral_step * current_data.get('d', 0) - self.lateral_step * current_data.get('a', 0)
+                command_data['IDstepAlpha'] = self.rotation_step * current_data.get('q', 0) - self.rotation_step * current_data.get('e', 0)
 
-        if current_data['move']:
-            command_data['StartStepping'] = True
-        else:
-            command_data['StartStepping'] = False
+                if current_data.get('move', False):
+                    command_data['StartStepping'] = True
+                else:
+                    command_data['StartStepping'] = False
 
-        self.movement_data.put(current_data)
-        self.robot_commands.put(command_data)
+                self.robot_commands.put(command_data)
+            self.movement_data.put(current_data)
+
+    def stop(self):
+        self._running = False
 
     def cleanup(self):
         if hasattr(self, 'movement_data'):
@@ -50,7 +60,7 @@ class RobotKeyboardController:
     def start_listening(self, process_id, movement_queue, command_queue):
         key_pressed = False
 
-        while True:
+        while self._running:
             if keyboard.is_pressed('w'):
                 if not key_pressed:
                     self.register_key('w')
@@ -92,6 +102,8 @@ def monitor_commands(process_id, command_queue):
         time.sleep(KB_TEST_SLEEP_TIME)
 
 if __name__ == "__main__":
+    controller = None
+    keyboard_process = None
     try:
         controller = RobotKeyboardController()
         keyboard_process = Process(target=controller.start_listening, args=(1, controller.movement_data, controller.robot_commands))
@@ -103,7 +115,9 @@ if __name__ == "__main__":
         print("Exception occurred")
     finally:
         print("Done... ")
-        if 'keyboard_process' in locals():
+        if keyboard_process is not None:
             keyboard_process.terminate()
             keyboard_process.join()
+        if controller is not None:
+            controller.cleanup()
 
