@@ -1,4 +1,8 @@
-from utils.config import *
+from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEGS, PCA9685_CAMERA,
+                         PWM_FREQUENCY, PWM_MIN_PULSE, PWM_MAX_PULSE, SERVO_CHANNELS,
+                         FRONT_LEG_CHANNELS, CAMERA_PAN, CAMERA_TILT, SERVO_OFFSETS,
+                         SERVO_ANGLE_MIN, SERVO_ANGLE_MAX, SERVO_TEST_ENDPOINT_VALUES,
+                         SERVO_MAX_ANGLE, SERVO_MIN_ANGLE, SERVO_ANGLE_ADJUSTMENT)
 
 import Kinematics.kinematics as kn
 import numpy as np
@@ -9,100 +13,105 @@ import board
 import busio
 import time
 
-class Controllers:
+class QuadrupedServoManager:
 
     def __init__(self):
         try:
-            print("Initializing Servos")
-            self._i2c_bus0=(busio.I2C(I2C_SCL, I2C_SDA))
-            print("Initializing ServoKit")
+            print("Initializing servo hardware")
+            self._i2c_interface = busio.I2C(I2C_SCL, I2C_SDA)
+            print("Setting up servo drivers")
 
-            self._pca_1 = PCA9685(self._i2c_bus0, address=PCA9685_FRONT_LEGS)
-            self._pca_1.frequency = PWM_FREQUENCY
-            self._pca_2 = PCA9685(self._i2c_bus0, address=PCA9685_BACK_LEGS)
-            self._pca_2.frequency = PWM_FREQUENCY
-            self._pca_3 = PCA9685(self._i2c_bus0, address=PCA9685_CAMERA)
-            self._pca_3.frequency = PWM_FREQUENCY
-        except Exception as e:
-            print(f"I2C initialization failed: {e}")
+            self._front_driver = PCA9685(self._i2c_interface, address=PCA9685_FRONT_LEGS)
+            self._front_driver.frequency = PWM_FREQUENCY
+            self._rear_driver = PCA9685(self._i2c_interface, address=PCA9685_BACK_LEGS)
+            self._rear_driver.frequency = PWM_FREQUENCY
+            self._camera_driver = PCA9685(self._i2c_interface, address=PCA9685_CAMERA)
+            self._camera_driver.frequency = PWM_FREQUENCY
+        except Exception:
+            print("Servo driver initialization failed")
             raise
 
-        self._servos = list()
-        for i in range(0, SERVO_CHANNELS):
-            if i < FRONT_LEG_CHANNELS:
-                self._servos.append(servo.Servo(self._pca_1.channels[i], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
+        self._servo_array = list()
+        for servo_index in range(0, SERVO_CHANNELS):
+            if servo_index < FRONT_LEG_CHANNELS:
+                self._servo_array.append(servo.Servo(self._front_driver.channels[servo_index], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
             else:
-                self._servos.append(servo.Servo(self._pca_2.channels[i-FRONT_LEG_CHANNELS], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
+                self._servo_array.append(servo.Servo(self._rear_driver.channels[servo_index-FRONT_LEG_CHANNELS], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
 
-        self._pan_servo = servo.Servo(self._pca_3.channels[CAMERA_PAN], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
-        self._tilt_servo = servo.Servo(self._pca_3.channels[CAMERA_TILT], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
+        self._pan_motor = servo.Servo(self._camera_driver.channels[CAMERA_PAN], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
+        self._tilt_motor = servo.Servo(self._camera_driver.channels[CAMERA_TILT], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
 
-        print("Done initializing")
+        print("Servo initialization complete")
 
-        self._servo_offsets = SERVO_OFFSETS
+        self._offset_values = SERVO_OFFSETS
 
-        self._val_list = [ x for x in range(SERVO_CHANNELS) ]
-        self._thetas = []
+        self._angle_array = [servo_index for servo_index in range(SERVO_CHANNELS)]
+        self._joint_angles = []
 
-    def getDegreeAngles(self, La):
-        La *= 180/np.pi
-        La = [ [ int(x) for x in y ] for y in La ]
-        self._thetas = La
+    def convert_to_degrees(self, angle_radians):
+        angle_radians *= 180/np.pi
+        angle_radians = [[int(value) for value in row] for row in angle_radians]
+        self._joint_angles = angle_radians
 
-    def angleToServo(self, La):
-        self.getDegreeAngles(La)
+    def process_angle_mapping(self, angle_radians):
+        self.convert_to_degrees(angle_radians)
 
-        self._val_list[0] = self._servo_offsets[0] - self._thetas[0][2]
-        self._val_list[1] = self._servo_offsets[1] - self._thetas[0][1]
-        self._val_list[2] = self._servo_offsets[2] + self._thetas[0][0]
+        self._angle_array[0] = self._offset_values[0] - self._joint_angles[0][2]
+        self._angle_array[1] = self._offset_values[1] - self._joint_angles[0][1]
+        self._angle_array[2] = self._offset_values[2] + self._joint_angles[0][0]
 
-        self._val_list[3] = self._servo_offsets[3] + self._thetas[1][2]
-        self._val_list[4] = self._servo_offsets[4] + self._thetas[1][1]
-        self._val_list[5] = self._servo_offsets[5] - self._thetas[1][0]
+        self._angle_array[3] = self._offset_values[3] + self._joint_angles[1][2]
+        self._angle_array[4] = self._offset_values[4] + self._joint_angles[1][1]
+        self._angle_array[5] = self._offset_values[5] - self._joint_angles[1][0]
 
-        self._val_list[6] = self._servo_offsets[6] - self._thetas[2][2]
-        self._val_list[7] = self._servo_offsets[7] - self._thetas[2][1]
-        self._val_list[8] = self._servo_offsets[8] - self._thetas[2][0]
+        self._angle_array[6] = self._offset_values[6] - self._joint_angles[2][2]
+        self._angle_array[7] = self._offset_values[7] - self._joint_angles[2][1]
+        self._angle_array[8] = self._offset_values[8] - self._joint_angles[2][0]
 
-        self._val_list[9] = self._servo_offsets[9] + self._thetas[3][2]
-        self._val_list[10] = self._servo_offsets[10] + self._thetas[3][1]
-        self._val_list[11] = self._servo_offsets[11] + self._thetas[3][0]
+        self._angle_array[9] = self._offset_values[9] + self._joint_angles[3][2]
+        self._angle_array[10] = self._offset_values[10] + self._joint_angles[3][1]
+        self._angle_array[11] = self._offset_values[11] + self._joint_angles[3][0]
 
-    def getServoAngles(self):
-        return self._val_list
+    def get_current_angles(self):
+        return self._angle_array
 
-    def servoRotate(self, thetas):
-        self.angleToServo(thetas)
+    def execute_servo_motion(self, joint_angles):
+        self.process_angle_mapping(joint_angles)
 
-        for x in range(len(self._val_list)):
-            if (self._val_list[x] > SERVO_ANGLE_MAX):
-                print("Over 180!!")
-                self._val_list[x] = SERVO_ANGLE_MAX - 1
-            if (self._val_list[x] <= SERVO_ANGLE_MIN):
-                print("Under 0!!")
-                self._val_list[x] = SERVO_ANGLE_MIN + 1
-            self._servos[x].angle = float(self._val_list[x])
+        for servo_index in range(len(self._angle_array)):
+            if (self._angle_array[servo_index] > SERVO_MAX_ANGLE):
+                print("Angle exceeds maximum limit")
+                self._angle_array[servo_index] = SERVO_MAX_ANGLE - SERVO_ANGLE_ADJUSTMENT
+            if (self._angle_array[servo_index] <= SERVO_MIN_ANGLE):
+                print("Angle below minimum limit")
+                self._angle_array[servo_index] = SERVO_MIN_ANGLE + SERVO_ANGLE_ADJUSTMENT
+            self._servo_array[servo_index].angle = float(self._angle_array[servo_index])
 
-    def set_camera_pan(self, angle):
-        if angle < SERVO_ANGLE_MIN:
-            angle = SERVO_ANGLE_MIN
-        if angle > SERVO_ANGLE_MAX:
-            angle = SERVO_ANGLE_MAX
-        self._pan_servo.angle = float(angle)
+    def set_pan_angle(self, target_angle):
+        if target_angle < SERVO_ANGLE_MIN:
+            target_angle = SERVO_ANGLE_MIN
+        if target_angle > SERVO_ANGLE_MAX:
+            target_angle = SERVO_ANGLE_MAX
+        self._pan_motor.angle = float(target_angle)
 
-    def set_camera_tilt(self, angle):
-        if angle < SERVO_ANGLE_MIN:
-            angle = SERVO_ANGLE_MIN
-        if angle > SERVO_ANGLE_MAX:
-            angle = SERVO_ANGLE_MAX
-        self._tilt_servo.angle = float(angle)
+    def set_tilt_angle(self, target_angle):
+        if target_angle < SERVO_ANGLE_MIN:
+            target_angle = SERVO_ANGLE_MIN
+        if target_angle > SERVO_ANGLE_MAX:
+            target_angle = SERVO_ANGLE_MAX
+        self._tilt_motor.angle = float(target_angle)
+
+    def shutdown_servos(self):
+        self._front_driver.deinit()
+        self._rear_driver.deinit()
+        self._camera_driver.deinit()
 
 if __name__=="__main__":
-    legEndpoints=np.array(SERVO_TEST_ENDPOINT_VALUES)
-    robot_kinematics = kn.QuadrupedKinematics()
-    thetas = robot_kinematics.init_ik(legEndpoints)
-    controller = Controllers()
-    controller.servoRotate(thetas)
-    svAngle = controller.getServoAngles()
-    print(svAngle)
-    robot_kinematics.plot()
+    test_endpoints = np.array(SERVO_TEST_ENDPOINT_VALUES)
+    kinematics_solver = kn.DHParameterSolver()
+    calculated_angles = kinematics_solver.init_ik(test_endpoints)
+    servo_manager = QuadrupedServoManager()
+    servo_manager.execute_servo_motion(calculated_angles)
+    current_angles = servo_manager.get_current_angles()
+    print(current_angles)
+    kinematics_solver.plot()

@@ -1,7 +1,11 @@
 import serial
 import math
 import numpy as np
-from utils.config import *
+import time
+from utils.config import (LIDAR_UART_PORT, LIDAR_BAUDRATE, LIDAR_OBSTACLE_THRESHOLD,
+                         LIDAR_DIRECTION_ANGLES, LIDAR_DATA_SIZE, LIDAR_PACKET_HEADER,
+                         LIDAR_FULL_SCAN_SIZE, LIDAR_DIRECTION_COUNT, LIDAR_ANGLE_RANGE,
+                         LIDAR_REVERSE_DIRECTION, LIDAR_PATH_CHECK_RANGE, LIDAR_READ_TIMEOUT)
 
 class LidarManager:
 
@@ -9,7 +13,7 @@ class LidarManager:
         try:
             self.serial_port = serial.Serial(LIDAR_UART_PORT, LIDAR_BAUDRATE, timeout=1)
             self._available = True
-        except Exception as e:
+        except (OSError, serial.SerialException):
             self.serial_port = None
             self._available = False
         self.obstacle_threshold = LIDAR_OBSTACLE_THRESHOLD
@@ -20,7 +24,11 @@ class LidarManager:
             return {}
         try:
             distance_data = {}
+            start_time = time.time()
             while True:
+                if time.time() - start_time > LIDAR_READ_TIMEOUT:
+                    break
+
                 data = self.serial_port.read(LIDAR_DATA_SIZE)
 
                 if len(data) == LIDAR_DATA_SIZE and data[0] == LIDAR_PACKET_HEADER[0] and data[1] == LIDAR_PACKET_HEADER[1]:
@@ -35,7 +43,7 @@ class LidarManager:
                     if len(distance_data) >= LIDAR_FULL_SCAN_SIZE:
                         break
             return distance_data
-        except Exception as e:
+        except (serial.SerialException, IndexError, ValueError):
             return {}
 
     def get_obstacle_direction(self):

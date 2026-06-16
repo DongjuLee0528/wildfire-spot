@@ -3,228 +3,281 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from math import sqrt, atan2, acos, sin, cos, pi
 
-try:
-    from utils.config import *
-except ImportError:
-    ROBOT_L1 = 50
-    ROBOT_L2 = 20
-    ROBOT_L3 = 100
-    ROBOT_L4 = 100
-    ROBOT_L = 140
-    ROBOT_W = 75
-    ROBOT_LEG_FRONT = 0
-    ROBOT_LEG_BACK = 2
-    ROBOT_LEG_LEFT = 0
-    ROBOT_LEG_RIGHT = 1
+from utils.config import (ROBOT_L1, ROBOT_L2, ROBOT_L3, ROBOT_L4, ROBOT_L, ROBOT_W,
+                         ROBOT_LEG_FRONT, ROBOT_LEG_BACK, ROBOT_LEG_LEFT, ROBOT_LEG_RIGHT,
+                         ROBOT_BODY_HEIGHT, GAIT_BODY_POS, GAIT_BODY_ROT)
 
+def create_3d_plot(axis_range):
+    figure_axis = plt.axes(projection="3d")
+    figure_axis.set_xlim(-axis_range, axis_range)
+    figure_axis.set_ylim(-axis_range, axis_range)
+    figure_axis.set_zlim(-axis_range, axis_range)
+    figure_axis.set_xlabel("X")
+    figure_axis.set_ylabel("Z")
+    figure_axis.set_zlabel("Y")
+    return figure_axis
 
-def setup_3d_view(axis_limit):
-    ax = plt.axes(projection="3d")
-    ax.set_xlim(-axis_limit, axis_limit)
-    ax.set_ylim(-axis_limit, axis_limit)
-    ax.set_zlim(-axis_limit, axis_limit)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Z")
-    ax.set_zlabel("Y")
-    return ax
-
-
-class QuadrupedKinematics:
+class DHParameterSolver:
 
     def __init__(self):
-        self.link1 = ROBOT_L1
-        self.link2 = ROBOT_L2
-        self.link3 = ROBOT_L3
-        self.link4 = ROBOT_L4
-        self.body_length = ROBOT_L
-        self.body_width = ROBOT_W
+        self.L1 = ROBOT_L1
+        self.L2 = ROBOT_L2
+        self.L3 = ROBOT_L3
+        self.L4 = ROBOT_L4
+        self.body_length_L = ROBOT_L
+        self.body_width_W = ROBOT_W
 
-        self.leg_front = ROBOT_LEG_FRONT
-        self.leg_back = ROBOT_LEG_BACK
-        self.leg_left = ROBOT_LEG_LEFT
-        self.leg_right = ROBOT_LEG_RIGHT
+        self.front_leg_index = ROBOT_LEG_FRONT
+        self.back_leg_index = ROBOT_LEG_BACK
+        self.left_leg_index = ROBOT_LEG_LEFT
+        self.right_leg_index = ROBOT_LEG_RIGHT
 
-        self.joint_angles = np.zeros((4, 3), dtype=np.float64)
+        self.computed_angles = np.zeros((4, 3), dtype=np.float64)
 
-    def leg_ik(self, target_point):
-        x, y, z = target_point[0], target_point[1], target_point[2]
-        l1, l2, l3, l4 = self.link1, self.link2, self.link3, self.link4
+    def calculate_inverse_kinematics_single_leg(self, end_effector_pos):
+        x, y, z = end_effector_pos[0], end_effector_pos[1], end_effector_pos[2]
+        L1, L2, L3, L4 = self.L1, self.L2, self.L3, self.L4
 
-        try:
-            F = sqrt(x**2 + y**2 - l1**2)
-        except ValueError:
-            F = l1
-
-        G = F - l2
+        F = sqrt(x**2 + y**2 - L1**2)
+        G = F - L2
         H = sqrt(G**2 + z**2)
-
-        theta1 = -atan2(y, x) - atan2(F, -l1)
-
-        D = (H**2 - l3**2 - l4**2) / (2 * l3 * l4)
-        try:
-            theta3 = acos(D)
-        except ValueError:
-            theta3 = 0
-
-        theta2 = atan2(z, G) - atan2(l4 * sin(theta3), l3 + l4 * cos(theta3))
+        theta1 = -atan2(y, x) - atan2(F, -L1)
+        D = (H**2 - L3**2 - L4**2) / (2 * L3 * L4)
+        theta3 = acos(D)
+        theta2 = atan2(z, G) - atan2(L4*sin(theta3), L3+L4*cos(theta3))
 
         return (theta1, theta2, theta3)
 
-    def leg_fk(self, joint_angles):
-        l1, l2, l3, l4 = self.link1, self.link2, self.link3, self.link4
+    def forward_kinematics_dh_method(self, joint_angles):
+        L1, L2, L3, L4 = self.L1, self.L2, self.L3, self.L4
         theta1, theta2, theta3 = joint_angles
-        theta23 = theta2 + theta3
+        combined_angle_23 = theta2 + theta3
 
-        p0 = np.array([0, 0, 0, 1])
-        p1 = p0 + np.array([-l1 * cos(theta1), l1 * sin(theta1), 0, 0])
-        p2 = p1 + np.array([-l2 * sin(theta1), -l2 * cos(theta1), 0, 0])
-        p3 = p2 + np.array([-l3 * sin(theta1) * cos(theta2),
-                           -l3 * cos(theta1) * cos(theta2),
-                           l3 * sin(theta2), 0])
-        p4 = p3 + np.array([-l4 * sin(theta1) * cos(theta23),
-                           -l4 * cos(theta1) * cos(theta23),
-                           l4 * sin(theta23), 0])
+        joint_0 = np.array([0, 0, 0, 1])
 
-        return np.array([p0, p1, p2, p3, p4])
+        joint_1 = joint_0 + np.array([-L1 * cos(theta1), L1 * sin(theta1), 0, 0])
 
-    def body_ik(self, roll, pitch, yaw, x_offset, y_offset, z_offset):
-        Rx = np.array([[1, 0, 0, 0],
-                      [0, cos(roll), -sin(roll), 0],
-                      [0, sin(roll), cos(roll), 0],
-                      [0, 0, 0, 1]])
+        joint_2 = joint_1 + np.array([-L2 * sin(theta1), -L2 * cos(theta1), 0, 0])
 
-        Ry = np.array([[cos(pitch), 0, sin(pitch), 0],
-                      [0, 1, 0, 0],
-                      [-sin(pitch), 0, cos(pitch), 0],
-                      [0, 0, 0, 1]])
+        joint_3 = joint_2 + np.array([-L3 * sin(theta1) * cos(theta2),
+                                     -L3 * cos(theta1) * cos(theta2),
+                                     L3 * sin(theta2), 0])
 
-        Rz = np.array([[cos(yaw), -sin(yaw), 0, 0],
-                      [sin(yaw), cos(yaw), 0, 0],
-                      [0, 0, 1, 0],
-                      [0, 0, 0, 1]])
+        joint_4 = joint_3 + np.array([-L4 * sin(theta1) * cos(combined_angle_23),
+                                     -L4 * cos(theta1) * cos(combined_angle_23),
+                                     L4 * sin(combined_angle_23), 0])
 
-        rotation_matrix = Rx.dot(Ry.dot(Rz))
+        return np.array([joint_0, joint_1, joint_2, joint_3, joint_4])
 
-        translation_matrix = np.array([[0, 0, 0, x_offset],
-                                     [0, 0, 0, y_offset],
-                                     [0, 0, 0, z_offset],
-                                     [0, 0, 0, 0]])
+    def compute_body_transformation(self, roll_angle, pitch_angle, yaw_angle, x_trans, y_trans, z_trans):
+        rotation_x = np.array([[1, 0, 0, 0],
+                             [0, cos(roll_angle), -sin(roll_angle), 0],
+                             [0, sin(roll_angle), cos(roll_angle), 0],
+                             [0, 0, 0, 1]])
 
-        body_transform = translation_matrix + rotation_matrix
+        rotation_y = np.array([[cos(pitch_angle), 0, sin(pitch_angle), 0],
+                             [0, 1, 0, 0],
+                             [-sin(pitch_angle), 0, cos(pitch_angle), 0],
+                             [0, 0, 0, 1]])
 
-        half_pi_sin = sin(pi/2)
-        half_pi_cos = cos(pi/2)
-        L, W = self.body_length, self.body_width
+        rotation_z = np.array([[cos(yaw_angle), -sin(yaw_angle), 0, 0],
+                             [sin(yaw_angle), cos(yaw_angle), 0, 0],
+                             [0, 0, 1, 0],
+                             [0, 0, 0, 1]])
 
-        front_left = body_transform.dot(np.array([[half_pi_cos, 0, half_pi_sin, L/2],
-                                                 [0, 1, 0, 0],
-                                                 [-half_pi_sin, 0, half_pi_cos, W/2],
-                                                 [0, 0, 0, 1]]))
+        combined_rotation = rotation_x.dot(rotation_y.dot(rotation_z))
 
-        front_right = body_transform.dot(np.array([[half_pi_cos, 0, half_pi_sin, L/2],
-                                                  [0, 1, 0, 0],
-                                                  [-half_pi_sin, 0, half_pi_cos, -W/2],
-                                                  [0, 0, 0, 1]]))
+        translation_transform = np.array([[0, 0, 0, x_trans],
+                                        [0, 0, 0, y_trans],
+                                        [0, 0, 0, z_trans],
+                                        [0, 0, 0, 0]])
 
-        back_left = body_transform.dot(np.array([[half_pi_cos, 0, half_pi_sin, -L/2],
-                                                [0, 1, 0, 0],
-                                                [-half_pi_sin, 0, half_pi_cos, W/2],
-                                                [0, 0, 0, 1]]))
+        complete_transform = translation_transform + combined_rotation
 
-        back_right = body_transform.dot(np.array([[half_pi_cos, 0, half_pi_sin, -L/2],
-                                                 [0, 1, 0, 0],
-                                                 [-half_pi_sin, 0, half_pi_cos, -W/2],
-                                                 [0, 0, 0, 1]]))
+        cos_90 = cos(pi/2)
+        sin_90 = sin(pi/2)
+        L, W = self.body_length_L, self.body_width_W
 
-        return [front_left, front_right, back_left, back_right]
+        front_left_transform = complete_transform.dot(np.array([[cos_90, 0, sin_90, L/2],
+                                                              [0, 1, 0, 0],
+                                                              [-sin_90, 0, cos_90, W/2],
+                                                              [0, 0, 0, 1]]))
 
-    def calc_ik(self, foot_positions, body_position, body_rotation):
-        roll, pitch, yaw = body_rotation
-        x_pos, y_pos, z_pos = body_position
+        front_right_transform = complete_transform.dot(np.array([[cos_90, 0, sin_90, L/2],
+                                                               [0, 1, 0, 0],
+                                                               [-sin_90, 0, cos_90, -W/2],
+                                                               [0, 0, 0, 1]]))
 
-        leg_transforms = self.body_ik(roll, pitch, yaw, x_pos, y_pos, z_pos)
+        back_left_transform = complete_transform.dot(np.array([[cos_90, 0, sin_90, -L/2],
+                                                             [0, 1, 0, 0],
+                                                             [-sin_90, 0, cos_90, W/2],
+                                                             [0, 0, 0, 1]]))
 
-        mirror_matrix = np.array([[-1, 0, 0, 0],
-                                 [0, 1, 0, 0],
-                                 [0, 0, 1, 0],
-                                 [0, 0, 0, 1]])
+        back_right_transform = complete_transform.dot(np.array([[cos_90, 0, sin_90, -L/2],
+                                                              [0, 1, 0, 0],
+                                                              [-sin_90, 0, cos_90, -W/2],
+                                                              [0, 0, 0, 1]]))
 
-        angles = np.zeros((4, 3))
+        return [front_left_transform, front_right_transform, back_left_transform, back_right_transform]
 
-        angles[0] = self.leg_ik(np.linalg.inv(leg_transforms[0]).dot(foot_positions[0]))
-        angles[1] = self.leg_ik(mirror_matrix.dot(np.linalg.inv(leg_transforms[1]).dot(foot_positions[1])))
-        angles[2] = self.leg_ik(np.linalg.inv(leg_transforms[2]).dot(foot_positions[2]))
-        angles[3] = self.leg_ik(mirror_matrix.dot(np.linalg.inv(leg_transforms[3]).dot(foot_positions[3])))
+    def solve_complete_inverse_kinematics(self, foot_target_positions, body_pos, body_orient):
+        roll, pitch, yaw = body_orient
+        x_position, y_position, z_position = body_pos
 
-        return angles
+        leg_coordinate_transforms = self.compute_body_transformation(roll, pitch, yaw, x_position, y_position, z_position)
+
+        leg_mirror_transform = np.array([[-1, 0, 0, 0],
+                                       [0, 1, 0, 0],
+                                       [0, 0, 1, 0],
+                                       [0, 0, 0, 1]])
+
+        joint_angle_solutions = np.zeros((4, 3))
+
+        joint_angle_solutions[0] = self.calculate_inverse_kinematics_single_leg(
+            np.linalg.inv(leg_coordinate_transforms[0]).dot(foot_target_positions[0]))
+
+        joint_angle_solutions[1] = self.calculate_inverse_kinematics_single_leg(
+            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[1]).dot(foot_target_positions[1])))
+
+        joint_angle_solutions[2] = self.calculate_inverse_kinematics_single_leg(
+            np.linalg.inv(leg_coordinate_transforms[2]).dot(foot_target_positions[2]))
+
+        joint_angle_solutions[3] = self.calculate_inverse_kinematics_single_leg(
+            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[3]).dot(foot_target_positions[3])))
+
+        return joint_angle_solutions
 
     def init_ik(self, foot_positions):
-        ax = setup_3d_view(200)
-        ax.view_init(elev=12., azim=28)
+        visualization_axis = create_3d_plot(200)
+        visualization_axis.view_init(elev=12., azim=28)
 
-        self.joint_angles = self.calc_ik(foot_positions, (0, 0, 0), (0, 0, 0))
-        self.visualize_robot(foot_positions, (0, 0, 0), (0, 0, 0))
+        self.computed_angles = np.zeros((4, 3))
+        for i in range(4):
+            self.computed_angles[i] = self.calculate_inverse_kinematics_single_leg(foot_positions[i])
 
-        return self.joint_angles
+        return self.computed_angles
 
-    def visualize_robot(self, foot_positions, body_position, body_rotation):
-        roll, pitch, yaw = body_rotation
-        x_pos, y_pos, z_pos = body_position
+    def render_robot_structure(self, foot_positions, body_pos, body_orient):
+        roll, pitch, yaw = body_orient
+        x_position, y_position, z_position = body_pos
 
-        home_point = [0, 0, 0, 1]
-        leg_transforms = self.body_ik(roll, pitch, yaw, x_pos, y_pos, z_pos)
-        corner_points = [transform.dot(home_point) for transform in leg_transforms]
+        origin_point = [0, 0, 0, 1]
+        leg_transforms = self.compute_body_transformation(roll, pitch, yaw, x_position, y_position, z_position)
+        body_corner_points = [transform.dot(origin_point) for transform in leg_transforms]
 
-        body_outline = [corner_points[i] for i in [0, 1, 3, 2, 0]]
+        body_frame_outline = [body_corner_points[i] for i in [0, 1, 3, 2, 0]]
 
-        plt.plot([p[0] for p in body_outline],
-                [p[2] for p in body_outline],
-                [p[1] for p in body_outline], 'bo-', lw=2)
+        plt.plot([p[0] for p in body_frame_outline],
+                [p[2] for p in body_frame_outline],
+                [p[1] for p in body_frame_outline], 'bo-', lw=2)
 
-        self.render_leg_pair(leg_transforms[0], leg_transforms[1],
-                            foot_positions[0], foot_positions[1],
-                            self.leg_front)
+        self.visualize_leg_pair(leg_transforms[0], leg_transforms[1],
+                              foot_positions[0], foot_positions[1],
+                              self.front_leg_index)
 
-        self.render_leg_pair(leg_transforms[2], leg_transforms[3],
-                            foot_positions[2], foot_positions[3],
-                            self.leg_back)
+        self.visualize_leg_pair(leg_transforms[2], leg_transforms[3],
+                              foot_positions[2], foot_positions[3],
+                              self.back_leg_index)
 
-    def render_leg_pair(self, left_transform, right_transform, left_foot, right_foot, leg_group):
+    def visualize_leg_pair(self, left_leg_transform, right_leg_transform, left_foot_pos, right_foot_pos, leg_pair_index):
         mirror_matrix = np.array([[-1, 0, 0, 0],
-                                 [0, 1, 0, 0],
-                                 [0, 0, 1, 0],
-                                 [0, 0, 0, 1]])
+                                [0, 1, 0, 0],
+                                [0, 0, 1, 0],
+                                [0, 0, 0, 1]])
 
-        left_angles = self.leg_ik(np.linalg.inv(left_transform).dot(left_foot))
-        right_angles = self.leg_ik(mirror_matrix.dot(np.linalg.inv(right_transform).dot(right_foot)))
+        left_leg_angles = self.calculate_inverse_kinematics_single_leg(
+            np.linalg.inv(left_leg_transform).dot(left_foot_pos))
+        right_leg_angles = self.calculate_inverse_kinematics_single_leg(
+            mirror_matrix.dot(np.linalg.inv(right_leg_transform).dot(right_foot_pos)))
 
-        self.joint_angles[leg_group + self.leg_left] = np.array(left_angles)
-        self.joint_angles[leg_group + self.leg_right] = np.array(right_angles)
+        self.computed_angles[leg_pair_index + self.left_leg_index] = np.array(left_leg_angles)
+        self.computed_angles[leg_pair_index + self.right_leg_index] = np.array(right_leg_angles)
 
-        left_points = [left_transform.dot(point) for point in self.leg_fk(left_angles)]
-        right_points = [right_transform.dot(mirror_matrix.dot(point)) for point in self.leg_fk(right_angles)]
+        left_joint_positions = [left_leg_transform.dot(point) for point in self.forward_kinematics_dh_method(left_leg_angles)]
+        right_joint_positions = [right_leg_transform.dot(mirror_matrix.dot(point)) for point in self.forward_kinematics_dh_method(right_leg_angles)]
 
-        self.draw_leg_structure(left_points)
-        self.draw_leg_structure(right_points)
+        self.plot_leg_links(left_joint_positions)
+        self.plot_leg_links(right_joint_positions)
 
-    def draw_leg_structure(self, joint_points):
-        plt.plot([p[0] for p in joint_points],
-                [p[2] for p in joint_points],
-                [p[1] for p in joint_points], 'k-', lw=3)
+    def plot_leg_links(self, joint_coordinate_list):
+        plt.plot([p[0] for p in joint_coordinate_list],
+                [p[2] for p in joint_coordinate_list],
+                [p[1] for p in joint_coordinate_list], 'k-', lw=3)
 
-        plt.plot([joint_points[0][0]], [joint_points[0][2]], [joint_points[0][1]], 'bo', lw=2)
-        plt.plot([joint_points[4][0]], [joint_points[4][2]], [joint_points[4][1]], 'ro', lw=2)
+        plt.plot([joint_coordinate_list[0][0]], [joint_coordinate_list[0][2]], [joint_coordinate_list[0][1]], 'bo', lw=2)
+        plt.plot([joint_coordinate_list[4][0]], [joint_coordinate_list[4][2]], [joint_coordinate_list[4][1]], 'ro', lw=2)
 
     def plot(self):
         plt.show()
 
+    def numerical_validation_test(self):
+        test_foot_positions = np.array([
+            [100, -100, 87.5, 1],
+            [100, -100, -87.5, 1],
+            [-100, -100, 87.5, 1],
+            [-100, -100, -87.5, 1]
+        ])
+
+        print("SpotMicro Validation Test Results:")
+        print(f"Robot Parameters: L1={self.L1}, L2={self.L2}, L3={self.L3}, L4={self.L4}")
+        print(f"Body dimensions: L={self.body_length_L}, W={self.body_width_W}")
+
+        joint_angles = self.solve_complete_inverse_kinematics(test_foot_positions, (0, 0, 0), (0, 0, 0))
+        joint_angles_degrees = joint_angles * 180/pi
+
+        print("\nFoot positions and calculated joint angles:")
+        leg_names = ["Front Left", "Front Right", "Back Left", "Back Right"]
+
+        for i in range(4):
+            foot_pos = test_foot_positions[i]
+            angles_deg = joint_angles_degrees[i]
+
+            print(f"\n{leg_names[i]}:")
+            print(f"  Foot position: x={foot_pos[0]}, y={foot_pos[1]}, z={foot_pos[2]}")
+            print(f"  Joint angles: θ1={angles_deg[0]:.1f}°, θ2={angles_deg[1]:.1f}°, θ3={angles_deg[2]:.1f}°")
+
+            # Check if angles are in reasonable range
+            valid_angles = all(-180 <= angle <= 180 for angle in angles_deg)
+            print(f"  Valid range (-180° to 180°): {valid_angles}")
+
+            if not valid_angles:
+                out_of_range = [f"θ{j+1}={angles_deg[j]:.1f}°" for j in range(3) if not (-180 <= angles_deg[j] <= 180)]
+                print(f"  Out of range: {', '.join(out_of_range)}")
+
+        # Check overall validity
+        all_valid = all(all(-180 <= angle <= 180 for angle in leg) for leg in joint_angles_degrees)
+
+        print(f"\nOverall validation: {'PASSED' if all_valid else 'FAILED'}")
+        if all_valid:
+            print("All joint angles are within reasonable servo limits (-180° to 180°)")
+        else:
+            print("Some joint angles exceed reasonable servo limits")
+
+        # Compare with init_ik method
+        print("\nComparing with init_ik() method:")
+        init_ik_angles = self.init_ik(test_foot_positions)
+        init_ik_degrees = init_ik_angles * 180/pi
+
+        max_difference = np.max(np.abs(joint_angles_degrees - init_ik_degrees))
+        print(f"Maximum difference between methods: {max_difference:.3f}°")
+
+        if max_difference < 0.1:
+            print("Both methods produce consistent results")
+        else:
+            print("Significant difference detected between methods")
+
+        return joint_angles_degrees
+
 
 if __name__ == "__main__":
-    foot_positions = np.array([[100, -100, 100, 1],
-                              [100, -100, -100, 1],
-                              [-100, -100, 100, 1],
-                              [-100, -100, -100, 1]])
+    test_foot_positions = np.array([[100, -100, 100, 1],
+                                  [100, -100, -100, 1],
+                                  [-100, -100, 100, 1],
+                                  [-100, -100, -100, 1]])
 
-    robot_kinematics = QuadrupedKinematics()
-    calculated_angles = robot_kinematics.init_ik(foot_positions)
-    robot_kinematics.plot()
+    kinematics_engine = DHParameterSolver()
+    computed_joint_angles = kinematics_engine.init_ik(test_foot_positions)
+
+    kinematics_engine.numerical_validation_test()
+
+    kinematics_engine.plot()
