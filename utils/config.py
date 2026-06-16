@@ -1,5 +1,14 @@
+import os
 
-import board
+try:
+    import board
+    I2C_SCL = board.SCL_1
+    I2C_SDA = board.SDA_1
+except ImportError:
+    I2C_SCL = None
+    I2C_SDA = None
+
+BASE_DIR = os.path.expanduser('~')
 
 PCA9685_FRONT_LEGS = 0x40
 PCA9685_BACK_LEGS = 0x41
@@ -10,9 +19,6 @@ ADS1115_MQ2_2 = 0x49
 
 SHT31_ADDRESS = 0x44
 MPU6050_ADDRESS = 0x68
-
-I2C_SCL = board.SCL_1
-I2C_SDA = board.SDA_1
 
 PWM_FREQUENCY = 60
 PWM_MIN_PULSE = 460
@@ -120,8 +126,8 @@ KB_YAW_STEP = 3.0
 
 MATH_PI_DIVISOR = 180
 
-DATASET_BASE_PATH = "/Users/dongjulee/Documents/AIdatasets/wildfire-dataset"
-DATASET_OUTPUT_PATH = "/Users/dongjulee/Documents/AIdatasets/wildfire-dataset/unified_dataset"
+DATASET_BASE_PATH = os.path.join(BASE_DIR, "Documents", "AIdatasets", "wildfire-dataset")
+DATASET_OUTPUT_PATH = os.path.join(BASE_DIR, "Documents", "AIdatasets", "wildfire-dataset", "unified_dataset")
 
 KB_TEST_SLEEP_TIME = 1
 
@@ -129,3 +135,36 @@ ULTRASONIC_DISTANCE_MULTIPLIER = 17150
 DIRECTION_ANGLE_MULTIPLIER = 90
 DEFAULT_DIRECTION_VALUE = 0.0
 SERVO_TEST_ENDPOINT_VALUES = [[100, -100, 87.5, 1], [100, -100, -87.5, 1], [-100, -100, 87.5, 1], [-100, -100, -87.5, 1]]
+
+PATROL_ZONE = []
+PATROL_ZONE_MAX_POINTS = 4
+
+GPS_READ_MAX_ATTEMPTS = 10
+
+SENSOR_READ_TIMEOUT = 5.0
+SENSOR_CHANNEL_DIVISOR = 2
+
+LIDAR_READ_TIMEOUT = 10.0
+
+SERVO_MAX_ANGLE = 180
+SERVO_MIN_ANGLE = 0
+SERVO_ANGLE_ADJUSTMENT = 1
+
+DATASET_TRAIN_RATIO = 0.8
+DATASET_VAL_RATIO = 0.1
+
+AIHUB_DATASET_SUBPATH = "regional-safety-disaster-wildfire/01-1.official-open-data"
+WANDB_PROJECT = "wildfire-detection"
+WANDB_ENTITY = "ai-team"
+TRAIN_DATA_YAML = "/workspace/wildfire-dataset/data.yaml"
+TRAIN_OUTPUT_DIR = "/workspace/runs"
+
+KINEMATICS_L1_DEFAULT = 50
+KINEMATICS_L2_DEFAULT = 20
+KINEMATICS_L3_DEFAULT = 100
+KINEMATICS_L4_DEFAULT = 100
+KINEMATICS_L_DEFAULT = 140
+KINEMATICS_W_DEFAULT = 75
+KINEMATICS_HEIGHT_DEFAULT = -100
+KINEMATICS_BODY_POS_DEFAULT = (0, 100, 0)
+KINEMATICS_BODY_ROT_DEFAULT = (0, 0, 0)

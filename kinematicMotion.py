@@ -1,186 +1,188 @@
-from utils.config import *
+from utils.config import (GAIT_STEP_GAIN, GAIT_MAX_SL, GAIT_BODY_POS, GAIT_BODY_ROT,
+                         GAIT_TIMING, GAIT_INITIAL_VALUES, GAIT_FOOT_POSITIONS,
+                         GAIT_RC, GAIT_ANGLE_STEP, GAIT_END_Y, GAIT_TOTAL_TIME_CALC,
+                         MATH_PI_DIVISOR, STEP_HEIGHT, FORWARD_DISTANCE, BACKWARD_DISTANCE,
+                         ROBOT_BODY_HEIGHT)
 import time
 import numpy as np
 import math
-import logging
 
-class KinematicLegMotion:
+class LegMotionController:
 
-    def __init__(self, LLp):
-        self.rtime = time.time()
-        self.running = False
-        self.LLp = LLp
+    def __init__(self, initial_position):
+        self.current_time = time.time()
+        self.is_active = False
+        self.leg_position = initial_position
 
-    def moveTo(self, newLLp, rtime, func=None):
-        if self.running:
-            print("Movement already running, please try again later.")
+    def initiate_move(self, target_position, duration_ms, motion_func=None):
+        if self.is_active:
+            print("Motion already in progress, please wait.")
             return False
 
-        self.startTime = time.time()
-        self.startLLp = self.LLp
-        self.func = func
-        self.targetLLp = newLLp
-        self.endTime = time.time() + rtime / 1000
-        self.running = True
+        self.motion_start_time = time.time()
+        self.initial_position = self.leg_position
+        self.motion_function = motion_func
+        self.target_position = target_position
+        self.motion_end_time = time.time() + duration_ms / 1000
+        self.is_active = True
         return True
 
-    def update(self):
-        diff = time.time() - self.startTime
-        ldiff = self.targetLLp - self.startLLp
-        tdiff = self.endTime - self.startTime
+    def refresh_position(self):
+        elapsed_time = time.time() - self.motion_start_time
+        position_delta = self.target_position - self.initial_position
+        total_duration = self.motion_end_time - self.motion_start_time
 
         try:
-            p = diff / tdiff
+            progress_ratio = elapsed_time / total_duration
         except ZeroDivisionError:
-            p = 1
+            progress_ratio = 1
 
-        if time.time() > self.endTime and self.running:
-            self.running = False
-            p = 1
+        if time.time() > self.motion_end_time and self.is_active:
+            self.is_active = False
+            progress_ratio = 1
 
-        self.LLp = self.startLLp + ldiff * p
+        self.leg_position = self.initial_position + position_delta * progress_ratio
 
-        if self.func:
-            self.LLp = self.func(p, self.LLp)
+        if self.motion_function:
+            self.leg_position = self.motion_function(progress_ratio, self.leg_position)
 
-    def step(self):
-        if self.running:
-            self.update()
-        return self.LLp
+    def execute_step(self):
+        if self.is_active:
+            self.refresh_position()
+        return self.leg_position
 
-class KinematicMotion:
+class QuadrupedMotionManager:
 
-    def __init__(self, Lp):
-        self.Lp = Lp
-        self.legs = [KinematicLegMotion(Lp[x]) for x in range(4)]
+    def __init__(self, leg_positions):
+        self.leg_positions = leg_positions
+        self.leg_controllers = [LegMotionController(leg_positions[i]) for i in range(4)]
 
-    def moveLegsTo(self, newLp, rtime):
-        [self.legs[x].moveTo(newLp[x], rtime) for x in range(4)]
+    def move_all_legs(self, new_positions, duration_ms):
+        [self.leg_controllers[i].initiate_move(new_positions[i], duration_ms) for i in range(4)]
 
-    def moveLegTo(self, leg, newLLp, rtime, func=None):
-        return self.legs[leg].moveTo(newLLp, rtime, func)
+    def move_single_leg(self, leg_index, new_position, duration_ms, motion_func=None):
+        return self.leg_controllers[leg_index].initiate_move(new_position, duration_ms, motion_func)
 
-    def step(self):
-        return [x.step() for x in self.legs]
+    def execute_motion_step(self):
+        return [controller.execute_step() for controller in self.leg_controllers]
 
-
-class TrottingGait:
+class QuadrupedGaitPattern:
 
     def __init__(self):
-        self.step_gain = GAIT_STEP_GAIN
-        self.maxSl = GAIT_MAX_SL
+        self.stride_gain = GAIT_STEP_GAIN
+        self.max_stride_length = GAIT_MAX_SL
 
-        self.bodyPos = GAIT_BODY_POS
-        self.bodyRot = GAIT_BODY_ROT
+        self.body_position = GAIT_BODY_POS
+        self.body_rotation = GAIT_BODY_ROT
 
-        self.t0 = GAIT_TIMING[0]
-        self.t1 = GAIT_TIMING[1]
-        self.t2 = GAIT_TIMING[2]
-        self.t3 = GAIT_TIMING[3]
+        self.phase_0_time = GAIT_TIMING[0]
+        self.phase_1_time = GAIT_TIMING[1]
+        self.phase_2_time = GAIT_TIMING[2]
+        self.phase_3_time = GAIT_TIMING[3]
 
-        self.Sl = GAIT_INITIAL_VALUES[0]
-        self.Sw = GAIT_INITIAL_VALUES[1]
-        self.Sh = STEP_HEIGHT
-        self.Sa = GAIT_INITIAL_VALUES[2]
+        self.stride_length = GAIT_INITIAL_VALUES[0]
+        self.stride_width = GAIT_INITIAL_VALUES[1]
+        self.lift_height = STEP_HEIGHT
+        self.stride_angle = GAIT_INITIAL_VALUES[2]
 
-        self.Spf = GAIT_FOOT_POSITIONS[0]
-        self.Spr = GAIT_FOOT_POSITIONS[1]
+        self.front_spacing = GAIT_FOOT_POSITIONS[0]
+        self.rear_spacing = GAIT_FOOT_POSITIONS[1]
 
-        self.Fo = FORWARD_DISTANCE
-        self.Ro = abs(BACKWARD_DISTANCE)
+        self.forward_offset = FORWARD_DISTANCE
+        self.rear_offset = abs(BACKWARD_DISTANCE)
 
-        self.Rc = GAIT_RC
-    def calcLeg(self, t, x, y, z):
-        startLp = np.array([x - self.Sl/2.0, y, z - self.Sw, 1])
-        endY = GAIT_END_Y
-        endLp = np.array([x + self.Sl/2, y + endY, z + self.Sw, 1])
+        self.rotation_center = GAIT_RC
 
-        if t < self.t0:
-            return startLp
+    def compute_leg_trajectory(self, time_param, x_pos, y_pos, z_pos):
+        start_position = np.array([x_pos - self.stride_length/2.0, y_pos, z_pos - self.stride_width, 1])
+        end_y_position = GAIT_END_Y
+        end_position = np.array([x_pos + self.stride_length/2, y_pos + end_y_position, z_pos + self.stride_width, 1])
 
-        elif t < self.t0 + self.t1:
-            td = t - self.t0
+        if time_param < self.phase_0_time:
+            return start_position
+
+        elif time_param < self.phase_0_time + self.phase_1_time:
+            delta_time = time_param - self.phase_0_time
             try:
-                tp = td / self.t1
+                time_progress = delta_time / self.phase_1_time
             except ZeroDivisionError:
-                tp = 0
+                time_progress = 0
 
-            diffLp = endLp - startLp
-            curLp = startLp + diffLp * tp
+            position_difference = end_position - start_position
+            current_position = start_position + position_difference * time_progress
 
             try:
-                psi = -((math.pi/MATH_PI_DIVISOR*self.Sa)/2) + (math.pi/MATH_PI_DIVISOR*self.Sa)*tp
+                rotation_angle = -((math.pi/MATH_PI_DIVISOR*self.stride_angle)/2) + (math.pi/MATH_PI_DIVISOR*self.stride_angle)*time_progress
             except (ZeroDivisionError, ValueError):
-                psi = 0
+                rotation_angle = 0
 
             try:
-                Ry = np.array([[np.cos(psi), 0, np.sin(psi), 0],
-                              [0, 1, 0, 0],
-                              [-np.sin(psi), 0, np.cos(psi), 0],
-                              [0, 0, 0, 1]])
+                rotation_matrix = np.array([[np.cos(rotation_angle), 0, np.sin(rotation_angle), 0],
+                                          [0, 1, 0, 0],
+                                          [-np.sin(rotation_angle), 0, np.cos(rotation_angle), 0],
+                                          [0, 0, 0, 1]])
             except (ValueError, OverflowError):
-                Ry = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
+                rotation_matrix = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
 
             try:
-                curLp = Ry.dot(curLp)
+                current_position = rotation_matrix.dot(current_position)
             except (ValueError, np.linalg.LinAlgError):
-                logging.warning('Matrix operation failed, using original position')
-                curLp = startLp
-            return curLp
+                current_position = start_position
+            return current_position
 
-        elif t < self.t0 + self.t1 + self.t2:
-            return endLp
+        elif time_param < self.phase_0_time + self.phase_1_time + self.phase_2_time:
+            return end_position
 
-        elif t < self.t0 + self.t1 + self.t2 + self.t3:
-            td = t - (self.t0 + self.t1 + self.t2)
+        elif time_param < self.phase_0_time + self.phase_1_time + self.phase_2_time + self.phase_3_time:
+            delta_time = time_param - (self.phase_0_time + self.phase_1_time + self.phase_2_time)
             try:
-                tp = td / self.t3
+                time_progress = delta_time / self.phase_3_time
             except ZeroDivisionError:
-                tp = 0
+                time_progress = 0
 
-            diffLp = startLp - endLp
-            curLp = endLp + diffLp * tp
+            position_difference = start_position - end_position
+            current_position = end_position + position_difference * time_progress
 
             try:
-                curLp[1] += self.Sh * math.sin(math.pi * tp)
+                current_position[1] += self.lift_height * math.sin(math.pi * time_progress)
             except (ValueError, OverflowError, IndexError):
                 pass
-            return curLp
+            return current_position
 
-    def stepLength(self, len):
-        self.Sl = len
+    def set_stride_length(self, length):
+        self.stride_length = length
 
-    def positions(self, t, kb_offset={}):
-        spf = self.Spf
-        spr = self.Spr
+    def calculate_leg_positions(self, time_value, keyboard_input={}):
+        front_foot_spacing = self.front_spacing
+        rear_foot_spacing = self.rear_spacing
 
-        if list(kb_offset.values()) == [0.0, 0.0, 0.0]:
-            self.Sl = 0.0
-            self.Sw = 0.0
-            self.Sa = 0.0
+        if list(keyboard_input.values()) == [0.0, 0.0, 0.0]:
+            self.stride_length = 0.0
+            self.stride_width = 0.0
+            self.stride_angle = 0.0
         else:
-            self.Sl = kb_offset['IDstepLength']
-            self.Sw = kb_offset['IDstepWidth']
-            self.Sa = kb_offset['IDstepAlpha']
+            self.stride_length = keyboard_input['IDstepLength']
+            self.stride_width = keyboard_input['IDstepWidth']
+            self.stride_angle = keyboard_input['IDstepAlpha']
 
-        Tt = (self.t0 + self.t1 + self.t2 + self.t3)
-        Tt2 = Tt / 2
-        rd = 0
+        total_period = (self.phase_0_time + self.phase_1_time + self.phase_2_time + self.phase_3_time)
+        half_period = total_period / 2
+        phase_offset = 0
 
-        td = (t * GAIT_TOTAL_TIME_CALC) % Tt
-        t2 = (t * GAIT_TOTAL_TIME_CALC - Tt2) % Tt
-        rtd = (t * GAIT_TOTAL_TIME_CALC - rd) % Tt
-        rt2 = (t * GAIT_TOTAL_TIME_CALC - Tt2 - rd) % Tt
+        time_1 = (time_value * GAIT_TOTAL_TIME_CALC) % total_period
+        time_2 = (time_value * GAIT_TOTAL_TIME_CALC - half_period) % total_period
+        rear_time_1 = (time_value * GAIT_TOTAL_TIME_CALC - phase_offset) % total_period
+        rear_time_2 = (time_value * GAIT_TOTAL_TIME_CALC - half_period - phase_offset) % total_period
 
-        Fx = self.Fo
-        Rx = -1 * self.Ro
-        Fy = ROBOT_BODY_HEIGHT
-        Ry = ROBOT_BODY_HEIGHT
+        front_x_position = self.forward_offset
+        rear_x_position = -1 * self.rear_offset
+        front_y_position = ROBOT_BODY_HEIGHT
+        rear_y_position = ROBOT_BODY_HEIGHT
 
-        r = np.array([
-            self.calcLeg(td, Fx, Fy, spf),
-            self.calcLeg(t2, Fx, Fy, -spf),
-            self.calcLeg(rt2, Rx, Ry, spr),
-            self.calcLeg(rtd, Rx, Ry, -spr)
+        leg_positions = np.array([
+            self.compute_leg_trajectory(time_1, front_x_position, front_y_position, front_foot_spacing),
+            self.compute_leg_trajectory(time_2, front_x_position, front_y_position, -front_foot_spacing),
+            self.compute_leg_trajectory(rear_time_2, rear_x_position, rear_y_position, rear_foot_spacing),
+            self.compute_leg_trajectory(rear_time_1, rear_x_position, rear_y_position, -rear_foot_spacing)
         ])
-        return r
+        return leg_positions
