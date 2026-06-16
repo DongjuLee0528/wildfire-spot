@@ -1,4 +1,5 @@
-from utils.config import *
+from utils.config import (KB_KEY_VALUES, KB_CONTROL_OFFSET, FORWARD_DISTANCE,
+                         KB_X_STEP_DIVISOR, KB_Y_STEP, KB_YAW_STEP, KB_TEST_SLEEP_TIME)
 import time
 import keyboard
 from multiprocessing import Process, Queue
@@ -39,6 +40,12 @@ class RobotKeyboardController:
 
         self.movement_data.put(current_data)
         self.robot_commands.put(command_data)
+
+    def cleanup(self):
+        if hasattr(self, 'movement_data'):
+            self.movement_data.close()
+        if hasattr(self, 'robot_commands'):
+            self.robot_commands.close()
 
     def start_listening(self, process_id, movement_queue, command_queue):
         key_pressed = False
@@ -92,7 +99,11 @@ if __name__ == "__main__":
         keyboard_process.start()
 
         monitor_commands(2, controller.robot_commands)
-    except Exception as e:
-        print(e)
+    except (ImportError, OSError, KeyboardInterrupt):
+        print("Exception occurred")
     finally:
         print("Done... ")
+        if 'keyboard_process' in locals():
+            keyboard_process.terminate()
+            keyboard_process.join()
+

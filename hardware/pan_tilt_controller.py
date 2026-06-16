@@ -1,4 +1,4 @@
-from utils.config import *
+from utils.config import CAMERA_CENTER_ANGLE, CAMERA_SCAN_ANGLES, TIME_SLEEP_SCAN, SERVO_ANGLE_MIN, SERVO_ANGLE_MAX
 from hardware.servo_controller import Controllers
 import time
 

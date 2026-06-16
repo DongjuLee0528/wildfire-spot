@@ -3,7 +3,8 @@ import json
 import pandas as pd
 import random
 from typing import Dict, List, Tuple
-from utils.config import DATASET_BASE_PATH, DATASET_OUTPUT_PATH
+from utils.config import (DATASET_BASE_PATH, DATASET_OUTPUT_PATH, DATASET_TRAIN_RATIO,
+                         DATASET_VAL_RATIO, AIHUB_DATASET_SUBPATH)
 
 BASE = DATASET_BASE_PATH
 OUTPUT_DIR = DATASET_OUTPUT_PATH
@@ -30,29 +31,35 @@ class DatasetProcessor:
             if not os.path.exists(split_file):
                 continue
 
-            with open(split_file, 'r') as f:
-                for line in f:
-                    img_path = line.strip()
-                    if img_path.startswith('images/'):
-                        img_path = img_path[7:]
+            try:
+                with open(split_file, 'r') as f:
+                    for line in f:
+                        img_path = line.strip()
+                        if img_path.startswith('images/'):
+                            img_path = img_path[7:]
 
-                    src_img = f"{fasdd_path}/images/{img_path}"
-                    src_label = f"{fasdd_path}/annotations/YOLO/labels/{img_path.replace('.jpg', '.txt')}"
+                        src_img = f"{fasdd_path}/images/{img_path}"
+                        src_label = f"{fasdd_path}/annotations/YOLO/labels/{img_path.replace('.jpg', '.txt')}"
 
-                    if os.path.exists(src_img) and os.path.exists(src_label):
-                        self.all_image_paths.append((src_img, src_label))
+                        if os.path.exists(src_img) and os.path.exists(src_label):
+                            self.all_image_paths.append((src_img, src_label))
 
-                        with open(src_label, 'r') as lf:
-                            content = lf.read().strip()
-                            if content:
-                                lines = content.split('\n')
-                                for line in lines:
-                                    if line.strip():
-                                        class_id = int(line.split()[0])
-                                        if class_id == 0:
-                                            self.stats['fire_images'] += 1
-                                        elif class_id == 1:
-                                            self.stats['smoke_images'] += 1
+                            try:
+                                with open(src_label, 'r') as lf:
+                                    content = lf.read().strip()
+                                    if content:
+                                        lines = content.split('\n')
+                                        for label_line in lines:
+                                            if label_line.strip():
+                                                class_id = int(label_line.split()[0])
+                                                if class_id == 0:
+                                                    self.stats['fire_images'] += 1
+                                                elif class_id == 1:
+                                                    self.stats['smoke_images'] += 1
+                            except (IOError, ValueError) as e:
+                                print(f"Error reading label file {src_label}: {e}")
+            except IOError as e:
+                print(f"Error reading split file {split_file}: {e}")
 
     def process_fasdd_uav(self):
         print("Processing FASDD_UAV dataset...")
@@ -63,29 +70,35 @@ class DatasetProcessor:
             if not os.path.exists(split_file):
                 continue
 
-            with open(split_file, 'r') as f:
-                for line in f:
-                    img_path = line.strip()
-                    if img_path.startswith('./images/'):
-                        img_path = img_path[9:]
+            try:
+                with open(split_file, 'r') as f:
+                    for line in f:
+                        img_path = line.strip()
+                        if img_path.startswith('./images/'):
+                            img_path = img_path[9:]
 
-                    src_img = f"{fasdd_uav_path}/images/{img_path}"
-                    src_label = f"{fasdd_uav_path}/annotations/YOLO_UAV/labels/{img_path.replace('.jpg', '.txt')}"
+                        src_img = f"{fasdd_uav_path}/images/{img_path}"
+                        src_label = f"{fasdd_uav_path}/annotations/YOLO_UAV/labels/{img_path.replace('.jpg', '.txt')}"
 
-                    if os.path.exists(src_img) and os.path.exists(src_label):
-                        self.all_image_paths.append((src_img, src_label))
+                        if os.path.exists(src_img) and os.path.exists(src_label):
+                            self.all_image_paths.append((src_img, src_label))
 
-                        with open(src_label, 'r') as lf:
-                            content = lf.read().strip()
-                            if content:
-                                lines = content.split('\n')
-                                for line in lines:
-                                    if line.strip():
-                                        class_id = int(line.split()[0])
-                                        if class_id == 0:
-                                            self.stats['fire_images'] += 1
-                                        elif class_id == 1:
-                                            self.stats['smoke_images'] += 1
+                            try:
+                                with open(src_label, 'r') as lf:
+                                    content = lf.read().strip()
+                                    if content:
+                                        lines = content.split('\n')
+                                        for label_line in lines:
+                                            if label_line.strip():
+                                                class_id = int(label_line.split()[0])
+                                                if class_id == 0:
+                                                    self.stats['fire_images'] += 1
+                                                elif class_id == 1:
+                                                    self.stats['smoke_images'] += 1
+                            except (IOError, ValueError) as e:
+                                print(f"Error reading label file {src_label}: {e}")
+            except IOError as e:
+                print(f"Error reading split file {split_file}: {e}")
 
     def process_pyronear(self):
         print("Processing PyroNear dataset...")
@@ -112,43 +125,46 @@ class DatasetProcessor:
                             label_path = f"{temp_dir}/labels/{img_name.replace('.jpg', '.txt')}"
 
                             if isinstance(img_data, dict) and 'bytes' in img_data:
-                                with open(img_path, 'wb') as f:
-                                    f.write(img_data['bytes'])
+                                try:
+                                    with open(img_path, 'wb') as f:
+                                        f.write(img_data['bytes'])
 
-                                from PIL import Image
-                                img = Image.open(img_path)
-                                img_width, img_height = img.size
+                                    from PIL import Image
+                                    img = Image.open(img_path)
+                                    img_width, img_height = img.size
 
-                                has_objects = False
-                                with open(label_path, 'w') as f:
-                                    if objects and 'bbox' in objects:
-                                        for bbox in objects['bbox']:
-                                            x, y, width, height = bbox
-                                            cx = (x + width/2) / img_width
-                                            cy = (y + height/2) / img_height
-                                            w = width / img_width
-                                            h = height / img_height
-                                            f.write(f"1 {cx} {cy} {w} {h}\n")
-                                            has_objects = True
+                                    has_objects = False
+                                    with open(label_path, 'w') as f:
+                                        if objects and 'bbox' in objects:
+                                            for bbox in objects['bbox']:
+                                                x, y, width, height = bbox
+                                                cx = (x + width/2) / img_width
+                                                cy = (y + height/2) / img_height
+                                                w = width / img_width
+                                                h = height / img_height
+                                                f.write(f"1 {cx} {cy} {w} {h}\n")
+                                                has_objects = True
 
-                                if has_objects:
-                                    self.all_image_paths.append((img_path, label_path))
-                                    self.stats['smoke_images'] += 1
+                                    if has_objects:
+                                        self.all_image_paths.append((img_path, label_path))
+                                        self.stats['smoke_images'] += 1
+                                except (IOError, ValueError) as e:
+                                    print(f"Error processing image {img_path}: {e}")
 
-                except Exception as e:
+                except (IOError, ValueError, KeyError) as e:
                     print(f"Error processing PyroNear file {file}: {e}")
 
     def process_ai_hub(self):
         print("Processing AI Hub dataset...")
-        ai_hub_path = f"{DATASET_BASE_PATH}/265.지역안전재난(산불) 방재의 고도화를 위한 대규모 인공지능 데이터베이스 구축/01-1.정식개방데이터"
+        ai_hub_path = f"{DATASET_BASE_PATH}/{AIHUB_DATASET_SUBPATH}"
 
         aihub_dir = f"{OUTPUT_DIR}/aihub"
         os.makedirs(f"{aihub_dir}/images/train", exist_ok=True)
         os.makedirs(f"{aihub_dir}/labels/train", exist_ok=True)
 
         for split in ['Training', 'Validation']:
-            img_dir = f"{ai_hub_path}/{split}/01.원천데이터"
-            label_dir = f"{ai_hub_path}/{split}/02.라벨링데이터"
+            img_dir = f"{ai_hub_path}/{split}/source-data"
+            label_dir = f"{ai_hub_path}/{split}/labeling-data"
 
             if not os.path.exists(img_dir) or not os.path.exists(label_dir):
                 continue
@@ -221,7 +237,7 @@ class DatasetProcessor:
                                     if has_smoke:
                                         self.stats['smoke_images'] += 1
 
-                        except Exception as e:
+                        except (IOError, ValueError, KeyError) as e:
                             print(f"Error processing AI Hub file {json_path}: {e}")
 
     def split_and_create_files(self):
@@ -230,8 +246,8 @@ class DatasetProcessor:
         random.shuffle(self.all_image_paths)
         total = len(self.all_image_paths)
 
-        train_end = int(total * 0.8)
-        val_end = int(total * 0.9)
+        train_end = int(total * DATASET_TRAIN_RATIO)
+        val_end = int(total * (DATASET_TRAIN_RATIO + DATASET_VAL_RATIO))
 
         train_data = self.all_image_paths[:train_end]
         val_data = self.all_image_paths[train_end:val_end]
