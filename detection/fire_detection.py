@@ -1,8 +1,9 @@
 from utils.config import (MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
-                         DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE)
+                         DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT)
 from hardware.sensor_manager import SensorManager
 from hardware.gps_manager import GPSManager
 from hardware.pan_tilt_controller import PanTiltController
+from utils.logger import WildfireLogger
 import time
 
 
@@ -16,6 +17,7 @@ class FireDetector:
         self.sensor_detected = False
         self.detection_log = []
         self._last_detection_result = False
+        self.logger = WildfireLogger("FireDetector")
 
     def _check_sensor_thresholds(self, sensor_data):
         try:
@@ -37,6 +39,7 @@ class FireDetector:
             return False
 
         except (ValueError, RuntimeError, KeyError) as e:
+            self.logger.log_error("FireDetector._check_sensor_thresholds", str(e))
             return False
 
     def detect_by_sensor(self):
@@ -44,6 +47,7 @@ class FireDetector:
             sensor_data = self.sensor_manager.read_all()
             return self._check_sensor_thresholds(sensor_data)
         except (ValueError, RuntimeError, KeyError) as e:
+            self.logger.log_error("FireDetector.detect_by_sensor", str(e))
             return False
 
     def detect_by_camera(self):
@@ -51,7 +55,7 @@ class FireDetector:
 
     def track_fire_direction(self, sensor_data):
         try:
-            flame_sensors = sensor_data.get('flame', [False, False, False, False])
+            flame_sensors = sensor_data.get('flame', [False] * KY026_COUNT)
 
             if any(flame_sensors):
                 detected_directions = []
@@ -67,6 +71,7 @@ class FireDetector:
             return None
 
         except (ValueError, RuntimeError, KeyError, ZeroDivisionError) as e:
+            self.logger.log_error("FireDetector.track_fire_direction", str(e))
             return None
 
     def log_detection(self, location, direction, sensor_data):
@@ -79,12 +84,13 @@ class FireDetector:
                 "smoke": sensor_data.get('smoke', 0),
                 "temperature": sensor_data.get('temperature', 0.0),
                 "humidity": sensor_data.get('humidity', 0.0),
-                "flame": sensor_data.get('flame', [False, False, False, False])
+                "flame": sensor_data.get('flame', [False] * KY026_COUNT)
             }
             self.detection_log.append(detection_record)
+            self.logger.log_fire_detected(location, sensor_data, direction)
 
         except (ValueError, RuntimeError, KeyError) as e:
-            pass
+            self.logger.log_error("FireDetector", str(e))
 
     def get_strongest_direction(self):
         try:
@@ -95,6 +101,7 @@ class FireDetector:
             return strongest_record['direction']
 
         except (ValueError, KeyError) as e:
+            self.logger.log_error("FireDetector.get_strongest_direction", str(e))
             return None
 
     def is_fire_detected(self):
@@ -123,6 +130,7 @@ class FireDetector:
             return fire_detected
 
         except (ValueError, RuntimeError, KeyError) as e:
+            self.logger.log_error("FireDetector.is_fire_detected", str(e))
             return False
 
     def get_fire_location(self):
@@ -131,4 +139,5 @@ class FireDetector:
                 return self.gps_manager.get_coordinates()
             return None
         except (ValueError, RuntimeError) as e:
+            self.logger.log_error("FireDetector.get_fire_location", str(e))
             return None

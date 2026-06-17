@@ -8,7 +8,11 @@ from utils.config import (WANDB_PROJECT, WANDB_ENTITY, TRAIN_MODEL_PATH, TRAIN_D
                          TRAIN_HSV_V, TRAIN_FLIPUD, TRAIN_FLIPLR)
 
 def install_package(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+    except (subprocess.SubprocessError, OSError) as e:
+        print(f"Failed to install package {package}: {e}")
+        raise
 
 try:
     import ultralytics
@@ -29,7 +33,11 @@ if wandb_api_key:
 from ultralytics import YOLO
 
 def main():
-    wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY)
+    try:
+        wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY)
+    except Exception as e:
+        print(f"Failed to initialize wandb: {e}")
+        print("Continuing without wandb logging")
 
     print("Starting wildfire detection training with YOLOv10s...")
 
