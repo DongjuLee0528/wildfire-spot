@@ -9,6 +9,7 @@ except ImportError:
     I2C_SDA = None
 
 BASE_DIR = os.path.expanduser('~')
+LOG_DIR = "/home/robot/logs"
 
 PCA9685_FRONT_LEGS = 0x40
 PCA9685_BACK_LEGS = 0x41
@@ -57,6 +58,7 @@ KY026_PIN_1 = None
 KY026_PIN_2 = None
 KY026_PIN_3 = None
 KY026_PIN_4 = None
+KY026_COUNT = 4
 
 HCSR04_TRIGGER_PIN = None
 HCSR04_ECHO_PIN = None
