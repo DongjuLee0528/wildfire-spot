@@ -7,7 +7,7 @@ import re
 import json
 from pathlib import Path
 from hardware.gps_manager import GPSManager
-from utils.config import PATROL_ZONE_MAX_POINTS
+from utils.config import PATROL_ZONE_MIN_POINTS
 from utils.logger import WildfireLogger
 
 class KeyboardInput:
@@ -56,7 +56,7 @@ class PatrolZoneCalibrator:
         self._calibration_mode = True
         self._collected_points = []
         self.logger.log_system_state("CALIBRATING")
-        print(f"Calibration mode started. Press SPACE to record GPS coordinates ({PATROL_ZONE_MAX_POINTS} points required)")
+        print(f"Calibration mode started. Press SPACE to record GPS coordinates (minimum {PATROL_ZONE_MIN_POINTS} required, press F to finish)")
 
     def handle_space_key(self):
         if not self._calibration_mode:
@@ -78,8 +78,16 @@ class PatrolZoneCalibrator:
         lat, lon = coordinates[0], coordinates[1]
         print(f"Point {point_number} recorded: ({lat:.6f}, {lon:.6f})")
 
-        if point_number >= PATROL_ZONE_MAX_POINTS:
-            self._complete_calibration()
+    def handle_finish_key(self):
+        if not self._calibration_mode:
+            return
+
+        if len(self._collected_points) < PATROL_ZONE_MIN_POINTS:
+            self.logger.log_error("PatrolZoneCalibrator.handle_finish_key", f"Not enough points: {len(self._collected_points)} < {PATROL_ZONE_MIN_POINTS}")
+            print(f"Need at least {PATROL_ZONE_MIN_POINTS} points, currently have {len(self._collected_points)}")
+            return
+
+        self._complete_calibration()
 
     def _complete_calibration(self):
         self._calibration_mode = False
@@ -138,6 +146,7 @@ def main():
 
         print("Robot Control Interface")
         print("Press 'c' to start patrol zone calibration")
+        print("Press 'f' to finish calibration (during calibration)")
         print("Press 'q' to quit")
 
         while True:
@@ -149,6 +158,9 @@ def main():
                     time.sleep(0.5)
                 elif key == ' ' and calibrator.is_calibration_mode():
                     calibrator.handle_space_key()
+                    time.sleep(0.5)
+                elif key == 'f' and calibrator.is_calibration_mode():
+                    calibrator.handle_finish_key()
                     time.sleep(0.5)
                 elif key == 'q':
                     print("Exiting...")
