@@ -9,7 +9,7 @@ except ImportError:
     I2C_SDA = None
 
 BASE_DIR = os.path.expanduser('~')
-LOG_DIR = "/home/robot/logs"
+LOG_DIR = os.path.join(BASE_DIR, "wildfire_logs")
 
 PCA9685_FRONT_LEGS = 0x40
 PCA9685_BACK_LEGS = 0x41
@@ -139,7 +139,7 @@ DEFAULT_DIRECTION_VALUE = 0.0
 SERVO_TEST_ENDPOINT_VALUES = [[100, -100, 87.5, 1], [100, -100, -87.5, 1], [-100, -100, 87.5, 1], [-100, -100, -87.5, 1]]
 
 PATROL_ZONE = []
-PATROL_ZONE_MAX_POINTS = 4
+PATROL_ZONE_MIN_POINTS = 3
 
 GPS_READ_MAX_ATTEMPTS = 10
 
