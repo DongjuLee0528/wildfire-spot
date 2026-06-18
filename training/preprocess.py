@@ -4,7 +4,7 @@ import pandas as pd
 import random
 from PIL import Image
 from utils.config import (DATASET_ROOT_PATH, DATASET_OUTPUT_PATH, DATASET_TRAIN_RATIO,
-                         DATASET_VAL_RATIO, AIHUB_DATASET_SUBPATH)
+                         DATASET_VAL_RATIO, DATASET_RANDOM_SEED, AIHUB_DATASET_SUBPATH)
 
 BASE = DATASET_ROOT_PATH
 OUTPUT_DIR = DATASET_OUTPUT_PATH
@@ -111,8 +111,8 @@ class DatasetProcessor:
         pyronear_path = f"{BASE}/PyroNear/data"
 
         try:
-            train_files = [f for f in os.listdir(pyronear_path) if f.startswith('train-')]
-            val_files = [f for f in os.listdir(pyronear_path) if f.startswith('val-')]
+            train_files = sorted([f for f in os.listdir(pyronear_path) if f.startswith('train-')])
+            val_files = sorted([f for f in os.listdir(pyronear_path) if f.startswith('val-')])
         except OSError as e:
             print(f"Error reading PyroNear directory {pyronear_path}: {e}")
             return
@@ -181,10 +181,17 @@ class DatasetProcessor:
                 continue
 
             print(f"Building image index for {split}...")
-            img_index = {f: os.path.join(r, f) for r, _, files in os.walk(img_dir) for f in files}
+            img_index = {}
+            for r, dirs, files in os.walk(img_dir):
+                dirs.sort()
+                files.sort()
+                for f in files:
+                    img_index[f] = os.path.join(r, f)
             print(f"Found {len(img_index)} images in {split}")
 
             for root, dirs, files in os.walk(label_dir):
+                dirs.sort()
+                files.sort()
                 for file in files:
                     if file.endswith('.json'):
                         json_path = os.path.join(root, file)
@@ -244,7 +251,8 @@ class DatasetProcessor:
                                     symlink_img_path = f"{aihub_dir}/images/train/{img_name}"
                                     if not os.path.exists(symlink_img_path):
                                         try:
-                                            os.symlink(img_path, symlink_img_path)
+                                            rel_path = os.path.relpath(img_path, os.path.dirname(symlink_img_path))
+                                            os.symlink(rel_path, symlink_img_path)
                                         except OSError as e:
                                             print(f"Error creating symlink {symlink_img_path}: {e}")
                                             continue
@@ -264,7 +272,8 @@ class DatasetProcessor:
         if DATASET_TRAIN_RATIO + DATASET_VAL_RATIO > 1.0:
             raise ValueError(f"Invalid dataset ratios: train={DATASET_TRAIN_RATIO}, val={DATASET_VAL_RATIO}, sum > 1.0")
 
-        random.shuffle(self.all_image_paths)
+        rng = random.Random(DATASET_RANDOM_SEED)
+        rng.shuffle(self.all_image_paths)
         total = len(self.all_image_paths)
 
         train_end = int(total * DATASET_TRAIN_RATIO)
