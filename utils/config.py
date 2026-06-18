@@ -161,6 +161,7 @@ SERVO_ANGLE_ADJUSTMENT = 1
 
 DATASET_TRAIN_RATIO = 0.8
 DATASET_VAL_RATIO = 0.1
+DATASET_RANDOM_SEED = 42
 
 AIHUB_DATASET_SUBPATH = "regional-safety-disaster-wildfire/01-1.official-open-data"
 WANDB_PROJECT = "wildfire-detection"
