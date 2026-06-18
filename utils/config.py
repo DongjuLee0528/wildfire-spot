@@ -128,8 +128,15 @@ KB_YAW_STEP = 3.0
 
 MATH_PI_DIVISOR = 180
 
-DATASET_BASE_PATH = os.path.join(BASE_DIR, "Documents", "AIdatasets", "wildfire-dataset")
-DATASET_OUTPUT_PATH = os.path.join(BASE_DIR, "Documents", "AIdatasets", "wildfire-dataset", "unified_dataset")
+DATASET_ROOT_PATH = os.environ.get(
+    'WILDFIRE_DATASET_ROOT',
+    os.path.join(BASE_DIR, "Documents", "AIdatasets", "wildfire-dataset")
+)
+
+DATASET_OUTPUT_PATH = os.environ.get(
+    'WILDFIRE_DATASET_OUTPUT',
+    os.path.join(DATASET_ROOT_PATH, "unified_dataset")
+)
 
 KB_TEST_SLEEP_TIME = 1
 
@@ -159,8 +166,11 @@ AIHUB_DATASET_SUBPATH = "regional-safety-disaster-wildfire/01-1.official-open-da
 WANDB_PROJECT = "wildfire-detection"
 WANDB_ENTITY = os.environ.get('WANDB_ENTITY', 'dozoo0528-')
 TRAIN_MODEL_PATH = "yolov10s.pt"
-TRAIN_DATA_YAML = "/workspace/wildfire-dataset/data.yaml"
-TRAIN_OUTPUT_DIR = "/workspace/runs"
+TRAIN_DATA_YAML = os.environ.get(
+    'WILDFIRE_TRAIN_DATA_YAML',
+    os.path.join(DATASET_OUTPUT_PATH, "data.yaml")
+)
+TRAIN_OUTPUT_DIR = os.environ.get('WILDFIRE_TRAIN_OUTPUT_DIR', "/workspace/runs")
 TRAIN_EPOCHS = 200
 TRAIN_BATCH_SIZE = 64
 TRAIN_IMAGE_SIZE = 1280
