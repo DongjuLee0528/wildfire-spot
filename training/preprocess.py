@@ -3,10 +3,10 @@ import json
 import pandas as pd
 import random
 from PIL import Image
-from utils.config import (DATASET_BASE_PATH, DATASET_OUTPUT_PATH, DATASET_TRAIN_RATIO,
+from utils.config import (DATASET_ROOT_PATH, DATASET_OUTPUT_PATH, DATASET_TRAIN_RATIO,
                          DATASET_VAL_RATIO, AIHUB_DATASET_SUBPATH)
 
-BASE = DATASET_BASE_PATH
+BASE = DATASET_ROOT_PATH
 OUTPUT_DIR = DATASET_OUTPUT_PATH
 
 class DatasetProcessor:
@@ -167,7 +167,7 @@ class DatasetProcessor:
 
     def process_ai_hub(self):
         print("Processing AI Hub dataset...")
-        ai_hub_path = f"{DATASET_BASE_PATH}/{AIHUB_DATASET_SUBPATH}"
+        ai_hub_path = f"{BASE}/{AIHUB_DATASET_SUBPATH}"
 
         aihub_dir = f"{OUTPUT_DIR}/aihub"
         os.makedirs(f"{aihub_dir}/images/train", exist_ok=True)
