@@ -42,7 +42,8 @@ class DatasetProcessor:
                             img_path = img_path[7:]
 
                         src_img = f"{fasdd_path}/images/{img_path}"
-                        src_label = f"{fasdd_path}/annotations/YOLO/labels/{img_path.replace('.jpg', '.txt')}"
+                        label_name = os.path.splitext(img_path)[0] + '.txt'
+                        src_label = f"{fasdd_path}/annotations/YOLO/labels/{label_name}"
 
                         if os.path.exists(src_img) and os.path.exists(src_label):
                             self.all_image_paths.append((src_img, src_label))
@@ -84,7 +85,8 @@ class DatasetProcessor:
                             img_path = img_path[9:]
 
                         src_img = f"{fasdd_uav_path}/images/{img_path}"
-                        src_label = f"{fasdd_uav_path}/annotations/YOLO_UAV/labels/{img_path.replace('.jpg', '.txt')}"
+                        label_name = os.path.splitext(img_path)[0] + '.txt'
+                        src_label = f"{fasdd_uav_path}/annotations/YOLO_UAV/labels/{label_name}"
 
                         if os.path.exists(src_img) and os.path.exists(src_label):
                             self.all_image_paths.append((src_img, src_label))
@@ -135,7 +137,8 @@ class DatasetProcessor:
 
                             img_name = f"pyronear_{split}_{file}_{idx}.jpg"
                             img_path = f"{temp_dir}/images/{img_name}"
-                            label_path = f"{temp_dir}/labels/{img_name.replace('.jpg', '.txt')}"
+                            label_name = os.path.splitext(img_name)[0] + '.txt'
+                            label_path = f"{temp_dir}/labels/{label_name}"
 
                             if isinstance(img_data, dict) and 'bytes' in img_data:
                                 try:
@@ -218,7 +221,7 @@ class DatasetProcessor:
 
                                 annotations = [ann for ann in data['annotations'] if ann['image_id'] == img_info['id']]
 
-                                label_name = img_name.replace('.jpg', '.txt')
+                                label_name = os.path.splitext(img_name)[0] + '.txt'
                                 label_path = f"{aihub_dir}/labels/train/{label_name}"
 
                                 has_fire = False
