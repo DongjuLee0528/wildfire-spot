@@ -27,7 +27,8 @@ class DatasetProcessor:
             'test_count': 0,
             'symlink_failures': 0,
             'label_copy_failures': 0,
-            'invalid_bbox_skipped': 0
+            'invalid_bbox_skipped': 0,
+            'empty_labels_created': 0
         }
 
     def process_fasdd(self):
@@ -370,11 +371,11 @@ class DatasetProcessor:
                             if line and self._validate_yolo_line(line, unified_img_path, unified_label_path):
                                 valid_lines.append(line + '\n')
 
-                    if not valid_lines:
-                        continue
-
                     with open(unified_label_path, 'w') as dst_f:
                         dst_f.writelines(valid_lines)
+
+                    if not valid_lines:
+                        self.stats['empty_labels_created'] += 1
                 except (IOError, OSError) as e:
                     print(f"Error copying label {src_label_path}: {e}")
                     self.stats['label_copy_failures'] += 1
@@ -488,6 +489,7 @@ class DatasetProcessor:
         print(f"Symlink creation failures: {self.stats['symlink_failures']}")
         print(f"Label copy failures: {self.stats['label_copy_failures']}")
         print(f"Invalid bboxes skipped: {self.stats['invalid_bbox_skipped']}")
+        print(f"Empty label files created (negative samples): {self.stats['empty_labels_created']}")
 
 def main():
     processor = DatasetProcessor()
