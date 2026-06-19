@@ -272,9 +272,15 @@ class DatasetProcessor:
     def split_and_create_files(self):
         print("Creating train/val/test split files...")
 
-        if os.path.exists(OUTPUT_DIR):
-            print(f"Removing previous output directory: {OUTPUT_DIR}")
-            shutil.rmtree(OUTPUT_DIR)
+        print("Cleaning up previous unified dataset outputs...")
+        if os.path.exists(f"{OUTPUT_DIR}/images"):
+            shutil.rmtree(f"{OUTPUT_DIR}/images")
+        if os.path.exists(f"{OUTPUT_DIR}/labels"):
+            shutil.rmtree(f"{OUTPUT_DIR}/labels")
+        for file in ['train.txt', 'val.txt', 'test.txt', 'data.yaml']:
+            file_path = f"{OUTPUT_DIR}/{file}"
+            if os.path.exists(file_path):
+                os.remove(file_path)
 
         if DATASET_TRAIN_RATIO + DATASET_VAL_RATIO > 1.0:
             raise ValueError(f"Invalid dataset ratios: train={DATASET_TRAIN_RATIO}, val={DATASET_VAL_RATIO}, sum > 1.0")
