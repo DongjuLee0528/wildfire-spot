@@ -164,6 +164,15 @@ class DatasetProcessor:
                                                     cy = (y + height/2) / img_height
                                                     w = width / img_width
                                                     h = height / img_height
+
+                                                    if w <= 0 or h <= 0:
+                                                        logger.warning(
+                                                            f"Skipped invalid bbox | image={img_path} | label={label_path} | "
+                                                            f"bbox_line='1 {cx} {cy} {w} {h}' | reason=width/height <= 0"
+                                                        )
+                                                        self.stats['invalid_bbox_skipped'] += 1
+                                                        continue
+
                                                     f.write(f"1 {cx} {cy} {w} {h}\n")
                                                     has_objects = True
 
@@ -255,6 +264,15 @@ class DatasetProcessor:
                                         cy = (y + height/2) / img_height
                                         w = width / img_width
                                         h = height / img_height
+
+                                        if w <= 0 or h <= 0:
+                                            logger.warning(
+                                                f"Skipped invalid bbox | image={img_name} | label={label_path} | "
+                                                f"bbox_line='{class_id} {cx} {cy} {w} {h}' | reason=width/height <= 0"
+                                            )
+                                            self.stats['invalid_bbox_skipped'] += 1
+                                            continue
+
                                         label_file.write(f"{class_id} {cx} {cy} {w} {h}\n")
                                         has_objects = True
 
@@ -351,6 +369,9 @@ class DatasetProcessor:
                             line = line.strip()
                             if line and self._validate_yolo_line(line, unified_img_path, unified_label_path):
                                 valid_lines.append(line + '\n')
+
+                    if not valid_lines:
+                        continue
 
                     with open(unified_label_path, 'w') as dst_f:
                         dst_f.writelines(valid_lines)
