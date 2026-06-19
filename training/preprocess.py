@@ -3,12 +3,16 @@ import json
 import pandas as pd
 import random
 import shutil
+import logging
 from PIL import Image
 from utils.config import (DATASET_ROOT_PATH, DATASET_OUTPUT_PATH, DATASET_TRAIN_RATIO,
                          DATASET_VAL_RATIO, DATASET_RANDOM_SEED, AIHUB_DATASET_SUBPATH)
 
 BASE = DATASET_ROOT_PATH
 OUTPUT_DIR = DATASET_OUTPUT_PATH
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 
 class DatasetProcessor:
 
@@ -22,7 +26,8 @@ class DatasetProcessor:
             'val_count': 0,
             'test_count': 0,
             'symlink_failures': 0,
-            'label_copy_failures': 0
+            'label_copy_failures': 0,
+            'invalid_bbox_skipped': 0
         }
 
     def process_fasdd(self):
@@ -159,6 +164,15 @@ class DatasetProcessor:
                                                     cy = (y + height/2) / img_height
                                                     w = width / img_width
                                                     h = height / img_height
+
+                                                    if w <= 0 or h <= 0:
+                                                        logger.warning(
+                                                            f"Skipped invalid bbox | image={img_path} | label={label_path} | "
+                                                            f"bbox_line='1 {cx} {cy} {w} {h}' | reason=width/height <= 0"
+                                                        )
+                                                        self.stats['invalid_bbox_skipped'] += 1
+                                                        continue
+
                                                     f.write(f"1 {cx} {cy} {w} {h}\n")
                                                     has_objects = True
 
@@ -250,6 +264,15 @@ class DatasetProcessor:
                                         cy = (y + height/2) / img_height
                                         w = width / img_width
                                         h = height / img_height
+
+                                        if w <= 0 or h <= 0:
+                                            logger.warning(
+                                                f"Skipped invalid bbox | image={img_name} | label={label_path} | "
+                                                f"bbox_line='{class_id} {cx} {cy} {w} {h}' | reason=width/height <= 0"
+                                            )
+                                            self.stats['invalid_bbox_skipped'] += 1
+                                            continue
+
                                         label_file.write(f"{class_id} {cx} {cy} {w} {h}\n")
                                         has_objects = True
 
@@ -341,15 +364,62 @@ class DatasetProcessor:
 
                 try:
                     with open(src_label_path, 'r') as src_f:
-                        label_content = src_f.read()
+                        valid_lines = []
+                        for line in src_f:
+                            line = line.strip()
+                            if line and self._validate_yolo_line(line, unified_img_path, unified_label_path):
+                                valid_lines.append(line + '\n')
+
+                    if not valid_lines:
+                        continue
+
                     with open(unified_label_path, 'w') as dst_f:
-                        dst_f.write(label_content)
+                        dst_f.writelines(valid_lines)
                 except (IOError, OSError) as e:
                     print(f"Error copying label {src_label_path}: {e}")
                     self.stats['label_copy_failures'] += 1
                     continue
 
                 f.write(f"{unified_img_path}\n")
+
+    def _validate_yolo_line(self, line, img_path, label_path):
+        try:
+            parts = line.split()
+            if len(parts) < 5:
+                logger.warning(
+                    f"Skipped invalid bbox | image={img_path} | label={label_path} | "
+                    f"bbox_line='{line}' | reason=invalid format"
+                )
+                self.stats['invalid_bbox_skipped'] += 1
+                return False
+
+            width = float(parts[3])
+            height = float(parts[4])
+
+            if width <= 0:
+                logger.warning(
+                    f"Skipped invalid bbox | image={img_path} | label={label_path} | "
+                    f"bbox_line='{line}' | reason=width <= 0"
+                )
+                self.stats['invalid_bbox_skipped'] += 1
+                return False
+
+            if height <= 0:
+                logger.warning(
+                    f"Skipped invalid bbox | image={img_path} | label={label_path} | "
+                    f"bbox_line='{line}' | reason=height <= 0"
+                )
+                self.stats['invalid_bbox_skipped'] += 1
+                return False
+
+            return True
+        except (ValueError, IndexError) as e:
+            logger.warning(
+                f"Skipped invalid bbox | image={img_path} | label={label_path} | "
+                f"bbox_line='{line}' | reason=parse error ({e})"
+            )
+            self.stats['invalid_bbox_skipped'] += 1
+            return False
 
     def _verify_unified_dataset(self):
         print("\nVerifying unified dataset integrity...")
@@ -417,6 +487,7 @@ class DatasetProcessor:
         print(f"\nFailures:")
         print(f"Symlink creation failures: {self.stats['symlink_failures']}")
         print(f"Label copy failures: {self.stats['label_copy_failures']}")
+        print(f"Invalid bboxes skipped: {self.stats['invalid_bbox_skipped']}")
 
 def main():
     processor = DatasetProcessor()
