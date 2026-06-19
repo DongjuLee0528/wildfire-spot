@@ -27,7 +27,8 @@ class DatasetProcessor:
             'test_count': 0,
             'symlink_failures': 0,
             'label_copy_failures': 0,
-            'invalid_bbox_skipped': 0
+            'invalid_bbox_skipped': 0,
+            'empty_labels_created': 0
         }
 
     def process_fasdd(self):
@@ -176,8 +177,8 @@ class DatasetProcessor:
                                                     f.write(f"1 {cx} {cy} {w} {h}\n")
                                                     has_objects = True
 
+                                        self.all_image_paths.append((img_path, label_path))
                                         if has_objects:
-                                            self.all_image_paths.append((img_path, label_path))
                                             self.stats['smoke_images'] += 1
                                 except (IOError, ValueError) as e:
                                     print(f"Error processing image {img_path}: {e}")
@@ -252,10 +253,8 @@ class DatasetProcessor:
 
                                         if category_id == 3:
                                             class_id = 0
-                                            has_fire = True
                                         elif category_id in [1, 2, 6]:
                                             class_id = 1
-                                            has_smoke = True
                                         else:
                                             continue
 
@@ -275,22 +274,25 @@ class DatasetProcessor:
 
                                         label_file.write(f"{class_id} {cx} {cy} {w} {h}\n")
                                         has_objects = True
+                                        if class_id == 0:
+                                            has_fire = True
+                                        elif class_id == 1:
+                                            has_smoke = True
 
-                                if has_objects:
-                                    symlink_img_path = f"{aihub_dir}/images/train/{img_name}"
-                                    if not os.path.exists(symlink_img_path):
-                                        try:
-                                            rel_path = os.path.relpath(img_path, os.path.dirname(symlink_img_path))
-                                            os.symlink(rel_path, symlink_img_path)
-                                        except OSError as e:
-                                            print(f"Error creating symlink {symlink_img_path}: {e}")
-                                            continue
+                                symlink_img_path = f"{aihub_dir}/images/train/{img_name}"
+                                if not os.path.exists(symlink_img_path):
+                                    try:
+                                        rel_path = os.path.relpath(img_path, os.path.dirname(symlink_img_path))
+                                        os.symlink(rel_path, symlink_img_path)
+                                    except OSError as e:
+                                        print(f"Error creating symlink {symlink_img_path}: {e}")
+                                        continue
 
-                                    self.all_image_paths.append((symlink_img_path, label_path))
-                                    if has_fire:
-                                        self.stats['fire_images'] += 1
-                                    if has_smoke:
-                                        self.stats['smoke_images'] += 1
+                                self.all_image_paths.append((symlink_img_path, label_path))
+                                if has_fire:
+                                    self.stats['fire_images'] += 1
+                                if has_smoke:
+                                    self.stats['smoke_images'] += 1
 
                         except (IOError, ValueError, KeyError) as e:
                             print(f"Error processing AI Hub file {json_path}: {e}")
@@ -370,11 +372,11 @@ class DatasetProcessor:
                             if line and self._validate_yolo_line(line, unified_img_path, unified_label_path):
                                 valid_lines.append(line + '\n')
 
-                    if not valid_lines:
-                        continue
-
                     with open(unified_label_path, 'w') as dst_f:
                         dst_f.writelines(valid_lines)
+
+                    if not valid_lines:
+                        self.stats['empty_labels_created'] += 1
                 except (IOError, OSError) as e:
                     print(f"Error copying label {src_label_path}: {e}")
                     self.stats['label_copy_failures'] += 1
@@ -488,6 +490,7 @@ class DatasetProcessor:
         print(f"Symlink creation failures: {self.stats['symlink_failures']}")
         print(f"Label copy failures: {self.stats['label_copy_failures']}")
         print(f"Invalid bboxes skipped: {self.stats['invalid_bbox_skipped']}")
+        print(f"Empty label files created (negative samples): {self.stats['empty_labels_created']}")
 
 def main():
     processor = DatasetProcessor()
