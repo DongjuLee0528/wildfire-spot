@@ -17,16 +17,14 @@ from utils.config import (
 BASE = DATASET_ROOT_PATH
 OUTPUT_DIR = DATASET_OUTPUT_PATH
 
-# D-Fire clean_yolo path
-# D-Fire original class mapping:
-#   0 = smoke
-#   1 = fire
-# Project class mapping:
-#   0 = fire
-#   1 = smoke
 DFIRE_CLEAN_YOLO_PATH = os.environ.get(
     "DFIRE_CLEAN_YOLO_PATH",
     "/data/wildfire-extra-datasets/DFire/clean_yolo",
+)
+
+NASA_AMS_CLEAN_YOLO_PATH = os.environ.get(
+    "NASA_AMS_CLEAN_YOLO_PATH",
+    "/data/wildfire-extra-datasets/NASA AMS/clean_yolo_patches",
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +48,35 @@ class DatasetProcessor:
             "empty_labels_created": 0,
         }
 
+    def _count_label_classes(self, label_path):
+        has_fire = False
+        has_smoke = False
+
+        try:
+            with open(label_path, "r") as lf:
+                for line in lf:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    parts = line.split()
+                    if not parts:
+                        continue
+
+                    class_id = int(parts[0])
+                    if class_id == 0:
+                        has_fire = True
+                    elif class_id == 1:
+                        has_smoke = True
+
+        except (IOError, ValueError) as e:
+            print(f"Error reading label file {label_path}: {e}")
+
+        if has_fire:
+            self.stats["fire_images"] += 1
+        if has_smoke:
+            self.stats["smoke_images"] += 1
+
     def process_fasdd(self):
         print("Processing FASDD dataset...")
         fasdd_path = f"{BASE}/FASDD"
@@ -72,24 +99,7 @@ class DatasetProcessor:
 
                         if os.path.exists(src_img) and os.path.exists(src_label):
                             self.all_image_paths.append((src_img, src_label))
-
-                            try:
-                                with open(src_label, "r") as lf:
-                                    content = lf.read().strip()
-                                    if content:
-                                        lines = content.split("\n")
-                                        for label_line in lines:
-                                            if label_line.strip():
-                                                label_parts = label_line.split()
-                                                if not label_parts:
-                                                    continue
-                                                class_id = int(label_parts[0])
-                                                if class_id == 0:
-                                                    self.stats["fire_images"] += 1
-                                                elif class_id == 1:
-                                                    self.stats["smoke_images"] += 1
-                            except (IOError, ValueError) as e:
-                                print(f"Error reading label file {src_label}: {e}")
+                            self._count_label_classes(src_label)
             except IOError as e:
                 print(f"Error reading split file {split_file}: {e}")
 
@@ -115,24 +125,7 @@ class DatasetProcessor:
 
                         if os.path.exists(src_img) and os.path.exists(src_label):
                             self.all_image_paths.append((src_img, src_label))
-
-                            try:
-                                with open(src_label, "r") as lf:
-                                    content = lf.read().strip()
-                                    if content:
-                                        lines = content.split("\n")
-                                        for label_line in lines:
-                                            if label_line.strip():
-                                                label_parts = label_line.split()
-                                                if not label_parts:
-                                                    continue
-                                                class_id = int(label_parts[0])
-                                                if class_id == 0:
-                                                    self.stats["fire_images"] += 1
-                                                elif class_id == 1:
-                                                    self.stats["smoke_images"] += 1
-                            except (IOError, ValueError) as e:
-                                print(f"Error reading label file {src_label}: {e}")
+                            self._count_label_classes(src_label)
             except IOError as e:
                 print(f"Error reading split file {split_file}: {e}")
 
@@ -158,49 +151,48 @@ class DatasetProcessor:
                     for idx, row in df.iterrows():
                         img_data = row.get("image")
                         objects = row.get("objects")
-                        if img_data is not None and objects is not None:
+                        if img_data is None or objects is None:
+                            continue
 
-                            img_name = f"pyronear_{split}_{file}_{idx}.jpg"
-                            img_path = f"{temp_dir}/images/{img_name}"
-                            label_name = os.path.splitext(img_name)[0] + ".txt"
-                            label_path = f"{temp_dir}/labels/{label_name}"
+                        img_name = f"pyronear_{split}_{file}_{idx}.jpg"
+                        img_path = f"{temp_dir}/images/{img_name}"
+                        label_name = os.path.splitext(img_name)[0] + ".txt"
+                        label_path = f"{temp_dir}/labels/{label_name}"
 
-                            if isinstance(img_data, dict) and "bytes" in img_data:
-                                try:
-                                    with open(img_path, "wb") as f:
-                                        f.write(img_data["bytes"])
+                        if isinstance(img_data, dict) and "bytes" in img_data:
+                            try:
+                                with open(img_path, "wb") as f:
+                                    f.write(img_data["bytes"])
 
-                                    with Image.open(img_path) as img:
-                                        img_width, img_height = img.size
+                                with Image.open(img_path) as img:
+                                    img_width, img_height = img.size
 
-                                        has_objects = False
-                                        with open(label_path, "w") as f:
-                                            if objects and "bbox" in objects:
-                                                for bbox in objects["bbox"]:
-                                                    if len(bbox) < 4:
-                                                        continue
-                                                    x, y, width, height = bbox
-                                                    cx = (x + width / 2) / img_width
-                                                    cy = (y + height / 2) / img_height
-                                                    w = width / img_width
-                                                    h = height / img_height
+                                    has_objects = False
+                                    with open(label_path, "w") as f:
+                                        if objects and "bbox" in objects:
+                                            for bbox in objects["bbox"]:
+                                                if len(bbox) < 4:
+                                                    continue
 
-                                                    if w <= 0 or h <= 0:
-                                                        logger.warning(
-                                                            f"Skipped invalid bbox | image={img_path} | label={label_path} | "
-                                                            f"bbox_line='1 {cx} {cy} {w} {h}' | reason=width/height <= 0"
-                                                        )
-                                                        self.stats["invalid_bbox_skipped"] += 1
-                                                        continue
+                                                x, y, width, height = bbox
+                                                cx = (x + width / 2) / img_width
+                                                cy = (y + height / 2) / img_height
+                                                w = width / img_width
+                                                h = height / img_height
 
-                                                    f.write(f"1 {cx} {cy} {w} {h}\n")
-                                                    has_objects = True
+                                                if w <= 0 or h <= 0:
+                                                    self.stats["invalid_bbox_skipped"] += 1
+                                                    continue
 
-                                        self.all_image_paths.append((img_path, label_path))
-                                        if has_objects:
-                                            self.stats["smoke_images"] += 1
-                                except (IOError, ValueError) as e:
-                                    print(f"Error processing image {img_path}: {e}")
+                                                f.write(f"1 {cx} {cy} {w} {h}\n")
+                                                has_objects = True
+
+                                    self.all_image_paths.append((img_path, label_path))
+                                    if has_objects:
+                                        self.stats["smoke_images"] += 1
+
+                            except (IOError, ValueError) as e:
+                                print(f"Error processing image {img_path}: {e}")
 
                 except (IOError, ValueError, KeyError) as e:
                     print(f"Error processing PyroNear file {file}: {e}")
@@ -227,96 +219,96 @@ class DatasetProcessor:
                 files.sort()
                 for f in files:
                     img_index[f] = os.path.join(r, f)
+
             print(f"Found {len(img_index)} images in {split}")
 
             for root, dirs, files in os.walk(label_dir):
                 dirs.sort()
                 files.sort()
+
                 for file in files:
-                    if file.endswith(".json"):
-                        json_path = os.path.join(root, file)
+                    if not file.endswith(".json"):
+                        continue
 
-                        try:
-                            with open(json_path, "r", encoding="utf-8") as f:
-                                data = json.load(f)
+                    json_path = os.path.join(root, file)
 
-                            if "images" not in data or "annotations" not in data:
+                    try:
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+
+                        if "images" not in data or "annotations" not in data:
+                            continue
+
+                        for img_info in data["images"]:
+                            img_name = img_info["file_name"]
+                            img_width = img_info["width"]
+                            img_height = img_info["height"]
+                            img_path = img_index.get(img_name)
+
+                            if not img_path or not os.path.exists(img_path):
                                 continue
 
-                            for img_info in data["images"]:
-                                img_name = img_info["file_name"]
-                                img_width = img_info["width"]
-                                img_height = img_info["height"]
+                            annotations = [
+                                ann for ann in data["annotations"]
+                                if ann["image_id"] == img_info["id"]
+                            ]
 
-                                img_path = img_index.get(img_name)
+                            label_name = os.path.splitext(img_name)[0] + ".txt"
+                            label_path = f"{aihub_dir}/labels/train/{label_name}"
 
-                                if not img_path or not os.path.exists(img_path):
-                                    continue
+                            has_fire = False
+                            has_smoke = False
 
-                                annotations = [
-                                    ann for ann in data["annotations"]
-                                    if ann["image_id"] == img_info["id"]
-                                ]
+                            with open(label_path, "w") as label_file:
+                                for ann in annotations:
+                                    category_id = ann["category_id"]
+                                    bbox = ann["bbox"]
 
-                                label_name = os.path.splitext(img_name)[0] + ".txt"
-                                label_path = f"{aihub_dir}/labels/train/{label_name}"
-
-                                has_fire = False
-                                has_smoke = False
-
-                                with open(label_path, "w") as label_file:
-                                    for ann in annotations:
-                                        category_id = ann["category_id"]
-                                        bbox = ann["bbox"]
-
-                                        if len(bbox) < 4:
-                                            continue
-
-                                        if category_id == 3:
-                                            class_id = 0
-                                        elif category_id in [1, 2, 6]:
-                                            class_id = 1
-                                        else:
-                                            continue
-
-                                        x, y, width, height = bbox
-                                        cx = (x + width / 2) / img_width
-                                        cy = (y + height / 2) / img_height
-                                        w = width / img_width
-                                        h = height / img_height
-
-                                        if w <= 0 or h <= 0:
-                                            logger.warning(
-                                                f"Skipped invalid bbox | image={img_name} | label={label_path} | "
-                                                f"bbox_line='{class_id} {cx} {cy} {w} {h}' | reason=width/height <= 0"
-                                            )
-                                            self.stats["invalid_bbox_skipped"] += 1
-                                            continue
-
-                                        label_file.write(f"{class_id} {cx} {cy} {w} {h}\n")
-
-                                        if class_id == 0:
-                                            has_fire = True
-                                        elif class_id == 1:
-                                            has_smoke = True
-
-                                symlink_img_path = f"{aihub_dir}/images/train/{img_name}"
-                                if not os.path.exists(symlink_img_path):
-                                    try:
-                                        rel_path = os.path.relpath(img_path, os.path.dirname(symlink_img_path))
-                                        os.symlink(rel_path, symlink_img_path)
-                                    except OSError as e:
-                                        print(f"Error creating symlink {symlink_img_path}: {e}")
+                                    if len(bbox) < 4:
                                         continue
 
-                                self.all_image_paths.append((symlink_img_path, label_path))
-                                if has_fire:
-                                    self.stats["fire_images"] += 1
-                                if has_smoke:
-                                    self.stats["smoke_images"] += 1
+                                    if category_id == 3:
+                                        class_id = 0
+                                    elif category_id in [1, 2, 6]:
+                                        class_id = 1
+                                    else:
+                                        continue
 
-                        except (IOError, ValueError, KeyError) as e:
-                            print(f"Error processing AI Hub file {json_path}: {e}")
+                                    x, y, width, height = bbox
+                                    cx = (x + width / 2) / img_width
+                                    cy = (y + height / 2) / img_height
+                                    w = width / img_width
+                                    h = height / img_height
+
+                                    if w <= 0 or h <= 0:
+                                        self.stats["invalid_bbox_skipped"] += 1
+                                        continue
+
+                                    label_file.write(f"{class_id} {cx} {cy} {w} {h}\n")
+
+                                    if class_id == 0:
+                                        has_fire = True
+                                    elif class_id == 1:
+                                        has_smoke = True
+
+                            symlink_img_path = f"{aihub_dir}/images/train/{img_name}"
+                            if not os.path.exists(symlink_img_path):
+                                try:
+                                    rel_path = os.path.relpath(img_path, os.path.dirname(symlink_img_path))
+                                    os.symlink(rel_path, symlink_img_path)
+                                except OSError as e:
+                                    print(f"Error creating symlink {symlink_img_path}: {e}")
+                                    continue
+
+                            self.all_image_paths.append((symlink_img_path, label_path))
+
+                            if has_fire:
+                                self.stats["fire_images"] += 1
+                            if has_smoke:
+                                self.stats["smoke_images"] += 1
+
+                    except (IOError, ValueError, KeyError) as e:
+                        print(f"Error processing AI Hub file {json_path}: {e}")
 
     def process_dfire(self):
         print("Processing D-Fire dataset...")
@@ -383,12 +375,6 @@ class DatasetProcessor:
                                 self.stats["invalid_bbox_skipped"] += 1
                                 continue
 
-                            # D-Fire class mapping:
-                            #   0 = smoke
-                            #   1 = fire
-                            # Project class mapping:
-                            #   0 = fire
-                            #   1 = smoke
                             if dfire_class_id == 0:
                                 class_id = 1
                                 has_smoke = True
@@ -413,6 +399,59 @@ class DatasetProcessor:
 
                 except IOError as e:
                     print(f"Error processing D-Fire label file {src_label}: {e}")
+
+    def process_nasa_ams(self):
+        print("Processing NASA AMS dataset...")
+
+        nasa_path = NASA_AMS_CLEAN_YOLO_PATH
+        if not os.path.exists(nasa_path):
+            print(f"NASA AMS path not found, skipping: {nasa_path}")
+            return
+
+        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+
+        for split in ["train", "test"]:
+            img_dir = os.path.join(nasa_path, split, "images")
+            label_dir = os.path.join(nasa_path, split, "labels")
+
+            if not os.path.exists(img_dir) or not os.path.exists(label_dir):
+                print(f"NASA AMS split missing, skipping: {split}")
+                continue
+
+            for file in sorted(os.listdir(img_dir)):
+                img_ext = os.path.splitext(file)[1].lower()
+                if img_ext not in image_exts:
+                    continue
+
+                src_img = os.path.join(img_dir, file)
+                src_label = os.path.join(label_dir, os.path.splitext(file)[0] + ".txt")
+
+                if not os.path.exists(src_label):
+                    continue
+
+                self.all_image_paths.append((src_img, src_label))
+
+                has_fire = False
+                try:
+                    with open(src_label, "r") as lf:
+                        for line in lf:
+                            line = line.strip()
+                            if not line:
+                                continue
+
+                            parts = line.split()
+                            if len(parts) < 5:
+                                continue
+
+                            class_id = int(parts[0])
+                            if class_id == 0:
+                                has_fire = True
+
+                    if has_fire:
+                        self.stats["fire_images"] += 1
+
+                except (IOError, ValueError) as e:
+                    print(f"Error reading NASA AMS label file {src_label}: {e}")
 
     def split_and_create_files(self):
         print("Creating train/val/test split files...")
@@ -510,10 +549,6 @@ class DatasetProcessor:
         try:
             parts = line.split()
             if len(parts) < 5:
-                logger.warning(
-                    f"Skipped invalid bbox | image={img_path} | label={label_path} | "
-                    f"bbox_line='{line}' | reason=invalid format"
-                )
                 self.stats["invalid_bbox_skipped"] += 1
                 return False
 
@@ -524,43 +559,19 @@ class DatasetProcessor:
             height = float(parts[4])
 
             if class_id not in [0, 1]:
-                logger.warning(
-                    f"Skipped invalid bbox | image={img_path} | label={label_path} | "
-                    f"bbox_line='{line}' | reason=invalid class"
-                )
                 self.stats["invalid_bbox_skipped"] += 1
                 return False
 
             if not (0 <= x <= 1 and 0 <= y <= 1 and 0 <= width <= 1 and 0 <= height <= 1):
-                logger.warning(
-                    f"Skipped invalid bbox | image={img_path} | label={label_path} | "
-                    f"bbox_line='{line}' | reason=value out of range"
-                )
                 self.stats["invalid_bbox_skipped"] += 1
                 return False
 
-            if width <= 0:
-                logger.warning(
-                    f"Skipped invalid bbox | image={img_path} | label={label_path} | "
-                    f"bbox_line='{line}' | reason=width <= 0"
-                )
-                self.stats["invalid_bbox_skipped"] += 1
-                return False
-
-            if height <= 0:
-                logger.warning(
-                    f"Skipped invalid bbox | image={img_path} | label={label_path} | "
-                    f"bbox_line='{line}' | reason=height <= 0"
-                )
+            if width <= 0 or height <= 0:
                 self.stats["invalid_bbox_skipped"] += 1
                 return False
 
             return True
-        except (ValueError, IndexError) as e:
-            logger.warning(
-                f"Skipped invalid bbox | image={img_path} | label={label_path} | "
-                f"bbox_line='{line}' | reason=parse error ({e})"
-            )
+        except (ValueError, IndexError):
             self.stats["invalid_bbox_skipped"] += 1
             return False
 
@@ -584,7 +595,7 @@ class DatasetProcessor:
                     errors.append(f"Image does not exist: {img_path}")
                     continue
 
-                img_name, img_ext = os.path.splitext(os.path.basename(img_path))
+                img_name, _ = os.path.splitext(os.path.basename(img_path))
                 label_path = f"{OUTPUT_DIR}/labels/{split}/{img_name}.txt"
 
                 if not os.path.exists(label_path):
@@ -594,16 +605,15 @@ class DatasetProcessor:
             labels_dir = f"{OUTPUT_DIR}/labels/{split}"
             images_dir = f"{OUTPUT_DIR}/images/{split}"
 
-            if os.path.exists(labels_dir):
+            if os.path.exists(labels_dir) and os.path.exists(images_dir):
                 label_files = set(os.listdir(labels_dir))
-                if os.path.exists(images_dir):
-                    image_files = set(os.listdir(images_dir))
-                    expected_labels = {os.path.splitext(img)[0] + ".txt" for img in image_files}
+                image_files = set(os.listdir(images_dir))
+                expected_labels = {os.path.splitext(img)[0] + ".txt" for img in image_files}
 
-                    orphaned_labels = label_files - expected_labels
-                    if orphaned_labels:
-                        for orphan in orphaned_labels:
-                            errors.append(f"Orphaned label without image: {labels_dir}/{orphan}")
+                orphaned_labels = label_files - expected_labels
+                if orphaned_labels:
+                    for orphan in orphaned_labels:
+                        errors.append(f"Orphaned label without image: {labels_dir}/{orphan}")
 
         if errors:
             error_msg = "Dataset verification failed:\n" + "\n".join(errors[:10])
@@ -639,7 +649,7 @@ class DatasetProcessor:
         print(f"Train: {self.stats['train_count']}")
         print(f"Validation: {self.stats['val_count']}")
         print(f"Test: {self.stats['test_count']}")
-        print(f"\nFailures:")
+        print("\nFailures:")
         print(f"Symlink creation failures: {self.stats['symlink_failures']}")
         print(f"Label copy failures: {self.stats['label_copy_failures']}")
         print(f"Invalid bboxes skipped: {self.stats['invalid_bbox_skipped']}")
@@ -654,12 +664,13 @@ def main():
     processor.process_pyronear()
     processor.process_ai_hub()
     processor.process_dfire()
+    processor.process_nasa_ams()
 
     processor.split_and_create_files()
     processor.create_data_yaml()
     processor.print_statistics()
 
-    print(f"\nGenerated files:")
+    print("\nGenerated files:")
     print(f"- {OUTPUT_DIR}/data.yaml")
     print(f"- {OUTPUT_DIR}/train.txt")
     print(f"- {OUTPUT_DIR}/val.txt")
