@@ -47,17 +47,33 @@ wildfire_spot/
 
 ## Datasets
 
-- **FASDD** (Flame and Smoke Detection Dataset)
-  - 100,000+ flame and smoke images, YOLO format
-  - https://doi.org/10.57760/sciencedb.j00104.00103
+### Currently Integrated
 
-- **Pyro-SDIS** by PyroNear
-  - 33,636 wildfire smoke images, YOLO format
-  - https://huggingface.co/datasets/pyronear/pyro-sdis
+| Dataset | Purpose | Format | Status |
+| --- | --- | --- | --- |
+| [FASDD](https://doi.org/10.57760/sciencedb.j00104.00103) | Flame and smoke detection (100,000+ images) | YOLO | Integrated |
+| [Pyro-SDIS](https://huggingface.co/datasets/pyronear/pyro-sdis) | Wildfire smoke detection (33,636 images) | YOLO | Integrated |
+| [AI Hub Wildfire Detection Dataset](https://aihub.or.kr/aihubdata/data/view.do?dataSetSn=71330) | Korean forest wildfire detection | YOLO | Integrated |
 
-- **AI Hub Wildfire Detection Dataset**
-  - Korean forest wildfire dataset
-  - https://aihub.or.kr/aihubdata/data/view.do?dataSetSn=71330
+### Pending Integration
+
+| Dataset | Purpose | Format | Status |
+| --- | --- | --- | --- |
+| D-Fire | Fire and smoke detection | YOLO | Downloaded — Validation in Progress |
+| NASA AMS Wildfire Dataset | Satellite wildfire detection | YOLO | Downloaded — Validation in Progress |
+| FLAME3 | Fire detection benchmark | YOLO | Access Requested |
+
+## Dataset Verification
+
+Every dataset undergoes a rigorous verification pipeline before integration into training:
+
+- Dataset integrity check
+- Annotation validation
+- Label quality inspection
+- Bounding box validation
+- Duplicate detection
+- Image quality inspection
+- Dataset statistics generation
 
 ## Model
 
@@ -65,7 +81,102 @@ wildfire_spot/
 - Classes: fire, smoke
 - Training: 200 epochs, imgsz=1280, batch=64
 - Training Platform: Vast.ai (A100 80GB)
-- Datasets: FASDD + Pyro-SDIS + AI Hub (301,060 images total)
+- Datasets: Verified datasets are continuously integrated into the training dataset as they pass the verification pipeline.
+
+## GPU Training Runbook
+
+The training code is configured for a GPU server without local path edits. Defaults use `/workspace` paths and can be overridden with environment variables.
+
+### Default Paths
+
+| Setting | Default | Environment Override |
+| --- | --- | --- |
+| Dataset root | `/workspace/wildfire-dataset` | `WILDFIRE_DATASET_ROOT` |
+| Unified dataset | `/workspace/wildfire-dataset/unified_dataset` | `WILDFIRE_DATASET_OUTPUT` |
+| Training YAML | `/workspace/wildfire-dataset/unified_dataset/data.yaml` | `WILDFIRE_TRAIN_DATA_YAML` |
+| Runs output | `/workspace/runs` | `WILDFIRE_TRAIN_OUTPUT_DIR` |
+| Model | `yolov10s.pt` | `WILDFIRE_TRAIN_MODEL` |
+| Run name | `wildfire_v1` | `WILDFIRE_TRAIN_RUN_NAME` |
+
+### Server Setup
+
+```bash
+git pull origin main
+pip install -r requirements.txt
+python -m training.preprocess
+python -m training.train
+```
+
+Before training, verify that these files exist:
+
+```bash
+ls /workspace/wildfire-dataset/unified_dataset/data.yaml
+ls /workspace/wildfire-dataset/unified_dataset/train.txt
+ls /workspace/wildfire-dataset/unified_dataset/val.txt
+ls /workspace/wildfire-dataset/unified_dataset/test.txt
+```
+
+### Resume Training
+
+Resume from the default `last.pt` checkpoint:
+
+```bash
+WILDFIRE_TRAIN_RESUME=true python -m training.train
+```
+
+Resume from an explicit checkpoint:
+
+```bash
+WILDFIRE_TRAIN_RESUME=/workspace/runs/wildfire_v1/weights/last.pt python -m training.train
+```
+
+Expected outputs:
+
+- `/workspace/runs/wildfire_v1/weights/best.pt`
+- `/workspace/runs/wildfire_v1/weights/last.pt`
+- `/workspace/runs/wildfire_v1.log`
+- TensorBoard event files under `/workspace/runs/wildfire_v1/`
+- Ultralytics result plots, metrics CSV, and confusion matrix under `/workspace/runs/wildfire_v1/`
+
+TensorBoard:
+
+```bash
+tensorboard --logdir /workspace/runs
+```
+
+Baseline settings are YOLOv10s, 200 epochs, image size 1280, batch size 64, and Unified Dataset v1.0. Record mAP50, mAP50-95, precision, recall, F1, confusion matrix, and total training time before changing optimization settings.
+
+## Research
+
+- **Daelim University** — Undergraduate Research Project
+- **Korea Institute of Information & Telecommunication Facilities Engineering**
+- **2026 Summer Conference**
+
+## Roadmap
+
+**Completed**
+
+- [x] Dataset preprocessing pipeline
+- [x] Dataset verification tools
+- [x] Fire detection logic
+- [x] GPS manager
+- [x] LiDAR manager
+- [x] Sensor manager
+- [x] YOLO training pipeline
+
+**In Progress**
+
+- [ ] D-Fire integration
+- [ ] NASA AMS integration
+- [ ] FLAME3 integration
+- [ ] Camera verification
+
+**Planned**
+
+- [ ] TensorRT optimization
+- [ ] Real robot deployment
+- [ ] Field testing
+- [ ] Conference paper publication
 
 ## Hardware References
 
