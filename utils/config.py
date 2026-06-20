@@ -1,4 +1,24 @@
 import os
+from pathlib import Path
+
+
+def _env_path(name, default):
+    return str(Path(os.environ.get(name, default)).expanduser())
+
+
+def _env_int(name, default):
+    return int(os.environ.get(name, default))
+
+
+def _env_float(name, default):
+    return float(os.environ.get(name, default))
+
+
+def _env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 try:
     import board
@@ -8,8 +28,8 @@ except ImportError:
     I2C_SCL = None
     I2C_SDA = None
 
-BASE_DIR = os.path.expanduser('~')
-LOG_DIR = os.path.join(BASE_DIR, "wildfire_logs")
+BASE_DIR = _env_path("WILDFIRE_BASE_DIR", "/workspace")
+LOG_DIR = _env_path("WILDFIRE_LOG_DIR", os.path.join(BASE_DIR, "wildfire_logs"))
 
 PCA9685_FRONT_LEGS = 0x40
 PCA9685_BACK_LEGS = 0x41
@@ -128,14 +148,11 @@ KB_YAW_STEP = 3.0
 
 MATH_PI_DIVISOR = 180
 
-DATASET_ROOT_PATH = os.environ.get(
-    'WILDFIRE_DATASET_ROOT',
-    os.path.join(BASE_DIR, "Documents", "AIdatasets", "wildfire-dataset")
-)
+DATASET_ROOT_PATH = _env_path("WILDFIRE_DATASET_ROOT", "/workspace/wildfire-dataset")
 
-DATASET_OUTPUT_PATH = os.environ.get(
-    'WILDFIRE_DATASET_OUTPUT',
-    os.path.join(DATASET_ROOT_PATH, "unified_dataset")
+DATASET_OUTPUT_PATH = _env_path(
+    "WILDFIRE_DATASET_OUTPUT",
+    os.path.join(DATASET_ROOT_PATH, "unified_dataset"),
 )
 
 KB_TEST_SLEEP_TIME = 1
@@ -164,29 +181,31 @@ DATASET_VAL_RATIO = 0.1
 DATASET_RANDOM_SEED = 42
 
 AIHUB_DATASET_SUBPATH = "regional-safety-disaster-wildfire/01-1.official-open-data"
-WANDB_PROJECT = "wildfire-detection"
+WANDB_PROJECT = os.environ.get("WANDB_PROJECT", "wildfire-detection")
 WANDB_ENTITY = os.environ.get('WANDB_ENTITY', 'dozoo0528-')
-TRAIN_MODEL_PATH = "yolov10s.pt"
-TRAIN_DATA_YAML = os.environ.get(
-    'WILDFIRE_TRAIN_DATA_YAML',
-    os.path.join(DATASET_OUTPUT_PATH, "data.yaml")
+TRAIN_MODEL_PATH = os.environ.get("WILDFIRE_TRAIN_MODEL", "yolov10s.pt")
+TRAIN_DATA_YAML = _env_path(
+    "WILDFIRE_TRAIN_DATA_YAML",
+    os.path.join(DATASET_OUTPUT_PATH, "data.yaml"),
 )
-TRAIN_OUTPUT_DIR = os.environ.get('WILDFIRE_TRAIN_OUTPUT_DIR', "/workspace/runs")
-TRAIN_EPOCHS = 200
-TRAIN_BATCH_SIZE = 64
-TRAIN_IMAGE_SIZE = 1280
-TRAIN_SAVE_PERIOD = 10
-TRAIN_PATIENCE = 30
-TRAIN_DEVICE = "cuda"
-TRAIN_RUN_NAME = "wildfire_v1"
-TRAIN_WORKERS = 4
-TRAIN_AUGMENT = True
-TRAIN_MOSAIC = 1.0
-TRAIN_HSV_H = 0.02
-TRAIN_HSV_S = 0.8
-TRAIN_HSV_V = 0.4
-TRAIN_FLIPUD = 0.5
-TRAIN_FLIPLR = 0.5
+TRAIN_OUTPUT_DIR = _env_path("WILDFIRE_TRAIN_OUTPUT_DIR", "/workspace/runs")
+TRAIN_EPOCHS = _env_int("WILDFIRE_TRAIN_EPOCHS", 200)
+TRAIN_BATCH_SIZE = _env_int("WILDFIRE_TRAIN_BATCH_SIZE", 64)
+TRAIN_IMAGE_SIZE = _env_int("WILDFIRE_TRAIN_IMAGE_SIZE", 1280)
+TRAIN_SAVE_PERIOD = _env_int("WILDFIRE_TRAIN_SAVE_PERIOD", 10)
+TRAIN_PATIENCE = _env_int("WILDFIRE_TRAIN_PATIENCE", 30)
+TRAIN_DEVICE = os.environ.get("WILDFIRE_TRAIN_DEVICE", "cuda")
+TRAIN_RUN_NAME = os.environ.get("WILDFIRE_TRAIN_RUN_NAME", "wildfire_v1")
+TRAIN_WORKERS = _env_int("WILDFIRE_TRAIN_WORKERS", 4)
+TRAIN_RESUME = os.environ.get("WILDFIRE_TRAIN_RESUME", "").strip()
+TRAIN_EXIST_OK = _env_bool("WILDFIRE_TRAIN_EXIST_OK", False)
+TRAIN_AUGMENT = _env_bool("WILDFIRE_TRAIN_AUGMENT", True)
+TRAIN_MOSAIC = _env_float("WILDFIRE_TRAIN_MOSAIC", 1.0)
+TRAIN_HSV_H = _env_float("WILDFIRE_TRAIN_HSV_H", 0.02)
+TRAIN_HSV_S = _env_float("WILDFIRE_TRAIN_HSV_S", 0.8)
+TRAIN_HSV_V = _env_float("WILDFIRE_TRAIN_HSV_V", 0.4)
+TRAIN_FLIPUD = _env_float("WILDFIRE_TRAIN_FLIPUD", 0.5)
+TRAIN_FLIPLR = _env_float("WILDFIRE_TRAIN_FLIPLR", 0.5)
 
 KINEMATICS_L1_DEFAULT = 50
 KINEMATICS_L2_DEFAULT = 20
