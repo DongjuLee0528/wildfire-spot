@@ -1,8 +1,7 @@
+import argparse
 import logging
 import os
 from pathlib import Path
-
-from ultralytics import YOLO
 
 from utils.config import (
     DATASET_OUTPUT_PATH,
@@ -96,6 +95,8 @@ def _init_wandb():
 
 
 def _load_model(resume):
+    from ultralytics import YOLO
+
     if resume:
         LOGGER.info("Resuming from checkpoint: %s", resume)
         return YOLO(resume)
@@ -127,13 +128,15 @@ def _verify_training_outputs(save_dir):
     weights_dir = save_dir / "weights"
     best = weights_dir / "best.pt"
     last = weights_dir / "last.pt"
+    results_csv = save_dir / "results.csv"
 
-    missing = [str(path) for path in (best, last) if not path.exists()]
+    missing = [str(path) for path in (best, last, results_csv) if not path.exists()]
     if missing:
-        raise RuntimeError("Training finished, but expected weights are missing: " + ", ".join(missing))
+        raise RuntimeError("Training finished, but expected outputs are missing: " + ", ".join(missing))
 
     LOGGER.info("Best checkpoint: %s", best)
     LOGGER.info("Last checkpoint: %s", last)
+    LOGGER.info("Results CSV: %s", results_csv)
 
     events = list(save_dir.glob("events.out.tfevents.*"))
     if events:
@@ -142,7 +145,34 @@ def _verify_training_outputs(save_dir):
         LOGGER.warning("No TensorBoard event file found in %s", save_dir)
 
 
+def _print_config():
+    print(f"DATASET_OUTPUT_PATH={DATASET_OUTPUT_PATH}")
+    print(f"TRAIN_DATA_YAML={TRAIN_DATA_YAML}")
+    print(f"TRAIN_PROJECT_PATH={TRAIN_OUTPUT_DIR}")
+    print(f"TRAIN_NAME={TRAIN_RUN_NAME}")
+    print(f"TRAIN_MODEL={TRAIN_MODEL_PATH}")
+    print(f"TRAIN_EPOCHS={TRAIN_EPOCHS}")
+    print(f"TRAIN_IMAGE_SIZE={TRAIN_IMAGE_SIZE}")
+    print(f"TRAIN_BATCH_SIZE={TRAIN_BATCH_SIZE}")
+    print(f"TRAIN_RESUME={TRAIN_RESUME or '<disabled>'}")
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Train YOLOv10s wildfire baseline.")
+    parser.add_argument(
+        "--print-config",
+        action="store_true",
+        help="Print resolved training paths and settings without starting training.",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = _parse_args()
+    if args.print_config:
+        _print_config()
+        return
+
     _setup_logging()
     data_yaml = _verify_training_inputs()
     resume = _resolve_resume()

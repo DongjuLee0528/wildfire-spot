@@ -10,6 +10,15 @@ def _env_int(name, default):
     return int(os.environ.get(name, default))
 
 
+def _env_int_or_auto(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if value.strip().lower() == "auto":
+        return "auto"
+    return int(value)
+
+
 def _env_float(name, default):
     return float(os.environ.get(name, default))
 
@@ -155,6 +164,16 @@ DATASET_OUTPUT_PATH = _env_path(
     os.path.join(DATASET_ROOT_PATH, "unified_dataset"),
 )
 
+DFIRE_CLEAN_YOLO_PATH = _env_path(
+    "DFIRE_CLEAN_YOLO_PATH",
+    "/workspace/wildfire-extra-datasets/DFire/clean_yolo",
+)
+
+NASA_AMS_CLEAN_YOLO_PATH = _env_path(
+    "NASA_AMS_CLEAN_YOLO_PATH",
+    "/workspace/wildfire-extra-datasets/NASA AMS/clean_yolo_patches",
+)
+
 KB_TEST_SLEEP_TIME = 1
 
 ULTRASONIC_DISTANCE_MULTIPLIER = 17150
@@ -188,14 +207,16 @@ TRAIN_DATA_YAML = _env_path(
     "WILDFIRE_TRAIN_DATA_YAML",
     os.path.join(DATASET_OUTPUT_PATH, "data.yaml"),
 )
-TRAIN_OUTPUT_DIR = _env_path("WILDFIRE_TRAIN_OUTPUT_DIR", "/workspace/runs")
+TRAIN_PROJECT_PATH = _env_path("WILDFIRE_TRAIN_PROJECT_PATH", "/workspace/runs")
+TRAIN_OUTPUT_DIR = _env_path("WILDFIRE_TRAIN_OUTPUT_DIR", TRAIN_PROJECT_PATH)
 TRAIN_EPOCHS = _env_int("WILDFIRE_TRAIN_EPOCHS", 200)
-TRAIN_BATCH_SIZE = _env_int("WILDFIRE_TRAIN_BATCH_SIZE", 64)
+TRAIN_BATCH_SIZE = _env_int_or_auto("WILDFIRE_TRAIN_BATCH_SIZE", 32)
 TRAIN_IMAGE_SIZE = _env_int("WILDFIRE_TRAIN_IMAGE_SIZE", 1280)
 TRAIN_SAVE_PERIOD = _env_int("WILDFIRE_TRAIN_SAVE_PERIOD", 10)
 TRAIN_PATIENCE = _env_int("WILDFIRE_TRAIN_PATIENCE", 30)
 TRAIN_DEVICE = os.environ.get("WILDFIRE_TRAIN_DEVICE", "cuda")
-TRAIN_RUN_NAME = os.environ.get("WILDFIRE_TRAIN_RUN_NAME", "wildfire_v1")
+TRAIN_NAME = os.environ.get("WILDFIRE_TRAIN_NAME", "wildfire_v1")
+TRAIN_RUN_NAME = os.environ.get("WILDFIRE_TRAIN_RUN_NAME", TRAIN_NAME)
 TRAIN_WORKERS = _env_int("WILDFIRE_TRAIN_WORKERS", 4)
 TRAIN_RESUME = os.environ.get("WILDFIRE_TRAIN_RESUME", "").strip()
 TRAIN_EXIST_OK = _env_bool("WILDFIRE_TRAIN_EXIST_OK", False)
