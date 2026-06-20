@@ -79,7 +79,7 @@ Every dataset undergoes a rigorous verification pipeline before integration into
 
 - Architecture: YOLOv10s
 - Classes: fire, smoke
-- Training: 200 epochs, imgsz=1280, batch=64
+- Training: 200 epochs, imgsz=1280, batch=32
 - Training Platform: Vast.ai (A100 80GB)
 - Datasets: Verified datasets are continuously integrated into the training dataset as they pass the verification pipeline.
 
@@ -94,18 +94,21 @@ The training code is configured for a GPU server without local path edits. Defau
 | Dataset root | `/workspace/wildfire-dataset` | `WILDFIRE_DATASET_ROOT` |
 | Unified dataset | `/workspace/wildfire-dataset/unified_dataset` | `WILDFIRE_DATASET_OUTPUT` |
 | Training YAML | `/workspace/wildfire-dataset/unified_dataset/data.yaml` | `WILDFIRE_TRAIN_DATA_YAML` |
-| Runs output | `/workspace/runs` | `WILDFIRE_TRAIN_OUTPUT_DIR` |
+| Runs output | `/workspace/runs` | `WILDFIRE_TRAIN_PROJECT_PATH` |
 | Model | `yolov10s.pt` | `WILDFIRE_TRAIN_MODEL` |
 | Run name | `wildfire_v1` | `WILDFIRE_TRAIN_RUN_NAME` |
+| D-Fire clean YOLO | `/workspace/wildfire-extra-datasets/DFire/clean_yolo` | `DFIRE_CLEAN_YOLO_PATH` |
+| NASA AMS clean YOLO | `/workspace/wildfire-extra-datasets/NASA AMS/clean_yolo_patches` | `NASA_AMS_CLEAN_YOLO_PATH` |
 
 ### Server Setup
 
 ```bash
 git pull origin main
-pip install -r requirements.txt
-python -m training.preprocess
-python -m training.train
+python3 -m training.preprocess
+python3 -m training.train
 ```
+
+GPU server policy: do not edit code on the server. Pull `main`, preprocess, then train.
 
 Before training, verify that these files exist:
 
@@ -121,19 +124,20 @@ ls /workspace/wildfire-dataset/unified_dataset/test.txt
 Resume from the default `last.pt` checkpoint:
 
 ```bash
-WILDFIRE_TRAIN_RESUME=true python -m training.train
+WILDFIRE_TRAIN_RESUME=true python3 -m training.train
 ```
 
 Resume from an explicit checkpoint:
 
 ```bash
-WILDFIRE_TRAIN_RESUME=/workspace/runs/wildfire_v1/weights/last.pt python -m training.train
+WILDFIRE_TRAIN_RESUME=/workspace/runs/wildfire_v1/weights/last.pt python3 -m training.train
 ```
 
 Expected outputs:
 
 - `/workspace/runs/wildfire_v1/weights/best.pt`
 - `/workspace/runs/wildfire_v1/weights/last.pt`
+- `/workspace/runs/wildfire_v1/results.csv`
 - `/workspace/runs/wildfire_v1.log`
 - TensorBoard event files under `/workspace/runs/wildfire_v1/`
 - Ultralytics result plots, metrics CSV, and confusion matrix under `/workspace/runs/wildfire_v1/`
@@ -144,7 +148,7 @@ TensorBoard:
 tensorboard --logdir /workspace/runs
 ```
 
-Baseline settings are YOLOv10s, 200 epochs, image size 1280, batch size 64, and Unified Dataset v1.0. Record mAP50, mAP50-95, precision, recall, F1, confusion matrix, and total training time before changing optimization settings.
+Baseline settings are YOLOv10s, 200 epochs, image size 1280, batch size 32, and Unified Dataset v1.0 with 173,600 images. Run the baseline first. Do not tune augmentation, optimizer, model size, confidence thresholds, or other performance settings before the baseline finishes. `results.csv` is updated during training, so the 50 epoch point can be checked from the run directory without changing code. If an OOM occurs, rerun with a smaller batch, for example `WILDFIRE_TRAIN_BATCH_SIZE=16 python3 -m training.train`. Record mAP50, mAP50-95, precision, recall, F1, confusion matrix, and total training time before changing optimization settings.
 
 ## Research
 

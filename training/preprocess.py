@@ -6,26 +6,18 @@ import shutil
 import logging
 from PIL import Image
 from utils.config import (
+    DFIRE_CLEAN_YOLO_PATH,
     DATASET_ROOT_PATH,
     DATASET_OUTPUT_PATH,
     DATASET_TRAIN_RATIO,
     DATASET_VAL_RATIO,
     DATASET_RANDOM_SEED,
     AIHUB_DATASET_SUBPATH,
+    NASA_AMS_CLEAN_YOLO_PATH,
 )
 
 BASE = DATASET_ROOT_PATH
 OUTPUT_DIR = DATASET_OUTPUT_PATH
-
-DFIRE_CLEAN_YOLO_PATH = os.environ.get(
-    "DFIRE_CLEAN_YOLO_PATH",
-    "/data/wildfire-extra-datasets/DFire/clean_yolo",
-)
-
-NASA_AMS_CLEAN_YOLO_PATH = os.environ.get(
-    "NASA_AMS_CLEAN_YOLO_PATH",
-    "/data/wildfire-extra-datasets/NASA AMS/clean_yolo_patches",
-)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
