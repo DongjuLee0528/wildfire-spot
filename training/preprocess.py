@@ -49,6 +49,180 @@ class DatasetProcessor:
             "nasa_ams_empty_labels": 0,
         }
 
+    def validate_input_datasets(self):
+        print("Validating input datasets before touching output directory...")
+
+        counts = {
+            "FASDD": self._count_fasdd_inputs(),
+            "FASDD_UAV": self._count_fasdd_uav_inputs(),
+            "PyroNear": self._count_pyronear_inputs(),
+            "AIHub": self._count_ai_hub_inputs(),
+            "D-Fire clean_yolo": self._count_clean_yolo_inputs(
+                DFIRE_CLEAN_YOLO_PATH,
+                ["train", "test"],
+                ALLOWED_IMAGE_EXTS,
+            ),
+            "NASA AMS clean_yolo_patches": self._count_clean_yolo_inputs(
+                NASA_AMS_CLEAN_YOLO_PATH,
+                ["train", "val", "test"],
+                {".jpg", ".jpeg", ".png", ".tif", ".tiff"},
+            ),
+        }
+
+        total = sum(counts.values())
+        for dataset_name, count in counts.items():
+            print(f"- {dataset_name}: {count} input images")
+
+        if total == 0:
+            checked = ", ".join(f"{name}={count}" for name, count in counts.items())
+            raise RuntimeError(
+                "No input images found. Refusing to delete existing output dataset. "
+                f"Checked datasets: {checked}"
+            )
+
+        print(f"Input dataset validation passed: {total} input images found")
+
+    def _count_fasdd_inputs(self):
+        fasdd_path = f"{BASE}/FASDD"
+        return self._count_split_file_inputs(
+            fasdd_path,
+            f"{fasdd_path}/annotations/YOLO",
+            "labels",
+            "images/",
+        )
+
+    def _count_fasdd_uav_inputs(self):
+        fasdd_uav_path = f"{BASE}/FASDD_UAV"
+        return self._count_split_file_inputs(
+            fasdd_uav_path,
+            f"{fasdd_uav_path}/annotations/YOLO_UAV",
+            "labels",
+            "./images/",
+        )
+
+    def _count_split_file_inputs(self, dataset_path, annotations_path, labels_dir, prefix):
+        count = 0
+
+        for split in ["train", "val", "test"]:
+            split_file = f"{annotations_path}/{split}.txt"
+            if not os.path.exists(split_file):
+                continue
+
+            try:
+                with open(split_file, "r") as f:
+                    for line in f:
+                        img_path = line.strip()
+                        if img_path.startswith(prefix):
+                            img_path = img_path[len(prefix):]
+
+                        src_img = f"{dataset_path}/images/{img_path}"
+                        label_name = os.path.splitext(img_path)[0] + ".txt"
+                        src_label = f"{annotations_path}/{labels_dir}/{label_name}"
+
+                        if (
+                            os.path.exists(src_img)
+                            and os.path.exists(src_label)
+                            and os.path.splitext(src_img)[1].lower() in ALLOWED_IMAGE_EXTS
+                        ):
+                            count += 1
+            except IOError as e:
+                print(f"Error reading split file {split_file}: {e}")
+
+        return count
+
+    def _count_pyronear_inputs(self):
+        pyronear_path = f"{BASE}/PyroNear/data"
+
+        try:
+            files = sorted(
+                f for f in os.listdir(pyronear_path)
+                if f.startswith("train-") or f.startswith("val-")
+            )
+        except OSError as e:
+            print(f"Error reading PyroNear directory {pyronear_path}: {e}")
+            return 0
+
+        count = 0
+        for file in files:
+            parquet_path = f"{pyronear_path}/{file}"
+            try:
+                df = pd.read_parquet(parquet_path, columns=["image", "objects"])
+                for _, row in df.iterrows():
+                    img_data = row.get("image")
+                    objects = row.get("objects")
+                    if isinstance(img_data, dict) and "bytes" in img_data and objects is not None:
+                        count += 1
+            except (IOError, ValueError, KeyError) as e:
+                print(f"Error validating PyroNear file {file}: {e}")
+
+        return count
+
+    def _count_ai_hub_inputs(self):
+        ai_hub_path = f"{BASE}/{AIHUB_DATASET_SUBPATH}"
+        count = 0
+
+        for split in ["Training", "Validation"]:
+            img_dir = f"{ai_hub_path}/{split}/source-data"
+            label_dir = f"{ai_hub_path}/{split}/labeling-data"
+
+            if not os.path.exists(img_dir) or not os.path.exists(label_dir):
+                continue
+
+            img_index = {}
+            for root, dirs, files in os.walk(img_dir):
+                dirs.sort()
+                files.sort()
+                for file in files:
+                    if os.path.splitext(file)[1].lower() in ALLOWED_IMAGE_EXTS:
+                        img_index[file] = os.path.join(root, file)
+
+            for root, dirs, files in os.walk(label_dir):
+                dirs.sort()
+                files.sort()
+                for file in files:
+                    if not file.endswith(".json"):
+                        continue
+
+                    json_path = os.path.join(root, file)
+                    try:
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+
+                        for img_info in data.get("images", []):
+                            img_path = img_index.get(img_info.get("file_name"))
+                            if img_path and os.path.exists(img_path):
+                                count += 1
+                    except (IOError, ValueError, KeyError) as e:
+                        print(f"Error validating AI Hub file {json_path}: {e}")
+
+        return count
+
+    def _count_clean_yolo_inputs(self, dataset_path, splits, image_exts):
+        if not os.path.exists(dataset_path):
+            return 0
+
+        count = 0
+        for split in splits:
+            img_dir = os.path.join(dataset_path, split, "images")
+            label_dir = os.path.join(dataset_path, split, "labels")
+
+            if not os.path.exists(img_dir) or not os.path.exists(label_dir):
+                continue
+
+            try:
+                for file in sorted(os.listdir(img_dir)):
+                    img_ext = os.path.splitext(file)[1].lower()
+                    if img_ext not in image_exts:
+                        continue
+
+                    label_path = os.path.join(label_dir, os.path.splitext(file)[0] + ".txt")
+                    if os.path.exists(label_path):
+                        count += 1
+            except OSError as e:
+                print(f"Error reading clean YOLO split {img_dir}: {e}")
+
+        return count
+
     def _count_label_classes(self, label_path):
         has_fire = False
         has_smoke = False
@@ -512,6 +686,11 @@ class DatasetProcessor:
     def split_and_create_files(self):
         print("Creating train/val/test split files...")
 
+        if not self.all_image_paths:
+            raise RuntimeError(
+                "No input images found. Refusing to delete existing output dataset."
+            )
+
         print("Cleaning up previous unified dataset outputs...")
         if os.path.exists(f"{OUTPUT_DIR}/images"):
             shutil.rmtree(f"{OUTPUT_DIR}/images")
@@ -752,6 +931,8 @@ class DatasetProcessor:
 
 def main():
     processor = DatasetProcessor()
+
+    processor.validate_input_datasets()
 
     processor.process_fasdd()
     processor.process_fasdd_uav()
