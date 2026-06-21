@@ -65,33 +65,55 @@ class DatasetProcessor:
     def publish_build(self):
         print("Publishing verified dataset build...")
 
-        if os.path.exists(OUTPUT_BACKUP_DIR):
-            shutil.rmtree(OUTPUT_BACKUP_DIR)
+        if not os.path.exists(BUILD_DIR):
+            raise RuntimeError(
+                f"BUILD_DIR does not exist, refusing to publish: {BUILD_DIR}"
+            )
 
-        if os.path.exists(OUTPUT_DIR):
-            os.rename(OUTPUT_DIR, OUTPUT_BACKUP_DIR)
+        side_backup = f"{OUTPUT_DIR}_publish_side_backup"
+
+        if os.path.exists(side_backup):
+            shutil.rmtree(side_backup)
+
+        output_existed = os.path.exists(OUTPUT_DIR)
+        if output_existed:
+            try:
+                os.rename(OUTPUT_DIR, side_backup)
+            except OSError as e:
+                raise RuntimeError(
+                    f"Failed to move existing output dataset to side backup: {e}\n"
+                    f"  OUTPUT_DIR:  {OUTPUT_DIR}\n"
+                    f"  side_backup: {side_backup}\n"
+                    "Existing dataset is untouched."
+                ) from e
 
         try:
             os.rename(BUILD_DIR, OUTPUT_DIR)
         except OSError as e:
-            restored_backup = False
-            if not os.path.exists(OUTPUT_DIR) and os.path.exists(OUTPUT_BACKUP_DIR):
+            if output_existed and os.path.exists(side_backup) and not os.path.exists(OUTPUT_DIR):
                 try:
-                    os.rename(OUTPUT_BACKUP_DIR, OUTPUT_DIR)
-                    restored_backup = True
+                    os.rename(side_backup, OUTPUT_DIR)
+                    raise RuntimeError(
+                        f"Failed to publish build: {e}\n"
+                        "Previous output dataset has been restored from side backup."
+                    ) from e
                 except OSError as restore_error:
                     raise RuntimeError(
-                        "Failed to publish build and failed to restore previous output "
-                        f"dataset from backup. Publish error: {e}. "
-                        f"Restore error: {restore_error}"
+                        f"Failed to publish build: {e}\n"
+                        f"CRITICAL: Failed to restore previous output dataset from side backup: {restore_error}\n"
+                        f"  BUILD_DIR:   {BUILD_DIR}\n"
+                        f"  side_backup: {side_backup}\n"
+                        f"  OUTPUT_DIR:  {OUTPUT_DIR}\n"
+                        "Manual recovery required."
                     ) from restore_error
+            raise RuntimeError(
+                f"Failed to publish build: {e}\n"
+                f"  BUILD_DIR:  {BUILD_DIR}\n"
+                f"  OUTPUT_DIR: {OUTPUT_DIR}"
+            ) from e
 
-            if restored_backup:
-                raise RuntimeError(
-                    "Failed to publish build. Previous output dataset was restored from backup."
-                ) from e
-
-            raise RuntimeError("Failed to publish build.") from e
+        if os.path.exists(side_backup):
+            shutil.rmtree(side_backup)
 
         if os.path.exists(OUTPUT_BACKUP_DIR):
             shutil.rmtree(OUTPUT_BACKUP_DIR)
