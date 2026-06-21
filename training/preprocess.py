@@ -38,6 +38,7 @@ class DatasetProcessor:
             "test_count": 0,
             "symlink_failures": 0,
             "label_copy_failures": 0,
+            "image_conversion_failures": 0,
             "invalid_bbox_skipped": 0,
             "empty_labels_created": 0,
             "nasa_ams_source_images": 0,
@@ -564,20 +565,24 @@ class DatasetProcessor:
                 img_basename = os.path.basename(src_img_path)
                 img_name, img_ext = os.path.splitext(img_basename)
 
-                unique_img_name = f"{split}_{idx:06d}_{img_basename}"
+                unique_img_name = f"{split}_{idx:06d}_{img_name}.jpg"
                 unique_label_name = f"{split}_{idx:06d}_{img_name}.txt"
 
                 unified_img_path = f"{OUTPUT_DIR}/images/{split}/{unique_img_name}"
                 unified_label_path = f"{OUTPUT_DIR}/labels/{split}/{unique_label_name}"
 
-                if not os.path.exists(unified_img_path):
-                    try:
-                        rel_path = os.path.relpath(src_img_path, os.path.dirname(unified_img_path))
-                        os.symlink(rel_path, unified_img_path)
-                    except OSError as e:
-                        print(f"Error creating symlink {unified_img_path}: {e}")
-                        self.stats["symlink_failures"] += 1
-                        continue
+                try:
+                    with Image.open(src_img_path) as src_img:
+                        rgb_img = src_img.convert("RGB")
+                        if rgb_img.mode != "RGB" or len(rgb_img.getbands()) != 3:
+                            raise ValueError(f"Converted image is not RGB: {src_img_path}")
+                        rgb_img.save(unified_img_path, "JPEG", quality=95)
+                except (IOError, OSError, ValueError) as e:
+                    print(f"Error converting image {src_img_path}: {e}")
+                    self.stats["image_conversion_failures"] += 1
+                    if os.path.exists(unified_img_path):
+                        os.remove(unified_img_path)
+                    continue
 
                 try:
                     with open(src_label_path, "r") as src_f:
@@ -596,6 +601,8 @@ class DatasetProcessor:
                 except (IOError, OSError) as e:
                     print(f"Error copying label {src_label_path}: {e}")
                     self.stats["label_copy_failures"] += 1
+                    if os.path.exists(unified_img_path):
+                        os.remove(unified_img_path)
                     continue
 
                 f.write(f"{unified_img_path}\n")
@@ -659,6 +666,15 @@ class DatasetProcessor:
                     errors.append(f"Unsupported image format in unified dataset: {img_path}")
                     continue
 
+                try:
+                    with Image.open(img_path) as img:
+                        if img.mode != "RGB" or len(img.getbands()) != 3:
+                            errors.append(f"Non-RGB image in unified dataset: {img_path}")
+                            continue
+                except (IOError, OSError, ValueError) as e:
+                    errors.append(f"Invalid image in unified dataset: {img_path} ({e})")
+                    continue
+
                 img_name, _ = os.path.splitext(os.path.basename(img_path))
                 label_path = f"{OUTPUT_DIR}/labels/{split}/{img_name}.txt"
 
@@ -716,6 +732,7 @@ class DatasetProcessor:
         print("\nFailures:")
         print(f"Symlink creation failures: {self.stats['symlink_failures']}")
         print(f"Label copy failures: {self.stats['label_copy_failures']}")
+        print(f"Image conversion failures: {self.stats['image_conversion_failures']}")
         print(f"Invalid bboxes skipped: {self.stats['invalid_bbox_skipped']}")
         print(f"Empty label files created (negative samples): {self.stats['empty_labels_created']}")
         print("\nNASA AMS:")
