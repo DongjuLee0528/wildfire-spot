@@ -88,8 +88,12 @@ def _init_wandb():
     if api_key:
         wandb.login(key=api_key)
 
+    init_kwargs = {"project": WANDB_PROJECT}
+    if WANDB_ENTITY:
+        init_kwargs["entity"] = WANDB_ENTITY
+
     try:
-        wandb.init(project=WANDB_PROJECT, entity=WANDB_ENTITY)
+        wandb.init(**init_kwargs)
     except Exception as exc:
         LOGGER.warning("Failed to initialize wandb; continuing without it: %s", exc)
 
@@ -111,12 +115,58 @@ def _load_model(resume):
     return YOLO(TRAIN_MODEL_PATH)
 
 
+def _resolve_img_path(raw, dataset_dir):
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    return dataset_dir / p
+
+
+def _verify_split_paths(dataset_dir, split, required):
+    txt_path = _require_path(dataset_dir / f"{split}.txt", f"{split}.txt")
+
+    with open(txt_path, "r", encoding="utf-8") as f:
+        lines = [l.strip() for l in f if l.strip()]
+
+    total = len(lines)
+    if required and total == 0:
+        raise RuntimeError(
+            f"{split}.txt exists but contains no image paths: {txt_path}"
+        )
+
+    missing = []
+    for line_no, raw_path in enumerate(lines, start=1):
+        resolved = _resolve_img_path(raw_path, dataset_dir)
+        if not resolved.exists():
+            missing.append((line_no, raw_path, resolved))
+
+    if missing:
+        detail = "\n".join(
+            f"  line {ln}: {raw!r} -> {resolved}"
+            for ln, raw, resolved in missing
+        )
+        raise RuntimeError(
+            f"{split}.txt: {len(missing)} of {total} image path(s) do not exist:\n"
+            + detail
+        )
+
+    LOGGER.info("%s split: %d images, all paths verified OK", split, total)
+    return total
+
+
 def _verify_training_inputs():
     dataset_dir = _require_path(DATASET_OUTPUT_PATH, "Unified dataset")
     data_yaml = _require_path(TRAIN_DATA_YAML, "Training data.yaml")
 
-    for split in ("train", "val", "test"):
-        _require_path(dataset_dir / f"{split}.txt", f"{split}.txt")
+    train_count = _verify_split_paths(dataset_dir, "train", required=True)
+    val_count = _verify_split_paths(dataset_dir, "val", required=True)
+    _verify_split_paths(dataset_dir, "test", required=False)
+
+    if train_count == 0 or val_count == 0:
+        raise RuntimeError(
+            f"Insufficient data: train={train_count}, val={val_count}. "
+            "Both train and val must have at least 1 image."
+        )
 
     LOGGER.info("Dataset root: %s", dataset_dir)
     LOGGER.info("Data yaml: %s", data_yaml)
@@ -213,7 +263,7 @@ def main():
         flipud=TRAIN_FLIPUD,
         fliplr=TRAIN_FLIPLR,
         plots=True,
-        resume=bool(resume),
+        resume=resume is not False,
     )
 
     _verify_training_outputs(results.save_dir)
