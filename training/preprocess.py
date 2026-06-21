@@ -19,6 +19,8 @@ from utils.config import (
 BASE = DATASET_ROOT_PATH
 OUTPUT_DIR = DATASET_OUTPUT_PATH
 
+ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
@@ -38,6 +40,12 @@ class DatasetProcessor:
             "label_copy_failures": 0,
             "invalid_bbox_skipped": 0,
             "empty_labels_created": 0,
+            "nasa_ams_source_images": 0,
+            "nasa_ams_converted_rgb_images": 0,
+            "nasa_ams_skipped_images": 0,
+            "nasa_ams_missing_labels": 0,
+            "nasa_ams_invalid_images": 0,
+            "nasa_ams_empty_labels": 0,
         }
 
     def _count_label_classes(self, label_path):
@@ -90,6 +98,8 @@ class DatasetProcessor:
                         src_label = f"{fasdd_path}/annotations/YOLO/labels/{label_name}"
 
                         if os.path.exists(src_img) and os.path.exists(src_label):
+                            if os.path.splitext(src_img)[1].lower() not in ALLOWED_IMAGE_EXTS:
+                                continue
                             self.all_image_paths.append((src_img, src_label))
                             self._count_label_classes(src_label)
             except IOError as e:
@@ -116,6 +126,8 @@ class DatasetProcessor:
                         src_label = f"{fasdd_uav_path}/annotations/YOLO_UAV/labels/{label_name}"
 
                         if os.path.exists(src_img) and os.path.exists(src_label):
+                            if os.path.splitext(src_img)[1].lower() not in ALLOWED_IMAGE_EXTS:
+                                continue
                             self.all_image_paths.append((src_img, src_label))
                             self._count_label_classes(src_label)
             except IOError as e:
@@ -292,6 +304,8 @@ class DatasetProcessor:
                                     print(f"Error creating symlink {symlink_img_path}: {e}")
                                     continue
 
+                            if os.path.splitext(symlink_img_path)[1].lower() not in ALLOWED_IMAGE_EXTS:
+                                continue
                             self.all_image_paths.append((symlink_img_path, label_path))
 
                             if has_fire:
@@ -310,7 +324,7 @@ class DatasetProcessor:
             print(f"D-Fire path not found, skipping: {dfire_path}")
             return
 
-        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+        image_exts = ALLOWED_IMAGE_EXTS
 
         dfire_temp_dir = f"{OUTPUT_DIR}/dfire_temp"
         if os.path.exists(dfire_temp_dir):
@@ -400,9 +414,21 @@ class DatasetProcessor:
             print(f"NASA AMS path not found, skipping: {nasa_path}")
             return
 
-        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+        nasa_rgb_path = os.environ.get(
+            "NASA_AMS_RGB_YOLO_PATH",
+            "/workspace/wildfire-extra-datasets/NASA AMS/clean_yolo_patches_rgb",
+        )
+        if os.path.abspath(nasa_rgb_path) == os.path.abspath(nasa_path):
+            raise ValueError(
+                "NASA_AMS_RGB_YOLO_PATH must be different from NASA_AMS_CLEAN_YOLO_PATH"
+            )
 
-        for split in ["train", "test"]:
+        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+
+        if os.path.exists(nasa_rgb_path):
+            shutil.rmtree(nasa_rgb_path)
+
+        for split in ["train", "val", "test"]:
             img_dir = os.path.join(nasa_path, split, "images")
             label_dir = os.path.join(nasa_path, split, "labels")
 
@@ -410,22 +436,59 @@ class DatasetProcessor:
                 print(f"NASA AMS split missing, skipping: {split}")
                 continue
 
+            rgb_img_dir = os.path.join(nasa_rgb_path, split, "images")
+            rgb_label_dir = os.path.join(nasa_rgb_path, split, "labels")
+            os.makedirs(rgb_img_dir, exist_ok=True)
+            os.makedirs(rgb_label_dir, exist_ok=True)
+
             for file in sorted(os.listdir(img_dir)):
                 img_ext = os.path.splitext(file)[1].lower()
                 if img_ext not in image_exts:
                     continue
 
+                self.stats["nasa_ams_source_images"] += 1
+
                 src_img = os.path.join(img_dir, file)
                 src_label = os.path.join(label_dir, os.path.splitext(file)[0] + ".txt")
 
                 if not os.path.exists(src_label):
+                    self.stats["nasa_ams_missing_labels"] += 1
+                    self.stats["nasa_ams_skipped_images"] += 1
                     continue
 
-                self.all_image_paths.append((src_img, src_label))
+                dst_img = os.path.join(rgb_img_dir, os.path.splitext(file)[0] + ".jpg")
+                dst_label = os.path.join(rgb_label_dir, os.path.splitext(file)[0] + ".txt")
+
+                try:
+                    with Image.open(src_img) as img:
+                        rgb_img = img.convert("RGB")
+                        if rgb_img.mode != "RGB" or len(rgb_img.getbands()) != 3:
+                            raise ValueError(f"Converted image is not RGB: {src_img}")
+                        rgb_img.save(dst_img, "JPEG", quality=95)
+
+                    with Image.open(dst_img) as verify_img:
+                        if verify_img.mode != "RGB" or len(verify_img.getbands()) != 3:
+                            raise ValueError(f"Saved image is not RGB: {dst_img}")
+
+                    shutil.copy2(src_label, dst_label)
+                except (IOError, OSError, ValueError) as e:
+                    print(f"Error converting NASA AMS image {src_img}: {e}")
+                    self.stats["nasa_ams_invalid_images"] += 1
+                    self.stats["nasa_ams_skipped_images"] += 1
+                    for partial_path in [dst_img, dst_label]:
+                        if os.path.exists(partial_path):
+                            os.remove(partial_path)
+                    continue
+
+                self.all_image_paths.append((dst_img, dst_label))
+                self.stats["nasa_ams_converted_rgb_images"] += 1
+
+                if os.path.getsize(dst_label) == 0:
+                    self.stats["nasa_ams_empty_labels"] += 1
 
                 has_fire = False
                 try:
-                    with open(src_label, "r") as lf:
+                    with open(dst_label, "r") as lf:
                         for line in lf:
                             line = line.strip()
                             if not line:
@@ -443,7 +506,7 @@ class DatasetProcessor:
                         self.stats["fire_images"] += 1
 
                 except (IOError, ValueError) as e:
-                    print(f"Error reading NASA AMS label file {src_label}: {e}")
+                    print(f"Error reading NASA AMS label file {dst_label}: {e}")
 
     def split_and_create_files(self):
         print("Creating train/val/test split files...")
@@ -542,6 +605,7 @@ class DatasetProcessor:
             parts = line.split()
             if len(parts) < 5:
                 self.stats["invalid_bbox_skipped"] += 1
+                logger.warning("Skipping invalid YOLO label line in %s: %s", label_path, line)
                 return False
 
             class_id = int(parts[0])
@@ -552,19 +616,23 @@ class DatasetProcessor:
 
             if class_id not in [0, 1]:
                 self.stats["invalid_bbox_skipped"] += 1
+                logger.warning("Skipping label with invalid class in %s: %s", label_path, line)
                 return False
 
             if not (0 <= x <= 1 and 0 <= y <= 1 and 0 <= width <= 1 and 0 <= height <= 1):
                 self.stats["invalid_bbox_skipped"] += 1
+                logger.warning("Skipping label with out-of-range bbox in %s: %s", label_path, line)
                 return False
 
             if width <= 0 or height <= 0:
                 self.stats["invalid_bbox_skipped"] += 1
+                logger.warning("Skipping label with non-positive bbox in %s: %s", label_path, line)
                 return False
 
             return True
         except (ValueError, IndexError):
             self.stats["invalid_bbox_skipped"] += 1
+            logger.warning("Skipping unparsable YOLO label line in %s: %s", label_path, line)
             return False
 
     def _verify_unified_dataset(self):
@@ -585,6 +653,10 @@ class DatasetProcessor:
             for img_path in image_paths:
                 if not os.path.exists(img_path):
                     errors.append(f"Image does not exist: {img_path}")
+                    continue
+
+                if os.path.splitext(img_path)[1].lower() not in ALLOWED_IMAGE_EXTS:
+                    errors.append(f"Unsupported image format in unified dataset: {img_path}")
                     continue
 
                 img_name, _ = os.path.splitext(os.path.basename(img_path))
@@ -646,6 +718,13 @@ class DatasetProcessor:
         print(f"Label copy failures: {self.stats['label_copy_failures']}")
         print(f"Invalid bboxes skipped: {self.stats['invalid_bbox_skipped']}")
         print(f"Empty label files created (negative samples): {self.stats['empty_labels_created']}")
+        print("\nNASA AMS:")
+        print(f"Source images: {self.stats['nasa_ams_source_images']}")
+        print(f"Converted RGB images: {self.stats['nasa_ams_converted_rgb_images']}")
+        print(f"Skipped images: {self.stats['nasa_ams_skipped_images']}")
+        print(f"Missing labels: {self.stats['nasa_ams_missing_labels']}")
+        print(f"Invalid images: {self.stats['nasa_ams_invalid_images']}")
+        print(f"Empty labels preserved: {self.stats['nasa_ams_empty_labels']}")
 
 
 def main():
