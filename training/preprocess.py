@@ -688,6 +688,12 @@ class DatasetProcessor:
             if os.path.exists(labels_dir) and os.path.exists(images_dir):
                 label_files = set(os.listdir(labels_dir))
                 image_files = set(os.listdir(images_dir))
+
+                for image_file in image_files:
+                    image_ext = os.path.splitext(image_file)[1].lower()
+                    if image_ext in {".tif", ".tiff"}:
+                        errors.append(f"TIFF image found in unified dataset: {images_dir}/{image_file}")
+
                 expected_labels = {os.path.splitext(img)[0] + ".txt" for img in image_files}
 
                 orphaned_labels = label_files - expected_labels
