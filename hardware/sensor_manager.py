@@ -9,9 +9,9 @@ Integrates multiple sensor types:
 """
 
 from utils.config import (I2C_SCL, I2C_SDA, ADS1115_MQ2_1, ADS1115_MQ2_2, SHT31_ADDRESS,
-                         KY026_PIN_1, KY026_PIN_2, KY026_PIN_3, KY026_PIN_4,
+                         KY026_FRONT_LEFT_PIN, KY026_FRONT_RIGHT_PIN, KY026_LEFT_PIN, KY026_RIGHT_PIN,
                          HCSR04_TRIGGER_PIN, HCSR04_ECHO_PIN, ULTRASONIC_DISTANCE_MULTIPLIER,
-                         SENSOR_READ_TIMEOUT)
+                         SENSOR_READ_TIMEOUT, MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD)
 from utils.logger import WildfireLogger
 
 import adafruit_ads1x15.ads1115 as ADS
@@ -21,6 +21,19 @@ import Jetson.GPIO as GPIO
 import busio
 import board
 import time
+
+class FlameReadings(dict):
+    def __iter__(self):
+        return iter(self.values())
+
+    def __bool__(self):
+        return any(self.values())
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
 
 class SensorManager:
     """
@@ -76,8 +89,13 @@ class SensorManager:
             self.logger.log_error("SensorManager.GPIO_setmode", str(e))
 
         # Setup KY-026 flame sensors (4 sensors for directional detection)
-        self._ky026_pins = [KY026_PIN_1, KY026_PIN_2, KY026_PIN_3, KY026_PIN_4]
-        for pin in self._ky026_pins:
+        self._ky026_pins = {
+            "front_left": KY026_FRONT_LEFT_PIN,
+            "front_right": KY026_FRONT_RIGHT_PIN,
+            "left": KY026_LEFT_PIN,
+            "right": KY026_RIGHT_PIN,
+        }
+        for pin in self._ky026_pins.values():
             if pin is not None:
                 try:
                     GPIO.setup(pin, GPIO.IN)
@@ -138,18 +156,32 @@ class SensorManager:
             True means flame detected in that direction
             Note: KY-026 outputs LOW when flame detected, so we invert the reading
         """
-        flame_detected = []
-        for pin in self._ky026_pins:
+        flame_detected = FlameReadings()
+        for position, pin in self._ky026_pins.items():
             if pin is not None:
                 try:
                     # KY-026 is active LOW (outputs 0 when flame detected)
-                    flame_detected.append(not GPIO.input(pin))
+                    flame_detected[position] = not GPIO.input(pin)
                 except (ValueError, RuntimeError) as e:
                     self.logger.log_error("SensorManager.read_ky026", str(e))
-                    flame_detected.append(False)
+                    flame_detected[position] = False
             else:
-                flame_detected.append(False)
+                flame_detected[position] = False
         return flame_detected
+
+    def _check_hardware_confirmation(self, smoke, temperature, humidity, flame):
+        flame_detected = any(flame.values()) if isinstance(flame, dict) else any(flame)
+        sensor_conditions = {
+            "flame": flame_detected,
+            "gas": smoke > MQ2_SMOKE_THRESHOLD,
+            "temperature": temperature > TEMP_THRESHOLD,
+            "humidity": humidity < HUMIDITY_THRESHOLD
+        }
+        fire_detected = any(sensor_conditions.values())
+        confirmed_fire = flame_detected and any(
+            detected for condition, detected in sensor_conditions.items() if condition != "flame"
+        )
+        return fire_detected, confirmed_fire
 
     def read_hcsr04(self):
         """
@@ -215,12 +247,17 @@ class SensorManager:
         temperature, humidity = self.read_sht31()
         flame = self.read_ky026()
         distance = self.read_hcsr04()
+        fire_detected, confirmed_fire = self._check_hardware_confirmation(smoke, temperature, humidity, flame)
 
         sensor_data = {
             "smoke": smoke,
             "temperature": temperature,
             "humidity": humidity,
             "flame": flame,
+            "flame_list": list(flame.values()),
+            "gas": smoke,
+            "fire_detected": fire_detected,
+            "confirmed_fire": confirmed_fire,
             "distance": distance
         }
 
