@@ -75,27 +75,28 @@ def _resolve_resume():
 
 def _init_wandb():
     if os.environ.get("WANDB_MODE") == "disabled":
-        LOGGER.info("Weights & Biases disabled by WANDB_MODE=disabled")
+        LOGGER.warning("Weights & Biases disabled by WANDB_MODE=disabled")
         return
 
     try:
         import wandb
+
+        try:
+            api_key = os.environ.get("WANDB_API_KEY")
+            if api_key:
+                wandb.login(key=api_key)
+
+            init_kwargs = {"project": WANDB_PROJECT}
+            if WANDB_ENTITY:
+                init_kwargs["entity"] = WANDB_ENTITY
+
+            wandb.init(**init_kwargs)
+
+        except Exception as exc:
+            LOGGER.warning("W&B initialization failed. Continuing without W&B logging: %s", exc)
+
     except ImportError:
-        LOGGER.info("wandb is not installed; continuing without W&B logging")
-        return
-
-    api_key = os.environ.get("WANDB_API_KEY")
-    if api_key:
-        wandb.login(key=api_key)
-
-    init_kwargs = {"project": WANDB_PROJECT}
-    if WANDB_ENTITY:
-        init_kwargs["entity"] = WANDB_ENTITY
-
-    try:
-        wandb.init(**init_kwargs)
-    except Exception as exc:
-        LOGGER.warning("Failed to initialize wandb; continuing without it: %s", exc)
+        LOGGER.warning("wandb is not installed. Continuing without W&B logging.")
 
 
 def _load_model(resume):
