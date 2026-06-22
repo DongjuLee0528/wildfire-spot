@@ -205,7 +205,7 @@ DATASET_RANDOM_SEED = 42
 
 AIHUB_DATASET_SUBPATH = "regional-safety-disaster-wildfire/01-1.official-open-data"
 WANDB_PROJECT = os.environ.get("WANDB_PROJECT", "wildfire-detection")
-WANDB_ENTITY = os.environ.get('WANDB_ENTITY', 'dozoo0528-')
+WANDB_ENTITY = os.environ.get("WANDB_ENTITY") or None
 TRAIN_MODEL_PATH = os.environ.get("WILDFIRE_TRAIN_MODEL", "yolov10s.pt")
 TRAIN_DATA_YAML = _env_path(
     "WILDFIRE_TRAIN_DATA_YAML",

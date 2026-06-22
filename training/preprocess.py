@@ -18,6 +18,9 @@ from utils.config import (
 
 BASE = DATASET_ROOT_PATH
 OUTPUT_DIR = DATASET_OUTPUT_PATH
+BUILD_DIR = f"{OUTPUT_DIR}_build"
+TEMP_ROOT = f"{OUTPUT_DIR}_temp"
+OUTPUT_BACKUP_DIR = f"{OUTPUT_DIR}_backup_before_publish"
 
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 
@@ -48,6 +51,75 @@ class DatasetProcessor:
             "nasa_ams_invalid_images": 0,
             "nasa_ams_empty_labels": 0,
         }
+
+    def prepare_build_workspace(self):
+        print("Preparing isolated build workspace...")
+
+        for path in [BUILD_DIR, TEMP_ROOT]:
+            if os.path.exists(path):
+                shutil.rmtree(path)
+
+        os.makedirs(BUILD_DIR, exist_ok=True)
+        os.makedirs(TEMP_ROOT, exist_ok=True)
+
+    def publish_build(self):
+        print("Publishing verified dataset build...")
+
+        if not os.path.exists(BUILD_DIR):
+            raise RuntimeError(
+                f"BUILD_DIR does not exist, refusing to publish: {BUILD_DIR}"
+            )
+
+        side_backup = f"{OUTPUT_DIR}_publish_side_backup"
+
+        if os.path.exists(side_backup):
+            shutil.rmtree(side_backup)
+
+        output_existed = os.path.exists(OUTPUT_DIR)
+        if output_existed:
+            try:
+                os.rename(OUTPUT_DIR, side_backup)
+            except OSError as e:
+                raise RuntimeError(
+                    f"Failed to move existing output dataset to side backup: {e}\n"
+                    f"  OUTPUT_DIR:  {OUTPUT_DIR}\n"
+                    f"  side_backup: {side_backup}\n"
+                    "Existing dataset is untouched."
+                ) from e
+
+        try:
+            os.rename(BUILD_DIR, OUTPUT_DIR)
+        except OSError as e:
+            if output_existed and os.path.exists(side_backup) and not os.path.exists(OUTPUT_DIR):
+                try:
+                    os.rename(side_backup, OUTPUT_DIR)
+                    raise RuntimeError(
+                        f"Failed to publish build: {e}\n"
+                        "Previous output dataset has been restored from side backup."
+                    ) from e
+                except OSError as restore_error:
+                    raise RuntimeError(
+                        f"Failed to publish build: {e}\n"
+                        f"CRITICAL: Failed to restore previous output dataset from side backup: {restore_error}\n"
+                        f"  BUILD_DIR:   {BUILD_DIR}\n"
+                        f"  side_backup: {side_backup}\n"
+                        f"  OUTPUT_DIR:  {OUTPUT_DIR}\n"
+                        "Manual recovery required."
+                    ) from restore_error
+            raise RuntimeError(
+                f"Failed to publish build: {e}\n"
+                f"  BUILD_DIR:  {BUILD_DIR}\n"
+                f"  OUTPUT_DIR: {OUTPUT_DIR}"
+            ) from e
+
+        if os.path.exists(side_backup):
+            shutil.rmtree(side_backup)
+
+        if os.path.exists(OUTPUT_BACKUP_DIR):
+            shutil.rmtree(OUTPUT_BACKUP_DIR)
+
+        if os.path.exists(TEMP_ROOT):
+            shutil.rmtree(TEMP_ROOT)
 
     def validate_input_datasets(self):
         print("Validating input datasets before touching output directory...")
@@ -319,7 +391,7 @@ class DatasetProcessor:
             print(f"Error reading PyroNear directory {pyronear_path}: {e}")
             return
 
-        temp_dir = f"{OUTPUT_DIR}/pyronear_temp"
+        temp_dir = f"{TEMP_ROOT}/pyronear_temp"
         os.makedirs(f"{temp_dir}/images", exist_ok=True)
         os.makedirs(f"{temp_dir}/labels", exist_ok=True)
 
@@ -380,7 +452,7 @@ class DatasetProcessor:
         print("Processing AI Hub dataset...")
         ai_hub_path = f"{BASE}/{AIHUB_DATASET_SUBPATH}"
 
-        aihub_dir = f"{OUTPUT_DIR}/aihub"
+        aihub_dir = f"{TEMP_ROOT}/aihub"
         os.makedirs(f"{aihub_dir}/images/train", exist_ok=True)
         os.makedirs(f"{aihub_dir}/labels/train", exist_ok=True)
 
@@ -501,7 +573,7 @@ class DatasetProcessor:
 
         image_exts = ALLOWED_IMAGE_EXTS
 
-        dfire_temp_dir = f"{OUTPUT_DIR}/dfire_temp"
+        dfire_temp_dir = f"{TEMP_ROOT}/dfire_temp"
         if os.path.exists(dfire_temp_dir):
             shutil.rmtree(dfire_temp_dir)
 
@@ -589,13 +661,10 @@ class DatasetProcessor:
             print(f"NASA AMS path not found, skipping: {nasa_path}")
             return
 
-        nasa_rgb_path = os.environ.get(
-            "NASA_AMS_RGB_YOLO_PATH",
-            "/workspace/wildfire-extra-datasets/NASA AMS/clean_yolo_patches_rgb",
-        )
+        nasa_rgb_path = f"{TEMP_ROOT}/nasa_ams_rgb"
         if os.path.abspath(nasa_rgb_path) == os.path.abspath(nasa_path):
             raise ValueError(
-                "NASA_AMS_RGB_YOLO_PATH must be different from NASA_AMS_CLEAN_YOLO_PATH"
+                "NASA AMS RGB temp path must be different from NASA_AMS_CLEAN_YOLO_PATH"
             )
 
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
@@ -691,16 +760,6 @@ class DatasetProcessor:
                 "No input images found. Refusing to delete existing output dataset."
             )
 
-        print("Cleaning up previous unified dataset outputs...")
-        if os.path.exists(f"{OUTPUT_DIR}/images"):
-            shutil.rmtree(f"{OUTPUT_DIR}/images")
-        if os.path.exists(f"{OUTPUT_DIR}/labels"):
-            shutil.rmtree(f"{OUTPUT_DIR}/labels")
-        for file in ["train.txt", "val.txt", "test.txt", "data.yaml"]:
-            file_path = f"{OUTPUT_DIR}/{file}"
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
         if DATASET_TRAIN_RATIO + DATASET_VAL_RATIO > 1.0:
             raise ValueError(
                 f"Invalid dataset ratios: train={DATASET_TRAIN_RATIO}, "
@@ -718,26 +777,30 @@ class DatasetProcessor:
         val_data = self.all_image_paths[train_end:val_end]
         test_data = self.all_image_paths[val_end:]
 
+        if not train_data:
+            raise RuntimeError("train split is empty. Refusing to publish invalid dataset.")
+
+        if not val_data:
+            raise RuntimeError("val split is empty. Refusing to publish invalid dataset.")
+
         self.stats["total_images"] = total
         self.stats["train_count"] = len(train_data)
         self.stats["val_count"] = len(val_data)
         self.stats["test_count"] = len(test_data)
 
-        os.makedirs(f"{OUTPUT_DIR}/images/train", exist_ok=True)
-        os.makedirs(f"{OUTPUT_DIR}/images/val", exist_ok=True)
-        os.makedirs(f"{OUTPUT_DIR}/images/test", exist_ok=True)
-        os.makedirs(f"{OUTPUT_DIR}/labels/train", exist_ok=True)
-        os.makedirs(f"{OUTPUT_DIR}/labels/val", exist_ok=True)
-        os.makedirs(f"{OUTPUT_DIR}/labels/test", exist_ok=True)
+        os.makedirs(f"{BUILD_DIR}/images/train", exist_ok=True)
+        os.makedirs(f"{BUILD_DIR}/images/val", exist_ok=True)
+        os.makedirs(f"{BUILD_DIR}/images/test", exist_ok=True)
+        os.makedirs(f"{BUILD_DIR}/labels/train", exist_ok=True)
+        os.makedirs(f"{BUILD_DIR}/labels/val", exist_ok=True)
+        os.makedirs(f"{BUILD_DIR}/labels/test", exist_ok=True)
 
         self._create_unified_dataset("train", train_data)
         self._create_unified_dataset("val", val_data)
         self._create_unified_dataset("test", test_data)
 
-        self._verify_unified_dataset()
-
     def _create_unified_dataset(self, split, data):
-        txt_file = f"{OUTPUT_DIR}/{split}.txt"
+        txt_file = f"{BUILD_DIR}/{split}.txt"
 
         with open(txt_file, "w") as f:
             for idx, (src_img_path, src_label_path) in enumerate(data):
@@ -747,8 +810,9 @@ class DatasetProcessor:
                 unique_img_name = f"{split}_{idx:06d}_{img_name}.jpg"
                 unique_label_name = f"{split}_{idx:06d}_{img_name}.txt"
 
-                unified_img_path = f"{OUTPUT_DIR}/images/{split}/{unique_img_name}"
-                unified_label_path = f"{OUTPUT_DIR}/labels/{split}/{unique_label_name}"
+                unified_img_path = f"{BUILD_DIR}/images/{split}/{unique_img_name}"
+                unified_label_path = f"{BUILD_DIR}/labels/{split}/{unique_label_name}"
+                final_img_path = f"{OUTPUT_DIR}/images/{split}/{unique_img_name}"
 
                 try:
                     with Image.open(src_img_path) as src_img:
@@ -784,7 +848,7 @@ class DatasetProcessor:
                         os.remove(unified_img_path)
                     continue
 
-                f.write(f"{unified_img_path}\n")
+                f.write(f"{final_img_path}\n")
 
     def _validate_yolo_line(self, line, img_path, label_path):
         try:
@@ -825,9 +889,38 @@ class DatasetProcessor:
         print("\nVerifying unified dataset integrity...")
 
         errors = []
+        allowed_top_level = {
+            "images",
+            "labels",
+            "train.txt",
+            "val.txt",
+            "test.txt",
+            "data.yaml",
+        }
+        forbidden_top_level = {
+            "aihub",
+            "pyronear_temp",
+            "dfire_temp",
+            "nasa_ams_rgb",
+        }
+
+        if os.path.exists(BUILD_DIR):
+            top_level_entries = set(os.listdir(BUILD_DIR))
+            unexpected_entries = top_level_entries - allowed_top_level
+            for entry in sorted(unexpected_entries):
+                if entry in forbidden_top_level or entry.endswith("_build") or entry.endswith("_temp"):
+                    errors.append(f"Forbidden temp/build entry in final dataset build: {entry}")
+                else:
+                    errors.append(f"Unexpected entry in final dataset build: {entry}")
+        else:
+            errors.append(f"Missing build directory: {BUILD_DIR}")
+
+        data_yaml_path = f"{BUILD_DIR}/data.yaml"
+        if not os.path.exists(data_yaml_path):
+            errors.append("Missing data.yaml file")
 
         for split in ["train", "val", "test"]:
-            txt_file = f"{OUTPUT_DIR}/{split}.txt"
+            txt_file = f"{BUILD_DIR}/{split}.txt"
 
             if not os.path.exists(txt_file):
                 errors.append(f"Missing {split}.txt file")
@@ -837,16 +930,18 @@ class DatasetProcessor:
                 image_paths = [line.strip() for line in f if line.strip()]
 
             for img_path in image_paths:
-                if not os.path.exists(img_path):
+                actual_img_path = self._build_path_for_final_path(img_path)
+
+                if not os.path.exists(actual_img_path):
                     errors.append(f"Image does not exist: {img_path}")
                     continue
 
-                if os.path.splitext(img_path)[1].lower() not in ALLOWED_IMAGE_EXTS:
+                if os.path.splitext(actual_img_path)[1].lower() not in ALLOWED_IMAGE_EXTS:
                     errors.append(f"Unsupported image format in unified dataset: {img_path}")
                     continue
 
                 try:
-                    with Image.open(img_path) as img:
+                    with Image.open(actual_img_path) as img:
                         if img.mode != "RGB" or len(img.getbands()) != 3:
                             errors.append(f"Non-RGB image in unified dataset: {img_path}")
                             continue
@@ -854,15 +949,15 @@ class DatasetProcessor:
                     errors.append(f"Invalid image in unified dataset: {img_path} ({e})")
                     continue
 
-                img_name, _ = os.path.splitext(os.path.basename(img_path))
-                label_path = f"{OUTPUT_DIR}/labels/{split}/{img_name}.txt"
+                img_name, _ = os.path.splitext(os.path.basename(actual_img_path))
+                label_path = f"{BUILD_DIR}/labels/{split}/{img_name}.txt"
 
                 if not os.path.exists(label_path):
                     errors.append(f"Missing label for image: {img_path} (expected: {label_path})")
 
         for split in ["train", "val", "test"]:
-            labels_dir = f"{OUTPUT_DIR}/labels/{split}"
-            images_dir = f"{OUTPUT_DIR}/images/{split}"
+            labels_dir = f"{BUILD_DIR}/labels/{split}"
+            images_dir = f"{BUILD_DIR}/images/{split}"
 
             if os.path.exists(labels_dir) and os.path.exists(images_dir):
                 label_files = set(os.listdir(labels_dir))
@@ -888,6 +983,16 @@ class DatasetProcessor:
 
         print("✓ Dataset verification passed")
 
+    def _build_path_for_final_path(self, final_path):
+        final_abs = os.path.abspath(final_path)
+        output_abs = os.path.abspath(OUTPUT_DIR)
+
+        if final_abs == output_abs or final_abs.startswith(output_abs + os.sep):
+            rel_path = os.path.relpath(final_abs, output_abs)
+            return os.path.join(BUILD_DIR, rel_path)
+
+        return final_path
+
     def create_data_yaml(self):
         data_yaml = (
             f"path: {OUTPUT_DIR}\n"
@@ -898,7 +1003,7 @@ class DatasetProcessor:
             f"names: ['fire', 'smoke']\n"
         )
 
-        with open(f"{OUTPUT_DIR}/data.yaml", "w") as f:
+        with open(f"{BUILD_DIR}/data.yaml", "w") as f:
             f.write(data_yaml)
 
     def print_statistics(self):
@@ -933,6 +1038,7 @@ def main():
     processor = DatasetProcessor()
 
     processor.validate_input_datasets()
+    processor.prepare_build_workspace()
 
     processor.process_fasdd()
     processor.process_fasdd_uav()
@@ -943,6 +1049,8 @@ def main():
 
     processor.split_and_create_files()
     processor.create_data_yaml()
+    processor._verify_unified_dataset()
+    processor.publish_build()
     processor.print_statistics()
 
     print("\nGenerated files:")
