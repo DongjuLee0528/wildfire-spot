@@ -777,6 +777,12 @@ class DatasetProcessor:
         val_data = self.all_image_paths[train_end:val_end]
         test_data = self.all_image_paths[val_end:]
 
+        if not train_data:
+            raise RuntimeError("train split is empty. Refusing to publish invalid dataset.")
+
+        if not val_data:
+            raise RuntimeError("val split is empty. Refusing to publish invalid dataset.")
+
         self.stats["total_images"] = total
         self.stats["train_count"] = len(train_data)
         self.stats["val_count"] = len(val_data)
