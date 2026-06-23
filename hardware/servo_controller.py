@@ -4,19 +4,26 @@ from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEG
                          SERVO_ANGLE_MIN, SERVO_ANGLE_MAX, SERVO_TEST_ENDPOINT_VALUES,
                          SERVO_MAX_ANGLE, SERVO_MIN_ANGLE, SERVO_ANGLE_ADJUSTMENT)
 
-import Kinematics.kinematics as kn
 import numpy as np
 
-from adafruit_pca9685 import PCA9685
-from adafruit_motor import servo
-import board
-import busio
-import time
+def _load_servo_hardware():
+    try:
+        from adafruit_pca9685 import PCA9685
+        from adafruit_motor import servo
+        import busio
+    except ImportError as exc:
+        raise RuntimeError("Servo hardware dependencies are not available") from exc
+    return PCA9685, servo, busio
 
 class QuadrupedServoManager:
 
     def __init__(self):
+        self._i2c_interface = None
+        self._front_driver = None
+        self._rear_driver = None
+        self._camera_driver = None
         try:
+            PCA9685, servo, busio = _load_servo_hardware()
             print("Initializing servo hardware")
             self._i2c_interface = busio.I2C(I2C_SCL, I2C_SDA)
             print("Setting up servo drivers")
@@ -28,7 +35,8 @@ class QuadrupedServoManager:
             self._camera_driver = PCA9685(self._i2c_interface, address=PCA9685_CAMERA)
             self._camera_driver.frequency = PWM_FREQUENCY
         except (ValueError, RuntimeError, OSError) as e:
-            print("Servo driver initialization failed")
+            print(f"Servo driver initialization failed: {type(e).__name__}: {e}")
+            self.shutdown_servos()
             raise
 
         self._servo_array = list()
@@ -107,19 +115,29 @@ class QuadrupedServoManager:
 
     def shutdown_servos(self):
         try:
-            self._front_driver.deinit()
+            if self._front_driver is not None:
+                self._front_driver.deinit()
         except (ValueError, RuntimeError, AttributeError) as e:
-            pass
+            print(f"Front servo driver shutdown failed: {type(e).__name__}: {e}")
         try:
-            self._rear_driver.deinit()
+            if self._rear_driver is not None:
+                self._rear_driver.deinit()
         except (ValueError, RuntimeError, AttributeError) as e:
-            pass
+            print(f"Rear servo driver shutdown failed: {type(e).__name__}: {e}")
         try:
-            self._camera_driver.deinit()
+            if self._camera_driver is not None:
+                self._camera_driver.deinit()
         except (ValueError, RuntimeError, AttributeError) as e:
-            pass
+            print(f"Camera servo driver shutdown failed: {type(e).__name__}: {e}")
+        try:
+            if self._i2c_interface is not None:
+                self._i2c_interface.deinit()
+        except (ValueError, RuntimeError, AttributeError) as e:
+            print(f"Servo I2C shutdown failed: {type(e).__name__}: {e}")
 
 if __name__=="__main__":
+    import Kinematics.kinematics as kn
+
     test_endpoints = np.array(SERVO_TEST_ENDPOINT_VALUES)
     kinematics_solver = kn.DHParameterSolver()
     calculated_angles = kinematics_solver.init_ik(test_endpoints)
