@@ -7,12 +7,19 @@ Processes 360-degree scanning LIDAR data for:
 - VFH (Vector Field Histogram) based navigation
 """
 
-import serial
 import time
 from utils.config import (LIDAR_UART_PORT, LIDAR_BAUDRATE, LIDAR_OBSTACLE_THRESHOLD,
                          LIDAR_DIRECTION_ANGLES, LIDAR_DATA_SIZE, LIDAR_PACKET_HEADER,
                          LIDAR_FULL_SCAN_SIZE, LIDAR_DIRECTION_COUNT, LIDAR_ANGLE_RANGE,
-                         LIDAR_REVERSE_DIRECTION, LIDAR_PATH_CHECK_RANGE, LIDAR_READ_TIMEOUT)
+	                         LIDAR_REVERSE_DIRECTION, LIDAR_PATH_CHECK_RANGE, LIDAR_READ_TIMEOUT)
+
+try:
+    import serial
+    SERIAL_EXCEPTIONS = (OSError, serial.SerialException)
+except ImportError:
+    serial = None
+    SERIAL_EXCEPTIONS = (OSError,)
+SERIAL_READ_EXCEPTIONS = SERIAL_EXCEPTIONS + (IndexError, ValueError)
 
 class LidarManager:
     """
@@ -31,14 +38,26 @@ class LidarManager:
         Attempts to connect to LIDAR sensor via UART.
         If connection fails, LIDAR remains unavailable but system continues.
         """
+        if serial is None:
+            print("LIDAR serial module is not available")
+            self.serial_port = None
+            self._available = False
+            self.obstacle_threshold = LIDAR_OBSTACLE_THRESHOLD
+            self.directions = LIDAR_DIRECTION_ANGLES
+            return
+
         try:
             self.serial_port = serial.Serial(LIDAR_UART_PORT, LIDAR_BAUDRATE, timeout=1)
             self._available = True
-        except (OSError, serial.SerialException):
+        except SERIAL_EXCEPTIONS:
             self.serial_port = None
             self._available = False
         self.obstacle_threshold = LIDAR_OBSTACLE_THRESHOLD
         self.directions = LIDAR_DIRECTION_ANGLES
+
+    def _angle_in_range(self, angle, target_angle, angle_range):
+        diff = abs((angle - target_angle + 180) % 360 - 180)
+        return diff <= angle_range
 
     def read_scan(self):
         """
@@ -81,7 +100,7 @@ class LidarManager:
                     if len(distance_data) >= LIDAR_FULL_SCAN_SIZE:
                         break
             return distance_data
-        except (serial.SerialException, IndexError, ValueError):
+        except SERIAL_READ_EXCEPTIONS:
             return {}
 
     def get_obstacle_direction(self):
@@ -104,10 +123,9 @@ class LidarManager:
             min_distance = float('inf')
 
             # Check all angles within the range for this direction
-            for angle in range(direction - LIDAR_ANGLE_RANGE, direction + LIDAR_ANGLE_RANGE + 1):
-                normalized_angle = angle % 360
-                if normalized_angle in scan_data:
-                    min_distance = min(min_distance, scan_data[normalized_angle])
+            for angle, distance in scan_data.items():
+                if self._angle_in_range(angle, direction, LIDAR_ANGLE_RANGE):
+                    min_distance = min(min_distance, distance)
 
             # Mark as obstacle if closest point is within threshold
             if min_distance <= self.obstacle_threshold:
@@ -177,10 +195,9 @@ class LidarManager:
 
         min_distance = float('inf')
         # Check angles within LIDAR_PATH_CHECK_RANGE of target direction
-        for angle in range(direction_deg - LIDAR_PATH_CHECK_RANGE, direction_deg + LIDAR_PATH_CHECK_RANGE + 1):
-            normalized_angle = angle % 360
-            if normalized_angle in scan_data:
-                min_distance = min(min_distance, scan_data[normalized_angle])
+        for angle, distance in scan_data.items():
+            if self._angle_in_range(angle, direction_deg, LIDAR_PATH_CHECK_RANGE):
+                min_distance = min(min_distance, distance)
 
         return min_distance > threshold_mm
 
@@ -195,5 +212,5 @@ class LidarManager:
                 if self.serial_port.is_open:
                     self.serial_port.close()
                 self._available = False
-            except (OSError, serial.SerialException) as e:
-                pass
+            except SERIAL_EXCEPTIONS as e:
+                print(f"LIDAR close failed: {type(e).__name__}: {e}")

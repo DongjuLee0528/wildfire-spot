@@ -14,13 +14,29 @@ from utils.config import (I2C_SCL, I2C_SDA, ADS1115_MQ2_1, ADS1115_MQ2_2, SHT31_
                          SENSOR_READ_TIMEOUT, MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD)
 from utils.logger import WildfireLogger
 
-import adafruit_ads1x15.ads1115 as ADS
-from adafruit_ads1x15.analog_in import AnalogIn
-import adafruit_sht31d
-import Jetson.GPIO as GPIO
-import busio
-import board
 import time
+
+try:
+    import adafruit_ads1x15.ads1115 as ADS
+    from adafruit_ads1x15.analog_in import AnalogIn
+except ImportError:
+    ADS = None
+    AnalogIn = None
+
+try:
+    import adafruit_sht31d
+except ImportError:
+    adafruit_sht31d = None
+
+try:
+    import Jetson.GPIO as GPIO
+except ImportError:
+    GPIO = None
+
+try:
+    import busio
+except ImportError:
+    busio = None
 
 class FlameReadings(dict):
     def __iter__(self):
@@ -55,38 +71,52 @@ class SensorManager:
         self._i2c = None
         self._ads_available = False
         self._sht31_available = False
+        self._gpio_available = False
         self.logger = WildfireLogger("SensorManager")
 
         # Initialize I2C bus for digital sensors
-        try:
-            self._i2c = busio.I2C(I2C_SCL, I2C_SDA)
-        except (ValueError, RuntimeError, OSError) as e:
-            self.logger.log_error("SensorManager.I2C_init", str(e))
+        if busio is None:
+            self.logger.log_error("SensorManager.I2C_init", "busio module is not available")
+        else:
+            try:
+                self._i2c = busio.I2C(I2C_SCL, I2C_SDA)
+            except (ValueError, RuntimeError, OSError) as e:
+                self.logger.log_error("SensorManager.I2C_init", str(e))
 
         # Initialize I2C-based sensors if bus is available
         if self._i2c is not None:
             # Setup dual ADS1115 ADCs for two MQ2 smoke sensors
-            try:
-                self._ads1_1 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_1)
-                self._ads1_2 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_2)
-                self._mq2_chan1 = AnalogIn(self._ads1_1, ADS.P0)
-                self._mq2_chan2 = AnalogIn(self._ads1_2, ADS.P0)
-                self._ads_available = True
-            except (ValueError, RuntimeError, OSError) as e:
-                self.logger.log_error("SensorManager.ADS1115_init", str(e))
+            if ADS is None or AnalogIn is None:
+                self.logger.log_error("SensorManager.ADS1115_init", "ADS1115 modules are not available")
+            else:
+                try:
+                    self._ads1_1 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_1)
+                    self._ads1_2 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_2)
+                    self._mq2_chan1 = AnalogIn(self._ads1_1, ADS.P0)
+                    self._mq2_chan2 = AnalogIn(self._ads1_2, ADS.P0)
+                    self._ads_available = True
+                except (ValueError, RuntimeError, OSError) as e:
+                    self.logger.log_error("SensorManager.ADS1115_init", str(e))
 
             # Setup SHT31 temperature and humidity sensor
-            try:
-                self._sht31 = adafruit_sht31d.SHT31D(self._i2c, address=SHT31_ADDRESS)
-                self._sht31_available = True
-            except (ValueError, RuntimeError, OSError) as e:
-                self.logger.log_error("SensorManager.SHT31_init", str(e))
+            if adafruit_sht31d is None:
+                self.logger.log_error("SensorManager.SHT31_init", "adafruit_sht31d module is not available")
+            else:
+                try:
+                    self._sht31 = adafruit_sht31d.SHT31D(self._i2c, address=SHT31_ADDRESS)
+                    self._sht31_available = True
+                except (ValueError, RuntimeError, OSError) as e:
+                    self.logger.log_error("SensorManager.SHT31_init", str(e))
 
         # Setup GPIO for digital sensors
-        try:
-            GPIO.setmode(GPIO.BOARD)
-        except (ValueError, RuntimeError) as e:
-            self.logger.log_error("SensorManager.GPIO_setmode", str(e))
+        if GPIO is None:
+            self.logger.log_error("SensorManager.GPIO_setmode", "Jetson.GPIO module is not available")
+        else:
+            try:
+                GPIO.setmode(GPIO.BOARD)
+                self._gpio_available = True
+            except (ValueError, RuntimeError, AttributeError) as e:
+                self.logger.log_error("SensorManager.GPIO_setmode", str(e))
 
         # Setup KY-026 flame sensors (4 sensors for directional detection)
         self._ky026_pins = {
@@ -96,18 +126,18 @@ class SensorManager:
             "right": KY026_RIGHT_PIN,
         }
         for pin in self._ky026_pins.values():
-            if pin is not None:
+            if self._gpio_available and pin is not None:
                 try:
                     GPIO.setup(pin, GPIO.IN)
-                except (ValueError, RuntimeError) as e:
+                except (ValueError, RuntimeError, AttributeError) as e:
                     self.logger.log_error("SensorManager.GPIO_setup_KY026", str(e))
 
         # Setup HC-SR04 ultrasonic distance sensor
-        if HCSR04_TRIGGER_PIN is not None and HCSR04_ECHO_PIN is not None:
+        if self._gpio_available and HCSR04_TRIGGER_PIN is not None and HCSR04_ECHO_PIN is not None:
             try:
                 GPIO.setup(HCSR04_TRIGGER_PIN, GPIO.OUT)
                 GPIO.setup(HCSR04_ECHO_PIN, GPIO.IN)
-            except (ValueError, RuntimeError) as e:
+            except (ValueError, RuntimeError, AttributeError) as e:
                 self.logger.log_error("SensorManager.GPIO_setup_HCSR04", str(e))
 
     def read_mq2(self):
@@ -157,12 +187,17 @@ class SensorManager:
             Note: KY-026 outputs LOW when flame detected, so we invert the reading
         """
         flame_detected = FlameReadings()
+        if not self._gpio_available:
+            for position in self._ky026_pins:
+                flame_detected[position] = False
+            return flame_detected
+
         for position, pin in self._ky026_pins.items():
             if pin is not None:
                 try:
                     # KY-026 is active LOW (outputs 0 when flame detected)
                     flame_detected[position] = not GPIO.input(pin)
-                except (ValueError, RuntimeError) as e:
+                except (ValueError, RuntimeError, AttributeError) as e:
                     self.logger.log_error("SensorManager.read_ky026", str(e))
                     flame_detected[position] = False
             else:
@@ -193,7 +228,7 @@ class SensorManager:
 
         Uses timeout protection to prevent infinite loops if sensor fails.
         """
-        if HCSR04_TRIGGER_PIN is None or HCSR04_ECHO_PIN is None:
+        if not self._gpio_available or HCSR04_TRIGGER_PIN is None or HCSR04_ECHO_PIN is None:
             return 0.0
 
         try:
@@ -211,6 +246,7 @@ class SensorManager:
                 pulse_start = time.time()
                 if time.time() - timeout_start > SENSOR_READ_TIMEOUT:
                     return 0.0
+                time.sleep(0.0001)
 
             # Wait for echo to end with timeout protection
             timeout_start = time.time()
@@ -219,13 +255,14 @@ class SensorManager:
                 pulse_end = time.time()
                 if time.time() - timeout_start > SENSOR_READ_TIMEOUT:
                     return 0.0
+                time.sleep(0.0001)
 
             # Calculate distance from pulse duration
             pulse_duration = pulse_end - pulse_start
             distance = pulse_duration * ULTRASONIC_DISTANCE_MULTIPLIER
 
             return round(distance, 2)
-        except (ValueError, RuntimeError) as e:
+        except (ValueError, RuntimeError, AttributeError) as e:
             self.logger.log_error("SensorManager.read_hcsr04", str(e))
             return 0.0
 
@@ -278,6 +315,7 @@ class SensorManager:
             self.logger.log_error("SensorManager.cleanup_i2c", str(e))
 
         try:
-            GPIO.cleanup()
-        except (ValueError, RuntimeError) as e:
+            if self._gpio_available:
+                GPIO.cleanup()
+        except (ValueError, RuntimeError, AttributeError) as e:
             self.logger.log_error("SensorManager.cleanup_gpio", str(e))
