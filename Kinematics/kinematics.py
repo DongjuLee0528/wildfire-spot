@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from math import sqrt, atan2, acos, sin, cos, pi
+from math import sqrt, atan2, acos, sin, cos, pi, isfinite
 
 from utils.config import (ROBOT_L1, ROBOT_L2, ROBOT_L3, ROBOT_L4, ROBOT_L, ROBOT_W,
                          ROBOT_LEG_FRONT, ROBOT_LEG_BACK, ROBOT_LEG_LEFT, ROBOT_LEG_RIGHT,
@@ -16,6 +16,14 @@ def create_3d_plot(axis_range):
     figure_axis.set_ylabel("Z")
     figure_axis.set_zlabel("Y")
     return figure_axis
+
+def _is_valid_coordinate_sequence(values, min_length):
+    try:
+        if values is None or len(values) < min_length:
+            return False
+        return all(isfinite(float(values[i])) for i in range(min_length))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 class DHParameterSolver:
 
@@ -35,10 +43,14 @@ class DHParameterSolver:
         self.computed_angles = np.zeros((4, 3), dtype=np.float64)
 
     def calculate_inverse_kinematics_single_leg(self, end_effector_pos):
-        x, y, z = end_effector_pos[0], end_effector_pos[1], end_effector_pos[2]
         L1, L2, L3, L4 = self.L1, self.L2, self.L3, self.L4
 
         try:
+            if not _is_valid_coordinate_sequence(end_effector_pos, 3):
+                print(f"Invalid IK target: {end_effector_pos}")
+                return (0, 0, 0)
+
+            x, y, z = float(end_effector_pos[0]), float(end_effector_pos[1]), float(end_effector_pos[2])
             F = sqrt(max(0, x**2 + y**2 - L1**2))
             G = F - L2
             H = sqrt(G**2 + z**2)
@@ -48,13 +60,19 @@ class DHParameterSolver:
                 return (0, 0, 0)
 
             D = (H**2 - L3**2 - L4**2) / (2 * L3 * L4)
-            D = max(-1, min(1, D))
+            if not isfinite(D) or D < -1 or D > 1:
+                print(f"Unreachable IK target: {end_effector_pos}")
+                return (0, 0, 0)
 
             theta3 = acos(D)
             theta2 = atan2(z, G) - atan2(L4*sin(theta3), L3+L4*cos(theta3))
+            if not all(isfinite(angle) for angle in (theta1, theta2, theta3)):
+                print(f"Invalid IK result for target: {end_effector_pos}")
+                return (0, 0, 0)
 
             return (theta1, theta2, theta3)
-        except (ValueError, ZeroDivisionError) as e:
+        except (ValueError, ZeroDivisionError, OverflowError, TypeError, IndexError) as e:
+            print(f"IK calculation failed: {type(e).__name__}: {e}")
             return (0, 0, 0)
 
     def forward_kinematics_dh_method(self, joint_angles):
@@ -130,6 +148,16 @@ class DHParameterSolver:
         return [front_left_transform, front_right_transform, back_left_transform, back_right_transform]
 
     def solve_complete_inverse_kinematics(self, foot_target_positions, body_pos, body_orient):
+        if foot_target_positions is None or len(foot_target_positions) < 4:
+            raise ValueError("foot_target_positions must contain 4 leg targets")
+        for i in range(4):
+            if not _is_valid_coordinate_sequence(foot_target_positions[i], 3):
+                raise ValueError(f"foot_target_positions[{i}] must contain 3 finite coordinates")
+        if not _is_valid_coordinate_sequence(body_pos, 3):
+            raise ValueError("body_pos must contain 3 finite coordinates")
+        if not _is_valid_coordinate_sequence(body_orient, 3):
+            raise ValueError("body_orient must contain 3 finite values")
+
         roll, pitch, yaw = body_orient
         x_position, y_position, z_position = body_pos
 
@@ -156,9 +184,10 @@ class DHParameterSolver:
 
         return joint_angle_solutions
 
-    def init_ik(self, foot_positions):
-        visualization_axis = create_3d_plot(200)
-        visualization_axis.view_init(elev=12., azim=28)
+    def init_ik(self, foot_positions, enable_plot=False):
+        if enable_plot:
+            visualization_axis = create_3d_plot(200)
+            visualization_axis.view_init(elev=12., azim=28)
 
         self.computed_angles = np.zeros((4, 3))
         for i in range(4):
