@@ -37,36 +37,36 @@ class WildfireLogger:
 
         # Only initialize handlers once to avoid duplicate log entries
         if not self.logger.handlers:
+            formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+            # Console handler for real-time monitoring (INFO level and above)
+            self.console_handler = logging.StreamHandler()
+            self.console_handler.setLevel(logging.INFO)
+            self.console_handler.setFormatter(formatter)
+            self.logger.addHandler(self.console_handler)
+
+            log_dir_available = True
             try:
                 os.makedirs(LOG_DIR, exist_ok=True)
             except OSError as e:
                 print(f"Failed to create log directory {LOG_DIR}: {e}")
-                return
+                log_dir_available = False
 
             # Create daily log file with timestamp
             log_filename = datetime.now().strftime("wildfire_%Y%m%d.log")
             log_filepath = os.path.join(LOG_DIR, log_filename)
 
-            try:
-                self.file_handler = logging.FileHandler(log_filepath)
-                self.file_handler.setLevel(logging.DEBUG)
-            except (PermissionError, OSError) as e:
-                print(f"Failed to create file handler for {log_filepath}: {e}")
-                self.file_handler = None
-
-            # Console handler for real-time monitoring (INFO level and above)
-            self.console_handler = logging.StreamHandler()
-            self.console_handler.setLevel(logging.INFO)
-
-            # Consistent log format across all handlers
-            formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+            if log_dir_available:
+                try:
+                    self.file_handler = logging.FileHandler(log_filepath)
+                    self.file_handler.setLevel(logging.DEBUG)
+                except (PermissionError, OSError) as e:
+                    print(f"Failed to create file handler for {log_filepath}: {e}")
+                    self.file_handler = None
 
             if self.file_handler:
                 self.file_handler.setFormatter(formatter)
                 self.logger.addHandler(self.file_handler)
-
-            self.console_handler.setFormatter(formatter)
-            self.logger.addHandler(self.console_handler)
 
     def debug(self, message):
         """Log a debug-level message (detailed diagnostic information)."""
