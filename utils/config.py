@@ -7,20 +7,38 @@ def _env_path(name, default):
 
 
 def _env_int(name, default):
-    return int(os.environ.get(name, default))
+    value = os.environ.get(name)
+    if value is None or value.strip() == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        print(f"Invalid integer for {name}: {value}. Using default: {default}")
+        return default
 
 
 def _env_int_or_auto(name, default):
     value = os.environ.get(name)
-    if value is None:
+    if value is None or value.strip() == "":
         return default
     if value.strip().lower() == "auto":
         return "auto"
-    return int(value)
+    try:
+        return int(value)
+    except ValueError:
+        print(f"Invalid integer for {name}: {value}. Using default: {default}")
+        return default
 
 
 def _env_float(name, default):
-    return float(os.environ.get(name, default))
+    value = os.environ.get(name)
+    if value is None or value.strip() == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        print(f"Invalid float for {name}: {value}. Using default: {default}")
+        return default
 
 
 def _env_bool(name, default=False):
@@ -33,7 +51,7 @@ try:
     import board
     I2C_SCL = board.SCL_1
     I2C_SDA = board.SDA_1
-except ImportError:
+except (ImportError, AttributeError):
     I2C_SCL = None
     I2C_SDA = None
 
