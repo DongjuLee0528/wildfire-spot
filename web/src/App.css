@@ -1,0 +1,906 @@
+/* --- Global Reset & Color Design Variables --- */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --bg-main: #0c0f12;
+    --bg-panel: #14191f;
+    --bg-panel-header: #1b222a;
+    --border-color: #26323f;
+    --text-main: #d1d7de;
+    --text-muted: #627284;
+    --accent-color: #00bcd4;
+    --accent-glow: rgba(0, 188, 212, 0.15);
+    --success: #2ecc71;
+    --warning: #f1c40f;
+    --danger: #e74c3c;
+    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: 'Courier New', Courier, monospace;
+}
+
+body {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    font-family: var(--font-family);
+    font-size: 14px;
+    overflow-x: hidden;
+}
+
+/* --- Dashboard Main Scaffold --- */
+.dashboard-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding: 16px;
+    gap: 16px;
+    width: 100%;
+    max-width: 100%;
+}
+
+/* --- 1. Header CSS --- */
+.dashboard-header {
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    padding: 14px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-radius: 4px;
+    gap: 16px;
+    min-width: 0;
+}
+
+.header-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.brand-icon {
+    font-size: 1.5rem;
+}
+
+.header-brand h1 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #fff;
+}
+
+.sub-title {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    border-left: 1px solid var(--border-color);
+    padding-left: 12px;
+    min-width: 0;
+}
+
+.header-status-group {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.status-item {
+    font-size: 0.9rem;
+}
+
+.status-label {
+    color: var(--text-muted);
+    margin-right: 6px;
+    font-weight: 600;
+}
+
+.status-value {
+    font-weight: 700;
+}
+
+.timestamp {
+    font-family: var(--font-mono);
+    color: var(--accent-color);
+    background: rgba(0, 188, 212, 0.05);
+    padding: 4px 8px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 188, 212, 0.2);
+}
+
+/* --- Responsive Layout Grid (Desktop First) --- */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr) 340px;
+    gap: 16px;
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.grid-column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+/* --- Standard Panel System Component --- */
+.panel {
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.panel-title {
+    background-color: var(--bg-panel-header);
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border-color);
+    color: #a2b4c7;
+}
+
+.panel-content {
+    padding: 14px;
+    flex-grow: 1;
+}
+
+/* Special Dashboard Interactive Glow Effect */
+.animate-border {
+    border-left: 3px solid var(--accent-color);
+}
+
+/* --- 2. Live Camera Viewport --- */
+.main-camera-panel {
+    flex-grow: 2;
+}
+
+.panel-header-actions {
+    background-color: var(--bg-panel-header);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 14px;
+    gap: 10px;
+    min-width: 0;
+}
+
+.badge-overlay-reserved {
+    font-size: 0.75rem;
+    background-color: rgba(231, 76, 60, 0.1);
+    color: var(--danger);
+    border: 1px solid rgba(231, 76, 60, 0.2);
+    padding: 2px 6px;
+    border-radius: 2px;
+}
+
+.camera-viewport {
+    background-color: #07090c;
+    position: relative;
+    aspect-ratio: 16 / 9;
+    min-height: 380px;
+    padding: 0;
+}
+
+/* Future AI Box Layout Placement Simulation */
+.ai-overlay-placeholder {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: 1px dashed rgba(255, 255, 255, 0.05);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.ai-overlay-placeholder .corner {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--text-muted);
+}
+.ai-overlay-placeholder .tl { top: 15px; left: 15px; border-right: 0; border-bottom: 0; }
+.ai-overlay-placeholder .tr { top: 15px; right: 15px; border-left: 0; border-bottom: 0; }
+.ai-overlay-placeholder .bl { bottom: 15px; left: 15px; border-right: 0; border-top: 0; }
+.ai-overlay-placeholder .br { bottom: 15px; right: 15px; border-left: 0; border-top: 0; }
+
+.error-message-container {
+    text-align: center;
+    padding: 20px;
+}
+
+.warning-icon {
+    font-size: 2.5rem;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 10px;
+}
+
+.main-msg {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: #8a9ba8;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+.sub-msg {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Center Bottom Row Grid Split */
+.center-bottom-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+/* --- 3. Robot Status Sub-Layout --- */
+.status-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.data-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(38, 50, 63, 0.4);
+}
+
+.data-row:last-child {
+    border-bottom: none;
+}
+
+/* --- 4. Current Mode System Selection UI --- */
+.mode-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.mode-btn {
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.02);
+    padding: 10px 14px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.mode-btn.active {
+    border-color: var(--accent-color);
+    background: var(--accent-glow);
+}
+
+.mode-btn.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.radio-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--text-muted);
+}
+
+.radio-indicator.checked {
+    border-color: var(--accent-color);
+    background-color: var(--accent-color);
+    box-shadow: 0 0 8px var(--accent-color);
+}
+
+.mode-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.mode-name {
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+
+.mode-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* --- 5. GPS Map Mock Component --- */
+.map-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mock-map-canvas {
+    height: 140px;
+    background-color: #11161d;
+    border: 1px solid var(--border-color);
+    position: relative;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.map-grid-lines {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-image:
+            linear-gradient(rgba(38, 50, 63, 0.3) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(38, 50, 63, 0.3) 1px, transparent 1px);
+    background-size: 20px 20px;
+}
+
+.map-robot-marker {
+    position: absolute;
+    top: 45%;
+    left: 55%;
+    transform: translate(-50%, -50%);
+}
+
+.marker-core {
+    display: block;
+    width: 8px;
+    height: 8px;
+    background-color: var(--accent-color);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--accent-color);
+}
+
+.ping {
+    position: absolute;
+    border: 2px solid var(--accent-color);
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    left: -8px;
+    top: -8px;
+    opacity: 0.4;
+}
+
+.map-scale-indicator {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--text-muted);
+    padding: 0 4px;
+}
+
+.map-coordinates {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    background: rgba(0,0,0,0.2);
+    padding: 8px;
+    border-radius: 3px;
+}
+
+.coord {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+}
+
+.c-lbl { color: var(--text-muted); margin-right: 4px; }
+.c-val { color: #fff; font-weight: bold;}
+
+/* --- 6. Sensor Telemetry CSS --- */
+.sensor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.sensor-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sensor-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+}
+
+.sensor-name { color: #a2b4c7; }
+.sensor-val { font-family: var(--font-mono); font-weight: 700; }
+
+.sensor-bar-bg {
+    height: 6px;
+    background-color: #0b0e12;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.sensor-bar-fill {
+    height: 100%;
+    background-color: var(--accent-color);
+}
+.sensor-bar-fill.safe { background-color: var(--success); }
+
+.sensor-grid-2x2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.sensor-mini-card {
+    background-color: rgba(0,0,0,0.15);
+    border: 1px solid rgba(38, 50, 63, 0.5);
+    padding: 6px 10px;
+    border-radius: 3px;
+    display: flex;
+    flex-direction: column;
+}
+
+.mini-lbl { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;}
+.mini-val { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; }
+
+.sensor-mini-card.flame-clear {
+    border-color: rgba(46, 204, 113, 0.35);
+    background: rgba(46, 204, 113, 0.05);
+}
+
+.sensor-mini-card.flame-clear .mini-val {
+    color: var(--success);
+}
+
+.sensor-mini-card.flame-detected {
+    border-color: rgba(241, 196, 15, 0.45);
+    background: rgba(241, 196, 15, 0.08);
+}
+
+.sensor-mini-card.flame-detected .mini-val {
+    color: var(--warning);
+}
+
+.font-industrial {
+    border-top: 1px solid var(--border-color);
+    padding-top: 10px;
+    margin-top: 4px;
+}
+
+.status-text-badge {
+    font-size: 0.75rem;
+    background-color: rgba(46, 204, 113, 0.1);
+    color: var(--success);
+    padding: 2px 6px;
+    border-radius: 2px;
+    font-weight: bold;
+}
+
+/* --- 7. Fire Status Verification Layout --- */
+.fire-status-panel {
+    flex-grow: 1;
+}
+
+.fire-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+    justify-content: center;
+}
+
+.fire-card {
+    background: rgba(255,255,255,0.01);
+    border: 1px solid var(--border-color);
+    padding: 10px;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.fire-card.status-clear {
+    border-color: rgba(46, 204, 113, 0.35);
+    background: rgba(46, 204, 113, 0.05);
+}
+
+.fire-card.status-clear .fire-card-value {
+    color: var(--success);
+}
+
+.fire-card.status-detected {
+    border-color: rgba(241, 196, 15, 0.4);
+    background: rgba(241, 196, 15, 0.05);
+}
+
+.fire-card.status-detected .fire-card-value {
+    color: var(--warning);
+}
+
+.fire-card.status-confirmed {
+    border-color: rgba(231, 76, 60, 0.5);
+    background: rgba(231, 76, 60, 0.08);
+}
+
+.fire-card.status-confirmed .fire-card-value {
+    color: var(--danger);
+}
+
+.fire-card-label {
+    font-size: 0.85rem;
+    color: #a2b4c7;
+}
+
+.fire-card-value {
+    font-family: var(--font-mono);
+    font-weight: 700;
+}
+
+/* --- 8. Health Check Grid UI --- */
+.health-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.health-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.status-ok {
+    background-color: var(--success);
+    box-shadow: 0 0 6px var(--success);
+}
+
+.health-label {
+    font-size: 0.85rem;
+}
+
+/* --- 9. Current Command Panel System UI --- */
+.command-panel {
+    flex-grow: 1.5;
+}
+
+.command-layout {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    justify-content: space-around;
+}
+
+.keyboard-map {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+}
+
+.key-row {
+    display: flex;
+    gap: 6px;
+}
+
+.key-cap {
+    width: 34px;
+    height: 34px;
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    background: #192028;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: #8a9ba8;
+    font-size: 0.9rem;
+    transition: all 0.1s ease;
+}
+
+.key-cap.esc {
+    width: auto;
+    padding: 0 12px;
+    height: 28px;
+    font-size: 0.75rem;
+}
+
+.key-cap.pressed {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: #000;
+    box-shadow: 0 0 12px var(--accent-color);
+    transform: scale(0.95);
+}
+
+.command-status-display {
+    text-align: center;
+}
+
+.status-title {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 4px;
+    letter-spacing: 0.5px;
+}
+
+.current-cmd-value {
+    font-family: var(--font-mono);
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    padding: 6px 16px;
+    background-color: rgba(0,0,0,0.2);
+    min-width: 130px;
+    border-radius: 3px;
+}
+
+.current-cmd-value.cmd-active {
+    color: var(--accent-color);
+    border-color: var(--accent-color);
+    background-color: var(--accent-glow);
+}
+
+/* --- 10. System Log Terminal Box --- */
+.log-panel {
+    flex-grow: 1;
+}
+
+.log-terminal {
+    background-color: #07090c;
+    border: 1px solid var(--border-color);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    padding: 10px;
+    border-radius: 3px;
+    height: 130px;
+    max-height: 130px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.log-line {
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.log-time {
+    color: var(--accent-color);
+    margin-right: 8px;
+}
+
+.log-text {
+    color: #9cb1c6;
+}
+
+.log-cursor {
+    display: inline-block;
+    width: 6px;
+    height: 12px;
+    background-color: var(--accent-color);
+    animation: blink 1s infinite;
+    margin-top: 2px;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
+}
+
+/* Global Utility Helper Typography Classes */
+.text-success { color: var(--success); }
+.text-highlight { color: var(--accent-color); font-weight: bold; }
+.text-active { color: #fff; background-color: rgba(0, 188, 212, 0.2); padding: 2px 6px; border-radius: 2px; }
+.subtext { color: var(--text-muted); font-size: 0.8rem; }
+
+/* --- Tablet / Mobile Optimization Viewport Query (Responsive Breakdowns) --- */
+@media (max-width: 1199px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: start;
+    }
+
+    .grid-column {
+        display: contents;
+    }
+
+    .main-camera-panel {
+        grid-column: 1 / -1;
+        order: 1;
+    }
+
+    .col-left > .panel:nth-child(1) {
+        order: 2;
+    }
+
+    .col-left > .panel:nth-child(2) {
+        order: 3;
+    }
+
+    .col-left > .panel:nth-child(3) {
+        order: 4;
+    }
+
+    .col-right > .panel:nth-child(1) {
+        order: 5;
+    }
+
+    .col-right > .panel:nth-child(2) {
+        order: 6;
+    }
+
+    .col-right > .panel:nth-child(3) {
+        order: 7;
+    }
+
+    .center-bottom-split {
+        display: contents;
+    }
+
+    .fire-status-panel {
+        order: 8;
+    }
+
+    .command-panel {
+        order: 9;
+    }
+
+    .camera-viewport {
+        min-height: 280px;
+    }
+
+    .log-terminal {
+        height: auto;
+        min-height: 120px;
+        max-height: 180px;
+    }
+
+    .command-layout {
+        justify-content: center;
+        gap: 28px;
+    }
+}
+
+@media (max-width: 767px) {
+    .dashboard-container {
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .dashboard-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px;
+    }
+
+    .header-brand {
+        flex-wrap: wrap;
+        row-gap: 4px;
+    }
+
+    .header-brand h1 {
+        font-size: 1.15rem;
+    }
+
+    .sub-title {
+        flex-basis: 100%;
+        border-left: 0;
+        padding-left: 0;
+    }
+
+    .header-status-group {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: flex-start;
+    }
+
+    .dashboard-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    .main-camera-panel {
+        order: 1;
+    }
+
+    .col-left > .panel:nth-child(1) {
+        order: 2;
+    }
+
+    .col-left > .panel:nth-child(2) {
+        order: 3;
+    }
+
+    .fire-status-panel {
+        order: 4;
+    }
+
+    .col-right > .panel:nth-child(1) {
+        order: 5;
+    }
+
+    .col-right > .panel:nth-child(2) {
+        order: 6;
+    }
+
+    .col-left > .panel:nth-child(3) {
+        order: 7;
+    }
+
+    .command-panel {
+        order: 8;
+    }
+
+    .col-right > .panel:nth-child(3) {
+        order: 9;
+    }
+
+    .panel-header-actions {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        padding: 0;
+    }
+
+    .panel-header-actions .panel-title {
+        width: 100%;
+    }
+
+    .badge-overlay-reserved {
+        margin: 0 14px 10px;
+    }
+
+    .camera-viewport {
+        min-height: 180px;
+    }
+
+    .command-layout {
+        flex-direction: column;
+        gap: 14px;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .sensor-grid-2x2,
+    .map-coordinates {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sensor-meta,
+    .data-row,
+    .fire-card {
+        gap: 10px;
+    }
+
+    .current-cmd-value {
+        max-width: 100%;
+    }
+
+    .log-terminal {
+        max-height: 160px;
+    }
+}
