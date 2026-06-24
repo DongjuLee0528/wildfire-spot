@@ -1,12 +1,39 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
+
+# macOS
 .DS_Store
+
+# Python Packaging
 *.egg-info/
+
+# Environment
 .env
+
+# Logs
 *.log
+
+# Jupyter
 .ipynb_checkpoints/
+
+# IDE
 .idea/
+.vscode/
+
+# AI Training
 training/runs/
-training/yolov10n.pt
 *.pt
+
+# Local AI Tools
+.claude/
+training/.claude/
+
+# React
+web/node_modules/
+web/dist/
+
+# Local Files
+config.txt
+sensor_manager.txt

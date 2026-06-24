@@ -7,11 +7,32 @@ optional camera-based detection to identify and locate wildfires.
 
 from utils.config import (MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
                          DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT)
-from hardware.sensor_manager import SensorManager
-from hardware.gps_manager import GPSManager
-from hardware.pan_tilt_controller import PanTiltController
 from utils.logger import WildfireLogger
+from math import isfinite
 import time
+
+
+def _safe_number(value, default):
+    if isinstance(value, bool):
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not isfinite(number):
+        return default
+    return number
+
+
+def _flame_values(flame_data):
+    if isinstance(flame_data, dict):
+        return list(flame_data.values())
+    if isinstance(flame_data, bool):
+        return [flame_data]
+    try:
+        return list(flame_data)
+    except TypeError:
+        return [bool(flame_data)]
 
 
 class FireDetector:
@@ -61,13 +82,18 @@ class FireDetector:
         - Any flame sensor triggered
         """
         try:
+            if sensor_data is None or not hasattr(sensor_data, 'get'):
+                self.sensor_detected = False
+                return False
+
             smoke_level = sensor_data.get('smoke', 0)
             temperature = sensor_data.get('temperature', 0)
             humidity = sensor_data.get('humidity', 100)
             flame_detected = sensor_data.get('flame', False)
-            # Handle flame as list of sensor readings
-            if isinstance(flame_detected, list):
-                flame_detected = any(flame_detected)
+            smoke_level = _safe_number(smoke_level, 0)
+            temperature = _safe_number(temperature, 0)
+            humidity = _safe_number(humidity, 100)
+            flame_detected = any(bool(value) for value in _flame_values(flame_detected))
 
             # Check if any fire indicator threshold is exceeded
             if (smoke_level > MQ2_SMOKE_THRESHOLD or
@@ -80,7 +106,7 @@ class FireDetector:
             self.sensor_detected = False
             return False
 
-        except (ValueError, RuntimeError, KeyError) as e:
+        except (ValueError, RuntimeError, KeyError, TypeError) as e:
             self.logger.log_error("FireDetector._check_sensor_thresholds", str(e))
             return False
 
@@ -124,7 +150,11 @@ class FireDetector:
         Calculates average direction and rotates pan-tilt camera to face it.
         """
         try:
+            if sensor_data is None or not hasattr(sensor_data, 'get'):
+                return DEFAULT_DIRECTION_VALUE
+
             flame_sensors = sensor_data.get('flame', [False] * KY026_COUNT)
+            flame_sensors = _flame_values(flame_sensors)
 
             if any(flame_sensors):
                 detected_directions = []
@@ -140,11 +170,11 @@ class FireDetector:
                     self.pan_tilt_controller.rotate_to_angle(avg_direction, DEFAULT_DIRECTION_VALUE)
                     return avg_direction
 
-            return None
+            return DEFAULT_DIRECTION_VALUE
 
-        except (ValueError, RuntimeError, KeyError, ZeroDivisionError) as e:
+        except (ValueError, RuntimeError, KeyError, ZeroDivisionError, TypeError) as e:
             self.logger.log_error("FireDetector.track_fire_direction", str(e))
-            return None
+            return DEFAULT_DIRECTION_VALUE
 
     def log_detection(self, location, direction, sensor_data):
         """
@@ -163,7 +193,7 @@ class FireDetector:
                 "timestamp": time.time(),
                 "latitude": location[0] if (location and len(location) >= 2) else DEFAULT_DIRECTION_VALUE,
                 "longitude": location[1] if (location and len(location) >= 2) else DEFAULT_DIRECTION_VALUE,
-                "direction": direction if direction else DEFAULT_DIRECTION_VALUE,
+                "direction": direction if direction is not None else DEFAULT_DIRECTION_VALUE,
                 "smoke": sensor_data.get('smoke', 0),
                 "temperature": sensor_data.get('temperature', 0.0),
                 "humidity": sensor_data.get('humidity', 0.0),

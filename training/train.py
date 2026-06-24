@@ -93,7 +93,10 @@ def _init_wandb():
             wandb.init(**init_kwargs)
 
         except Exception as exc:
-            LOGGER.warning("W&B initialization failed. Continuing without W&B logging: %s", exc)
+            LOGGER.warning(
+                "W&B initialization failed. Continuing without W&B logging: %s",
+                exc,
+            )
 
     except ImportError:
         LOGGER.warning("wandb is not installed. Continuing without W&B logging.")
@@ -117,19 +120,20 @@ def _load_model(resume):
 
 
 def _resolve_img_path(raw, dataset_dir):
-    p = Path(raw)
-    if p.is_absolute():
-        return p
-    return dataset_dir / p
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return dataset_dir / path
 
 
 def _verify_split_paths(dataset_dir, split, required):
     txt_path = _require_path(dataset_dir / f"{split}.txt", f"{split}.txt")
 
-    with open(txt_path, "r", encoding="utf-8") as f:
-        lines = [l.strip() for l in f if l.strip()]
+    with open(txt_path, "r", encoding="utf-8") as file:
+        lines = [line.strip() for line in file if line.strip()]
 
     total = len(lines)
+
     if required and total == 0:
         raise RuntimeError(
             f"{split}.txt exists but contains no image paths: {txt_path}"
@@ -137,14 +141,14 @@ def _verify_split_paths(dataset_dir, split, required):
 
     missing = []
     for line_no, raw_path in enumerate(lines, start=1):
-        resolved = _resolve_img_path(raw_path, dataset_dir)
-        if not resolved.exists():
-            missing.append((line_no, raw_path, resolved))
+        resolved_path = _resolve_img_path(raw_path, dataset_dir)
+        if not resolved_path.exists():
+            missing.append((line_no, raw_path, resolved_path))
 
     if missing:
         detail = "\n".join(
-            f"  line {ln}: {raw!r} -> {resolved}"
-            for ln, raw, resolved in missing
+            f"  line {line_no}: {raw_path!r} -> {resolved_path}"
+            for line_no, raw_path, resolved_path in missing
         )
         raise RuntimeError(
             f"{split}.txt: {len(missing)} of {total} image path(s) do not exist:\n"
@@ -183,7 +187,10 @@ def _verify_training_outputs(save_dir):
 
     missing = [str(path) for path in (best, last, results_csv) if not path.exists()]
     if missing:
-        raise RuntimeError("Training finished, but expected outputs are missing: " + ", ".join(missing))
+        raise RuntimeError(
+            "Training finished, but expected outputs are missing: "
+            + ", ".join(missing)
+        )
 
     LOGGER.info("Best checkpoint: %s", best)
     LOGGER.info("Last checkpoint: %s", last)
