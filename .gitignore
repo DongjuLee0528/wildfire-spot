@@ -34,6 +34,10 @@ training/.claude/
 web/node_modules/
 web/dist/
 
+# Gradle
+server/.gradle/
+server/build/
+
 # Local Files
 config.txt
 sensor_manager.txt

@@ -11,3 +11,4 @@ matplotlib>=3.7.0
 pyserial>=3.5
 pynmea2>=1.19.0
 keyboard>=0.13.5
+adafruit-circuitpython-dht
