@@ -3,12 +3,12 @@ Sensor management module for wildfire detection.
 
 Integrates multiple sensor types:
 - MQ2 smoke sensors (via ADS1115 ADC)
-- SHT31 temperature and humidity sensor
+- DHT11 temperature and humidity sensor
 - KY-026 flame detection sensors
 - HC-SR04 ultrasonic distance sensor
 """
 
-from utils.config import (I2C_SCL, I2C_SDA, ADS1115_MQ2_1, ADS1115_MQ2_2, SHT31_ADDRESS,
+from utils.config import (I2C_SCL, I2C_SDA, ADS1115_MQ2_1, ADS1115_MQ2_2, DHT11_DATA_PIN,
                          KY026_FRONT_LEFT_PIN, KY026_FRONT_RIGHT_PIN, KY026_LEFT_PIN, KY026_RIGHT_PIN,
                          HCSR04_TRIGGER_PIN, HCSR04_ECHO_PIN, ULTRASONIC_DISTANCE_MULTIPLIER,
                          SENSOR_READ_TIMEOUT, MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD)
@@ -24,9 +24,14 @@ except ImportError:
     AnalogIn = None
 
 try:
-    import adafruit_sht31d
+    import adafruit_dht
 except ImportError:
-    adafruit_sht31d = None
+    adafruit_dht = None
+
+try:
+    import board
+except ImportError:
+    board = None
 
 try:
     import Jetson.GPIO as GPIO
@@ -57,7 +62,7 @@ class SensorManager:
 
     Handles initialization, reading, and error recovery for:
     - Smoke detection (MQ2 sensors)
-    - Temperature/humidity monitoring (SHT31)
+    - Temperature/humidity monitoring (DHT11)
     - Flame detection (KY-026 IR sensors)
     - Obstacle distance measurement (HC-SR04)
     """
@@ -70,8 +75,9 @@ class SensorManager:
         """
         self._i2c = None
         self._ads_available = False
-        self._sht31_available = False
+        self._dht11_available = False
         self._gpio_available = False
+        self._last_dht11_reading = None
         self.logger = WildfireLogger("SensorManager")
 
         # Initialize I2C bus for digital sensors
@@ -98,15 +104,16 @@ class SensorManager:
                 except (ValueError, RuntimeError, OSError) as e:
                     self.logger.log_error("SensorManager.ADS1115_init", str(e))
 
-            # Setup SHT31 temperature and humidity sensor
-            if adafruit_sht31d is None:
-                self.logger.log_error("SensorManager.SHT31_init", "adafruit_sht31d module is not available")
-            else:
-                try:
-                    self._sht31 = adafruit_sht31d.SHT31D(self._i2c, address=SHT31_ADDRESS)
-                    self._sht31_available = True
-                except (ValueError, RuntimeError, OSError) as e:
-                    self.logger.log_error("SensorManager.SHT31_init", str(e))
+        if adafruit_dht is None:
+            self.logger.log_error("SensorManager.DHT11_init", "adafruit_dht module is not available")
+        elif board is None:
+            self.logger.log_error("SensorManager.DHT11_init", "board module is not available")
+        else:
+            try:
+                self._dht11 = adafruit_dht.DHT11(self._get_dht11_board_pin(DHT11_DATA_PIN))
+                self._dht11_available = True
+            except (ValueError, RuntimeError, OSError, AttributeError) as e:
+                self.logger.log_error("SensorManager.DHT11_init", str(e))
 
         # Setup GPIO for digital sensors
         if GPIO is None:
@@ -159,23 +166,45 @@ class SensorManager:
             self.logger.log_error("SensorManager.read_mq2", str(e))
             return 0
 
-    def read_sht31(self):
+    def _get_dht11_board_pin(self, pin):
+        supported_pins = {
+            18: "D18",
+        }
+        pin_name = supported_pins.get(pin)
+        if pin_name is None:
+            raise ValueError(f"Unsupported DHT11 BOARD pin: {pin}")
+        try:
+            return getattr(board, pin_name)
+        except AttributeError as e:
+            raise AttributeError(f"board.{pin_name} is not available") from e
+
+    def read_dht11(self):
         """
-        Read temperature and humidity from SHT31 sensor.
+        Read temperature and humidity from DHT11 sensor.
 
         Returns:
             Tuple of (temperature in Celsius, relative humidity percentage)
-            Returns (0.0, 0.0) if sensor unavailable or read fails
+            Returns the previous valid reading or (0.0, 0.0) if unavailable or all reads fail
         """
-        if not self._sht31_available or not hasattr(self, '_sht31'):
-            return (0.0, 0.0)
-        try:
-            temperature = self._sht31.temperature
-            humidity = self._sht31.relative_humidity
-            return (temperature, humidity)
-        except (ValueError, RuntimeError, OSError, AttributeError) as e:
-            self.logger.log_error("SensorManager.read_sht31", str(e))
-            return (0.0, 0.0)
+        if not self._dht11_available or not hasattr(self, '_dht11'):
+            return self._last_dht11_reading or (0.0, 0.0)
+
+        last_error = None
+        for attempt in range(3):
+            try:
+                temperature = self._dht11.temperature
+                humidity = self._dht11.humidity
+                if temperature is not None and humidity is not None:
+                    self._last_dht11_reading = (temperature, humidity)
+                    return self._last_dht11_reading
+            except (ValueError, RuntimeError, OSError, AttributeError) as e:
+                last_error = e
+
+            if attempt < 2:
+                time.sleep(1.0)
+
+        self.logger.warning(f"SensorManager.read_dht11 failed after retries: {last_error}")
+        return self._last_dht11_reading or (0.0, 0.0)
 
     def read_ky026(self):
         """
@@ -281,7 +310,7 @@ class SensorManager:
         Logs the readings for monitoring and debugging.
         """
         smoke = self.read_mq2()
-        temperature, humidity = self.read_sht31()
+        temperature, humidity = self.read_dht11()
         flame = self.read_ky026()
         distance = self.read_hcsr04()
         fire_detected, confirmed_fire = self._check_hardware_confirmation(smoke, temperature, humidity, flame)
