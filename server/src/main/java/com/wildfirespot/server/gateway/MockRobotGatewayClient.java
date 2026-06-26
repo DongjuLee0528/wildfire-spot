@@ -1,5 +1,8 @@
 package com.wildfirespot.server.gateway;
 
+import com.wildfirespot.server.adapter.RobotGpsProvider;
+import com.wildfirespot.server.adapter.RobotSensorProvider;
+import com.wildfirespot.server.adapter.RobotStatusProvider;
 import com.wildfirespot.server.common.ControlCommand;
 import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
@@ -11,14 +14,23 @@ import java.util.List;
 @Service
 public class MockRobotGatewayClient implements RobotGatewayClient {
 
+    private final RobotStatusProvider statusProvider;
+    private final RobotGpsProvider gpsProvider;
+    private final RobotSensorProvider sensorProvider;
+
+    public MockRobotGatewayClient(
+            RobotStatusProvider statusProvider,
+            RobotGpsProvider gpsProvider,
+            RobotSensorProvider sensorProvider
+    ) {
+        this.statusProvider = statusProvider;
+        this.gpsProvider = gpsProvider;
+        this.sensorProvider = sensorProvider;
+    }
+
     @Override
     public StatusResponse getStatus() {
-        return new StatusResponse(
-                "PATROL",
-                "AUTO",
-                true,
-                LocalDateTime.now()
-        );
+        return statusProvider.getStatus();
     }
 
     @Override
@@ -34,29 +46,12 @@ public class MockRobotGatewayClient implements RobotGatewayClient {
 
     @Override
     public GpsResponse getGps() {
-        return new GpsResponse(
-                37.5665,
-                126.9780,
-                true,
-                LocalDateTime.now()
-        );
+        return gpsProvider.getGps();
     }
 
     @Override
     public SensorResponse getSensors() {
-        SensorResponse.FlameStatus flame = new SensorResponse.FlameStatus(
-                false,
-                false,
-                true,
-                false
-        );
-        return new SensorResponse(
-                31.5,
-                42.0,
-                128,
-                flame,
-                "SCANNING"
-        );
+        return sensorProvider.getSensors();
     }
 
     @Override
@@ -72,11 +67,11 @@ public class MockRobotGatewayClient implements RobotGatewayClient {
     public LogResponse getLogs() {
         LocalDateTime base = LocalDateTime.of(2026, 6, 24, 21, 0, 0);
         List<LogResponse.LogEntry> entries = List.of(
-                new LogResponse.LogEntry("INFO",  "SYSTEM INITIALIZED SUCCESSFULLY",       base),
-                new LogResponse.LogEntry("INFO",  "AUTO MODE ENABLED",                     base.plusSeconds(3)),
-                new LogResponse.LogEntry("INFO",  "GPS FIX ACQUIRED - 3D FIX",             base.plusSeconds(4)),
-                new LogResponse.LogEntry("INFO",  "SENSOR DATA UPDATED (NOMINAL)",          base.plusSeconds(6)),
-                new LogResponse.LogEntry("WARN",  "HARDWARE FIRE CHECK ACTIVE",             base.plusSeconds(10)),
+                new LogResponse.LogEntry("INFO",  "SYSTEM INITIALIZED SUCCESSFULLY",          base),
+                new LogResponse.LogEntry("INFO",  "AUTO MODE ENABLED",                        base.plusSeconds(3)),
+                new LogResponse.LogEntry("INFO",  "GPS FIX ACQUIRED - 3D FIX",               base.plusSeconds(4)),
+                new LogResponse.LogEntry("INFO",  "SENSOR DATA UPDATED (NOMINAL)",             base.plusSeconds(6)),
+                new LogResponse.LogEntry("WARN",  "HARDWARE FIRE CHECK ACTIVE",               base.plusSeconds(10)),
                 new LogResponse.LogEntry("WARN",  "CAMERA STREAM WAITING (FEED_UNAVAILABLE)", base.plusSeconds(13))
         );
         return new LogResponse(entries);
