@@ -78,6 +78,7 @@ class SensorManager:
         self._dht11_available = False
         self._gpio_available = False
         self._last_dht11_reading = None
+        self._mq2_channels = []
         self.logger = WildfireLogger("SensorManager")
 
         # Initialize I2C bus for digital sensors
@@ -91,18 +92,12 @@ class SensorManager:
 
         # Initialize I2C-based sensors if bus is available
         if self._i2c is not None:
-            # Setup dual ADS1115 ADCs for two MQ2 smoke sensors
             if ADS is None or AnalogIn is None:
                 self.logger.log_error("SensorManager.ADS1115_init", "ADS1115 modules are not available")
             else:
-                try:
-                    self._ads1_1 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_1)
-                    self._ads1_2 = ADS.ADS1115(self._i2c, address=ADS1115_MQ2_2)
-                    self._mq2_chan1 = AnalogIn(self._ads1_1, ADS.P0)
-                    self._mq2_chan2 = AnalogIn(self._ads1_2, ADS.P0)
-                    self._ads_available = True
-                except (ValueError, RuntimeError, OSError) as e:
-                    self.logger.log_error("SensorManager.ADS1115_init", str(e))
+                self._init_mq2_adc(ADS1115_MQ2_1, "_ads1_1", "_mq2_chan1")
+                self._init_mq2_adc(ADS1115_MQ2_2, "_ads1_2", "_mq2_chan2")
+                self._ads_available = bool(self._mq2_channels)
 
         if adafruit_dht is None:
             self.logger.log_error("SensorManager.DHT11_init", "adafruit_dht module is not available")
@@ -152,19 +147,32 @@ class SensorManager:
         Read smoke level from MQ2 sensors.
 
         Returns:
-            Average reading from two MQ2 sensors (0-65535 range)
+            Average reading from available MQ2 sensors (0-65535 range)
             Returns 0 if sensors unavailable or read fails
         """
-        if not self._ads_available or not hasattr(self, '_mq2_chan1') or not hasattr(self, '_mq2_chan2'):
+        if not self._ads_available or not self._mq2_channels:
             return 0
+        values = []
+        for channel in self._mq2_channels:
+            try:
+                values.append(channel.value)
+            except (ValueError, RuntimeError, OSError, AttributeError) as e:
+                self.logger.log_error("SensorManager.read_mq2", str(e))
+        if not values:
+            return 0
+        return int(sum(values) / len(values))
+
+    def _init_mq2_adc(self, address, ads_attr, channel_attr):
+        if address is None:
+            return
         try:
-            value1 = self._mq2_chan1.value
-            value2 = self._mq2_chan2.value
-            # Average readings from both sensors for better accuracy
-            return int((value1 + value2) / 2)
+            ads = ADS.ADS1115(self._i2c, address=address)
+            channel = AnalogIn(ads, ADS.P0)
+            setattr(self, ads_attr, ads)
+            setattr(self, channel_attr, channel)
+            self._mq2_channels.append(channel)
         except (ValueError, RuntimeError, OSError, AttributeError) as e:
-            self.logger.log_error("SensorManager.read_mq2", str(e))
-            return 0
+            self.logger.log_error("SensorManager.ADS1115_init", str(e))
 
     def _get_dht11_board_pin(self, pin):
         supported_pins = {
