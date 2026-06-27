@@ -60,4 +60,4 @@ class RobotLogEntry:
 
 @dataclass
 class RobotLogsData:
-    logs: list = field(default_factory=list)
+    logs: list[RobotLogEntry] = field(default_factory=list)
