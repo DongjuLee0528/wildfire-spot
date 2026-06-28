@@ -338,6 +338,22 @@ class SensorManager:
         self.logger.log_sensor_values(sensor_data)
         return sensor_data
 
+    def is_ads_available(self) -> bool:
+        """Return True if the ADS1115 / MQ2 sensor path is available."""
+        return self._ads_available
+
+    def is_dht11_available(self) -> bool:
+        """Return True if the DHT11 temperature/humidity sensor path is available."""
+        return self._dht11_available
+
+    def is_gpio_available(self) -> bool:
+        """Return True if the GPIO / KY-026 flame sensor path is available."""
+        return self._gpio_available
+
+    def is_available(self) -> bool:
+        """Return True if at least one sensor path is available."""
+        return self._ads_available or self._dht11_available or self._gpio_available
+
     def cleanup(self):
         """
         Release hardware resources.
