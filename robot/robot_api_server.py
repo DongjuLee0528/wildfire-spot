@@ -26,8 +26,6 @@ from robot.robot_data_collector import RobotDataCollector
 
 logger = logging.getLogger(__name__)
 
-_collector: RobotDataCollector | None = None
-
 
 def create_app(collector: RobotDataCollector) -> FastAPI:
     """
