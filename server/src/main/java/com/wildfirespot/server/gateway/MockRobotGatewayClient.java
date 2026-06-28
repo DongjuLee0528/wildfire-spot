@@ -6,12 +6,12 @@ import com.wildfirespot.server.adapter.RobotStatusProvider;
 import com.wildfirespot.server.common.ControlCommand;
 import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
-@Service
+@Component
 public class MockRobotGatewayClient implements RobotGatewayClient {
 
     private final RobotStatusProvider statusProvider;
