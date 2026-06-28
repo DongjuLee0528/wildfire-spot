@@ -181,6 +181,10 @@ class LidarManager:
 
         return min_distance > threshold_mm
 
+    def is_available(self) -> bool:
+        """Return True if the LIDAR UDP socket is bound and ready."""
+        return self._available
+
     def close(self):
         """
         Close LIDAR UDP socket.
