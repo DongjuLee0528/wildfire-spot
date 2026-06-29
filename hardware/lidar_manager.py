@@ -32,12 +32,6 @@ class LidarManager:
     """
 
     def __init__(self):
-        """
-        Initialize LIDAR UDP socket.
-
-        Attempts to bind a UDP socket to the host receive port.
-        If initialization fails, LIDAR remains unavailable but system continues.
-        """
         self.logger = WildfireLogger("LidarManager")
         self._socket = None
         self._available = False
@@ -64,22 +58,20 @@ class LidarManager:
         diff = abs((angle - target_angle + 180) % 360 - 180)
         return diff <= angle_range
 
-    def read_scan(self):
-        """
-        Read a full 360-degree LIDAR scan from UDP packets.
+    def _parse_udp_packet(self, data: bytes) -> dict:
+        try:
+            if not data:
+                return {}
+            return {}
+        except Exception as e:
+            self.logger.log_error("LidarManager._parse_udp_packet", str(e))
+            return {}
 
-        Returns:
-            Dictionary mapping angles (0-359) to distances in millimeters
-            Empty dict if LIDAR unavailable, socket timeout, or packet parsing fails
-
-        Unitree L2 Ethernet UDP packet format is not yet verified.
-        Raw packets are received but not parsed into distance data.
-        Returns empty dict until packet format is confirmed.
-        """
+    def read_scan(self) -> dict:
         if not self._available or self._socket is None:
             return {}
 
-        distance_data = {}
+        scan_data = {}
         start_time = time.time()
 
         try:
@@ -95,21 +87,16 @@ class LidarManager:
                 if not data:
                     continue
 
+                parsed = self._parse_udp_packet(data)
+                if parsed:
+                    scan_data.update(parsed)
+
         except OSError as e:
             self.logger.log_error("LidarManager.read_scan", str(e))
 
-        return distance_data
+        return scan_data
 
-    def get_obstacle_direction(self):
-        """
-        Detect obstacles in predefined directions.
-
-        Returns:
-            List of boolean values, one per configured direction
-            True indicates obstacle detected within threshold distance
-
-        Returns all-clear (all False) when LIDAR data is unavailable.
-        """
+    def get_obstacle_direction(self) -> list:
         scan_data = self.read_scan()
         if not scan_data:
             return [False] * LIDAR_DIRECTION_COUNT
@@ -117,24 +104,18 @@ class LidarManager:
         obstacles = [False] * LIDAR_DIRECTION_COUNT
         for i, direction in enumerate(self.directions):
             min_distance = float('inf')
-
             for angle, distance in scan_data.items():
-                if self._angle_in_range(angle, direction, LIDAR_ANGLE_RANGE):
-                    min_distance = min(min_distance, distance)
-
+                try:
+                    if self._angle_in_range(angle, direction, LIDAR_ANGLE_RANGE):
+                        min_distance = min(min_distance, distance)
+                except Exception as e:
+                    self.logger.log_error("LidarManager.get_obstacle_direction", str(e))
             if min_distance <= self.obstacle_threshold:
                 obstacles[i] = True
 
         return obstacles
 
-    def vfh_avoid(self):
-        """
-        Vector Field Histogram obstacle avoidance algorithm.
-
-        Returns:
-            Recommended heading angle (0-359 degrees) to avoid obstacles
-            Returns LIDAR_REVERSE_DIRECTION if all directions blocked
-        """
+    def vfh_avoid(self) -> int:
         obstacles = self.get_obstacle_direction()
 
         clear_directions = []
@@ -158,39 +139,28 @@ class LidarManager:
 
         return best_direction
 
-    def is_path_clear(self, direction_deg, threshold_mm):
-        """
-        Check if a specific direction has a clear path.
-
-        Args:
-            direction_deg: Direction to check (0-359 degrees)
-            threshold_mm: Minimum clearance distance in millimeters
-
-        Returns:
-            True if path is clear beyond threshold distance
-            False if obstacle detected or LIDAR unavailable
-        """
+    def is_path_clear(self, direction_deg, threshold_mm) -> bool:
         scan_data = self.read_scan()
         if not scan_data:
             return False
 
         min_distance = float('inf')
         for angle, distance in scan_data.items():
-            if self._angle_in_range(angle, direction_deg, LIDAR_PATH_CHECK_RANGE):
-                min_distance = min(min_distance, distance)
+            try:
+                if self._angle_in_range(angle, direction_deg, LIDAR_PATH_CHECK_RANGE):
+                    min_distance = min(min_distance, distance)
+            except Exception as e:
+                self.logger.log_error("LidarManager.is_path_clear", str(e))
+
+        if min_distance == float('inf'):
+            return False
 
         return min_distance > threshold_mm
 
     def is_available(self) -> bool:
-        """Return True if the LIDAR UDP socket is bound and ready."""
         return self._available
 
     def close(self):
-        """
-        Close LIDAR UDP socket.
-
-        Releases the socket. Should be called during system shutdown.
-        """
         if self._socket is not None:
             try:
                 self._socket.close()
