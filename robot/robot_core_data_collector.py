@@ -30,6 +30,9 @@ from robot.robot_api_types import (
 
 logger = logging.getLogger(__name__)
 
+# Phase 5 TODO:
+# Replace this placeholder with runtime mode from StateMachine or ModeManager.
+# For Phase 4-3 read-only scope, mode is always reported as AUTO.
 _ROBOT_MODE = "AUTO"
 _DEFAULT_LIDAR_STATUS = "UNAVAILABLE"
 
@@ -130,10 +133,7 @@ class RobotCoreDataCollector(RobotDataCollector):
             logger.error("get_sensors: sensor_manager error: %s", e)
 
         try:
-            if self._lidar_manager._available:
-                lidar_status = "SCANNING"
-            else:
-                lidar_status = "UNAVAILABLE"
+            lidar_status = "SCANNING" if self._lidar_manager.is_available() else "UNAVAILABLE"
         except Exception as e:
             logger.error("get_sensors: lidar_manager error: %s", e)
 
@@ -158,17 +158,12 @@ class RobotCoreDataCollector(RobotDataCollector):
             logger.error("get_health: gps check error: %s", e)
 
         try:
-            lidar = bool(self._lidar_manager._available)
+            lidar = self._lidar_manager.is_available()
         except Exception as e:
             logger.error("get_health: lidar check error: %s", e)
 
         try:
-            sensor_available = (
-                self._sensor_manager._ads_available
-                or self._sensor_manager._dht11_available
-                or self._sensor_manager._gpio_available
-            )
-            sensors = bool(sensor_available)
+            sensors = self._sensor_manager.is_available()
         except Exception as e:
             logger.error("get_health: sensor check error: %s", e)
 
