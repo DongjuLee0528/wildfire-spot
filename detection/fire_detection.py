@@ -13,6 +13,7 @@ import time
 
 
 def _safe_number(value, default):
+    """Return value as a finite float, or default if conversion fails or the result is non-finite."""
     if isinstance(value, bool):
         return default
     try:
@@ -25,6 +26,7 @@ def _safe_number(value, default):
 
 
 def _flame_values(flame_data):
+    """Normalise flame sensor data into a flat list of values regardless of input type."""
     if isinstance(flame_data, dict):
         return list(flame_data.values())
     if isinstance(flame_data, bool):

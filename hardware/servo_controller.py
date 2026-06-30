@@ -1,3 +1,16 @@
+"""
+Servo controller for the Wildfire Spot quadruped robot.
+
+Manages three PCA9685 PWM driver boards via I2C:
+- Front leg servos  (channels 0-5,  address PCA9685_FRONT_LEGS)
+- Rear leg servos   (channels 6-11, address PCA9685_BACK_LEGS)
+- Camera pan/tilt   (channels 0-1,  address PCA9685_CAMERA)
+
+Accepts joint angles in radians from the kinematics solver, converts them
+to per-servo degree commands with per-channel offset correction, and writes
+the values to the hardware.
+"""
+
 from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEGS, PCA9685_CAMERA,
                          PWM_FREQUENCY, PWM_MIN_PULSE, PWM_MAX_PULSE, SERVO_CHANNELS,
                          FRONT_LEG_CHANNELS, CAMERA_PAN, CAMERA_TILT, SERVO_OFFSETS,
@@ -7,6 +20,7 @@ from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEG
 import numpy as np
 
 def _load_servo_hardware():
+    """Import and return PCA9685, servo, and busio modules; raises RuntimeError if unavailable."""
     try:
         from adafruit_pca9685 import PCA9685
         from adafruit_motor import servo
@@ -16,8 +30,21 @@ def _load_servo_hardware():
     return PCA9685, servo, busio
 
 class QuadrupedServoManager:
+    """
+    Controls all servos on the Wildfire Spot quadruped robot.
+
+    Initializes three PCA9685 boards over a shared I2C bus and exposes
+    methods to convert kinematics solver output into physical servo movements.
+    Also drives the camera pan/tilt gimbal.
+    """
 
     def __init__(self):
+        """
+        Open the I2C bus and initialise the three PCA9685 PWM drivers.
+
+        All 12 leg servos are configured with PWM_MIN_PULSE/PWM_MAX_PULSE limits.
+        Raises RuntimeError if hardware dependencies or the I2C bus are unavailable.
+        """
         self._i2c_interface = None
         self._front_driver = None
         self._rear_driver = None
@@ -57,11 +84,36 @@ class QuadrupedServoManager:
         self._joint_angles = []
 
     def convert_to_degrees(self, angle_radians):
+        """
+        Convert a 4x3 array of joint angles from radians to integer degrees.
+
+        Args:
+            angle_radians: numpy array of shape (4, 3) — one row per leg,
+                           columns are [shoulder, femur, tibia] in radians.
+
+        Stores the result in self._joint_angles as a list of lists of ints.
+        """
+
         angle_degrees = angle_radians * 180/np.pi
         angle_degrees_int = [[int(value) for value in row] for row in angle_degrees]
         self._joint_angles = angle_degrees_int
 
     def process_angle_mapping(self, angle_radians):
+        """
+        Map kinematics solver joint angles to per-channel servo commands.
+
+        Converts radians to degrees, then applies per-channel offset corrections
+        and sign inversions to account for physical servo mounting orientation.
+        Leg layout:
+          Channels 0-2:  front-left  (FL)
+          Channels 3-5:  front-right (FR)
+          Channels 6-8:  back-left   (BL)
+          Channels 9-11: back-right  (BR)
+
+        Args:
+            angle_radians: numpy array of shape (4, 3) in radians.
+        """
+
         self.convert_to_degrees(angle_radians)
 
         if len(self._joint_angles) < 4 or any(len(leg) < 3 for leg in self._joint_angles):
@@ -85,9 +137,21 @@ class QuadrupedServoManager:
         self._angle_array[11] = self._offset_values[11] + self._joint_angles[3][0]
 
     def get_current_angles(self):
+        """Return the most recently computed per-channel servo angles (degrees)."""
+
         return self._angle_array
 
     def execute_servo_motion(self, joint_angles):
+        """
+        Convert joint angles and drive all 12 leg servos to the target positions.
+
+        Clamps each channel to [SERVO_MIN_ANGLE+1, SERVO_MAX_ANGLE-1] before
+        writing to the hardware to protect servo mechanical limits.
+
+        Args:
+            joint_angles: numpy array of shape (4, 3) in radians.
+        """
+
         self.process_angle_mapping(joint_angles)
 
         for servo_index in range(len(self._angle_array)):
@@ -100,6 +164,13 @@ class QuadrupedServoManager:
             self._servo_array[servo_index].angle = float(self._angle_array[servo_index])
 
     def set_pan_angle(self, target_angle):
+        """
+        Set the camera pan (horizontal) servo to the given angle.
+
+        Args:
+            target_angle: Desired pan angle in degrees; clamped to [SERVO_ANGLE_MIN, SERVO_ANGLE_MAX].
+        """
+
         if target_angle < SERVO_ANGLE_MIN:
             target_angle = SERVO_ANGLE_MIN
         if target_angle > SERVO_ANGLE_MAX:
@@ -107,6 +178,13 @@ class QuadrupedServoManager:
         self._pan_motor.angle = float(target_angle)
 
     def set_tilt_angle(self, target_angle):
+        """
+        Set the camera tilt (vertical) servo to the given angle.
+
+        Args:
+            target_angle: Desired tilt angle in degrees; clamped to [SERVO_ANGLE_MIN, SERVO_ANGLE_MAX].
+        """
+
         if target_angle < SERVO_ANGLE_MIN:
             target_angle = SERVO_ANGLE_MIN
         if target_angle > SERVO_ANGLE_MAX:
@@ -114,6 +192,13 @@ class QuadrupedServoManager:
         self._tilt_motor.angle = float(target_angle)
 
     def shutdown_servos(self):
+        """
+        Deinitialize all PCA9685 drivers and release the I2C bus.
+
+        Safe to call even if initialisation partially failed.
+        Should be invoked during system shutdown.
+        """
+
         try:
             if self._front_driver is not None:
                 self._front_driver.deinit()
