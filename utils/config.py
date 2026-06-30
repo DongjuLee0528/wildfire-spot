@@ -1,12 +1,21 @@
+"""Central configuration for the Wildfire Spot robot.
+
+All hardware addresses, pin assignments, thresholds, gait parameters,
+and training settings are defined here. Values can be overridden via
+environment variables where noted.
+"""
+
 import os
 from pathlib import Path
 
 
 def _env_path(name, default):
+    """Return a resolved filesystem path from an env variable, falling back to default."""
     return str(Path(os.environ.get(name, default)).expanduser())
 
 
 def _env_int(name, default):
+    """Return an integer from an env variable, falling back to default on missing or invalid value."""
     value = os.environ.get(name)
     if value is None or value.strip() == "":
         return default
@@ -18,6 +27,7 @@ def _env_int(name, default):
 
 
 def _env_int_or_auto(name, default):
+    """Return an integer or the string 'auto' from an env variable, falling back to default."""
     value = os.environ.get(name)
     if value is None or value.strip() == "":
         return default
@@ -31,6 +41,7 @@ def _env_int_or_auto(name, default):
 
 
 def _env_float(name, default):
+    """Return a float from an env variable, falling back to default on missing or invalid value."""
     value = os.environ.get(name)
     if value is None or value.strip() == "":
         return default
@@ -42,6 +53,7 @@ def _env_float(name, default):
 
 
 def _env_bool(name, default=False):
+    """Return a boolean from an env variable; truthy strings are '1', 'true', 'yes', 'on'."""
     value = os.environ.get(name)
     if value is None:
         return default
@@ -92,7 +104,7 @@ BR_SHOULDER = 11
 CAMERA_PAN = 0
 CAMERA_TILT = 1
 
-SERVO_OFFSETS = [180, 90, 90, 1, 90, 90, 180, 90, 90, 1, 90, 90]
+SERVO_OFFSETS = [180, 90, 90, 1, 90, 90, 180, 90, 90, 1, 90, 90]  # Per-channel angle offsets that correct for physical servo mounting orientation
 
 GPS_UART_PORT = "/dev/ttyTHS1"
 GPS_BAUDRATE = 9600
@@ -143,32 +155,32 @@ CAMERA_CENTER_ANGLE = 90.0
 CAMERA_SCAN_ANGLES = [45.0, 135.0]
 TIME_SLEEP_SCAN = [2, 1]
 
-LIDAR_OBSTACLE_THRESHOLD = 500
+LIDAR_OBSTACLE_THRESHOLD = 500  # Distance in mm below which a scan point is treated as an obstacle
 LIDAR_FULL_SCAN_SIZE = 360
 LIDAR_DIRECTION_COUNT = 8
-LIDAR_DIRECTION_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315]
-LIDAR_ANGLE_RANGE = 22
-LIDAR_REVERSE_DIRECTION = 180
-LIDAR_PATH_CHECK_RANGE = 10
+LIDAR_DIRECTION_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315]  # Cardinal and intercardinal headings in degrees
+LIDAR_ANGLE_RANGE = 22  # Half-width in degrees around each heading used to aggregate scan points
+LIDAR_REVERSE_DIRECTION = 180  # Angle added to compute the opposite travel heading
+LIDAR_PATH_CHECK_RANGE = 10  # Degrees on each side of a heading checked for a clear path
 
-GAIT_STEP_GAIN = 0.8
-GAIT_MAX_SL = 2
-GAIT_BODY_POS = (0, 100, 0)
-GAIT_BODY_ROT = (0, 0, 0)
-GAIT_TIMING = [300, 1200, 300, 200]
+GAIT_STEP_GAIN = 0.8  # Scaling factor applied to the computed step length
+GAIT_MAX_SL = 2  # Maximum step length multiplier
+GAIT_BODY_POS = (0, 100, 0)  # Default body position (x, y, z) in mm
+GAIT_BODY_ROT = (0, 0, 0)  # Default body rotation (roll, pitch, yaw) in degrees
+GAIT_TIMING = [300, 1200, 300, 200]  # Gait phase durations in ms: [lift, swing, lower, stance]
 GAIT_INITIAL_VALUES = [0.0, 0, 0]
-GAIT_FOOT_POSITIONS = [87, 77]
+GAIT_FOOT_POSITIONS = [87, 77]  # Default foot x/z rest positions in mm
 GAIT_RC = [-50, 0, 0, 1]
-GAIT_ANGLE_STEP = 0.5
+GAIT_ANGLE_STEP = 0.5  # Step size in degrees for iterative IK angle search
 GAIT_END_Y = 0
-GAIT_TOTAL_TIME_CALC = 1000
+GAIT_TOTAL_TIME_CALC = 1000  # Normalisation divisor for gait timing calculations
 
-ROBOT_L1 = 50
-ROBOT_L2 = 20
-ROBOT_L3 = 100
-ROBOT_L4 = 100
-ROBOT_L = 140
-ROBOT_W = 75
+ROBOT_L1 = 50   # Coxa link length in mm
+ROBOT_L2 = 20   # Femur offset length in mm
+ROBOT_L3 = 100  # Femur link length in mm
+ROBOT_L4 = 100  # Tibia link length in mm
+ROBOT_L = 140   # Body length (front-to-back leg spacing) in mm
+ROBOT_W = 75    # Body width (left-to-right leg spacing) in mm
 
 ROBOT_LEG_FRONT = 0
 ROBOT_LEG_BACK = 2
@@ -183,7 +195,7 @@ KB_X_STEP_DIVISOR = 12.0
 KB_Y_STEP = 5.0
 KB_YAW_STEP = 3.0
 
-MATH_PI_DIVISOR = 180
+MATH_PI_DIVISOR = 180  # Divisor for degree-to-radian conversion (pi / 180)
 
 DATASET_ROOT_PATH = _env_path("WILDFIRE_DATASET_ROOT", "/workspace/wildfire-dataset")
 
@@ -204,8 +216,8 @@ NASA_AMS_CLEAN_YOLO_PATH = _env_path(
 
 KB_TEST_SLEEP_TIME = 1
 
-ULTRASONIC_DISTANCE_MULTIPLIER = 17150
-DIRECTION_ANGLE_MULTIPLIER = 90
+ULTRASONIC_DISTANCE_MULTIPLIER = 17150  # Speed-of-sound constant for HC-SR04 pulse-to-cm conversion (34300 cm/s / 2)
+DIRECTION_ANGLE_MULTIPLIER = 90  # Degrees per cardinal direction step
 DEFAULT_DIRECTION_VALUE = 0.0
 SERVO_TEST_ENDPOINT_VALUES = [[100, -100, 87.5, 1], [100, -100, -87.5, 1], [-100, -100, 87.5, 1], [-100, -100, -87.5, 1]]
 
@@ -214,8 +226,8 @@ PATROL_ZONE_MIN_POINTS = 3
 
 GPS_READ_MAX_ATTEMPTS = 10
 
-SENSOR_READ_TIMEOUT = 5.0
-SENSOR_CHANNEL_DIVISOR = 2
+SENSOR_READ_TIMEOUT = 5.0  # Seconds to wait for a sensor read before timing out
+SENSOR_CHANNEL_DIVISOR = 2  # ADS1115 uses two channels per MQ-2 sensor
 
 LIDAR_READ_TIMEOUT = 10.0
 
