@@ -6,6 +6,13 @@ import com.wildfirespot.server.dto.*;
 import com.wildfirespot.server.gateway.RobotGatewayClient;
 import org.springframework.stereotype.Service;
 
+/**
+ * Application-layer service for the robot dashboard.
+ *
+ * <p>Acts as the single point of entry between {@code DashboardController} and
+ * {@link RobotGatewayClient}. All data retrieval and command dispatch is
+ * delegated to the active gateway implementation; no business logic lives here.
+ */
 @Service
 public class DashboardService {
 
