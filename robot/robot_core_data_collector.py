@@ -59,6 +59,18 @@ class RobotCoreDataCollector(RobotDataCollector):
         fire_detector,
         log_reader,
     ):
+        """
+        Store references to all Robot Core managers.
+
+        Args:
+            state_machine: StateMachine providing the current robot state.
+            gps_manager: GPSManager for location reads.
+            sensor_manager: SensorManager for environmental sensor reads.
+            lidar_manager: LidarManager used to derive lidar_status.
+            fire_detector: FireDetector exposing detection flags.
+            log_reader: Zero-argument callable returning list[dict] with keys
+                        'level', 'message', and 'timestamp'.
+        """
         self._state_machine = state_machine
         self._gps_manager = gps_manager
         self._sensor_manager = sensor_manager
@@ -67,6 +79,7 @@ class RobotCoreDataCollector(RobotDataCollector):
         self._log_reader = log_reader
 
     def get_status(self) -> RobotStatusData:
+        """Read current state from StateMachine and return as RobotStatusData."""
         try:
             state = self._state_machine.get_state().value
         except Exception as e:
@@ -81,6 +94,7 @@ class RobotCoreDataCollector(RobotDataCollector):
         )
 
     def get_gps(self) -> RobotGpsData:
+        """Read one GPS fix from GPSManager; fix=False when no valid NMEA sentence is available."""
         latitude = 0.0
         longitude = 0.0
         fix = False
@@ -101,6 +115,13 @@ class RobotCoreDataCollector(RobotDataCollector):
         )
 
     def get_sensors(self) -> RobotSensorData:
+        """
+        Read all environmental sensors and report LIDAR availability.
+
+        Calls SensorManager.read_all() and maps the result into RobotSensorData.
+        FlameStatus is populated from either a dict or an ordered iterable.
+        lidar_status is set to 'SCANNING' if LidarManager is available, else 'UNAVAILABLE'.
+        """
         temperature = 0.0
         humidity = 0.0
         mq2_gas = 0
@@ -146,6 +167,13 @@ class RobotCoreDataCollector(RobotDataCollector):
         )
 
     def get_health(self) -> RobotHealthData:
+        """
+        Poll each subsystem for availability and return a health snapshot.
+
+        robot_core is always True (this method is only reachable if the core is running).
+        camera is always False until vision is implemented.
+        gps, lidar, and sensors reflect each manager's is_available() result.
+        """
         robot_core = True
         camera = False
         gps = False
@@ -176,6 +204,12 @@ class RobotCoreDataCollector(RobotDataCollector):
         )
 
     def get_fire_status(self) -> RobotFireStatusData:
+        """
+        Read the last fire detection state from FireDetector without triggering a new scan.
+
+        Reads sensor_detected, camera_detected, and _last_detection_result directly
+        from the FireDetector instance so no additional sensor I/O is performed.
+        """
         hardware_confirmed = False
         camera_detected = False
         final_confirmed_fire = False
@@ -194,6 +228,12 @@ class RobotCoreDataCollector(RobotDataCollector):
         )
 
     def get_logs(self) -> RobotLogsData:
+        """
+        Fetch recent log entries via the injected log_reader callable.
+
+        Each raw dict is mapped to a RobotLogEntry; malformed entries are skipped
+        and logged at ERROR level rather than raising.
+        """
         entries = []
         try:
             raw_logs = self._log_reader()
