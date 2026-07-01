@@ -6,6 +6,13 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * REST controller that exposes robot dashboard endpoints to the web frontend.
+ *
+ * <p>All routes are prefixed with {@code /api} and delegate directly to
+ * {@link DashboardService}. Read endpoints ({@code GET}) surface live robot data;
+ * write endpoints ({@code POST}) forward commands to the robot gateway.
+ */
 @RestController
 @RequestMapping("/api")
 @CrossOrigin(origins = "*")
