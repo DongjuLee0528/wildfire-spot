@@ -7,6 +7,12 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+/**
+ * Centralised exception handler for all REST controllers.
+ *
+ * <p>Translates Spring MVC and application-level exceptions into a consistent
+ * {@link ErrorResponse} JSON body so the frontend always receives a structured error.
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
