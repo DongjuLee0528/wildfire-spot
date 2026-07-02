@@ -11,6 +11,14 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Mock implementation of {@link RobotGatewayClient} for local development and testing.
+ *
+ * <p>Returns hardcoded or provider-generated responses without requiring a live robot
+ * connection. GPS, sensor, and status data are supplied by injected provider beans so
+ * they can be customised per test scenario. Health, fire status, and logs return fixed
+ * realistic values. Write operations always return {@code accepted=true}.
+ */
 @Component
 public class MockRobotGatewayClient implements RobotGatewayClient {
 

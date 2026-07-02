@@ -11,6 +11,17 @@ import org.springframework.web.client.RestClientException;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * HTTP implementation of {@link RobotGatewayClient}.
+ *
+ * <p>Communicates with the Python FastAPI server running on the robot over HTTP
+ * using Spring's {@link RestClient}. Every read method returns a safe fallback
+ * value when the robot is unreachable or returns an unexpected response, so the
+ * dashboard remains functional during connectivity loss.
+ *
+ * <p>Write operations ({@link #sendControlCommand} and {@link #changeMode}) are
+ * not yet wired to real robot endpoints; they return {@code accepted=false}.
+ */
 public class HttpRobotGatewayClient implements RobotGatewayClient {
 
     private static final Logger log = LoggerFactory.getLogger(HttpRobotGatewayClient.class);
