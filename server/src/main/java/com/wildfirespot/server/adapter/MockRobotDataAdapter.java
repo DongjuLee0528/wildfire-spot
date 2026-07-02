@@ -7,6 +7,14 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 
+/**
+ * Mock adapter that implements all three robot data provider interfaces.
+ *
+ * <p>Returns static, hardcoded values representing a healthy robot in AUTO patrol mode
+ * at a fixed Seoul-area GPS position with a typical sensor reading.
+ * Used as the data source for {@link com.wildfirespot.server.gateway.MockRobotGatewayClient}
+ * during local development and testing.
+ */
 @Component
 public class MockRobotDataAdapter implements RobotStatusProvider, RobotGpsProvider, RobotSensorProvider {
 
