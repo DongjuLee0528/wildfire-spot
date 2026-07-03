@@ -1,9 +1,9 @@
 package com.wildfirespot.server.dto;
 
 public record HealthResponse(
-        boolean robotCore,
+        boolean robot,
         boolean camera,
         boolean gps,
         boolean lidar,
-        boolean sensors
+        boolean sensor
 ) {}

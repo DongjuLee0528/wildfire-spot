@@ -1,12 +1,18 @@
 package com.wildfirespot.server;
 
+import com.wildfirespot.server.dto.GpsResponse;
+import com.wildfirespot.server.gateway.RobotGatewayClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.LocalDateTime;
+
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -30,7 +36,18 @@ class DashboardControllerTest {
     void getHealth_returns200() throws Exception {
         mockMvc.perform(get("/api/health"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.robotCore").value(true));
+                .andExpect(jsonPath("$.robot").value(true));
+    }
+
+    @Test
+    void getHealth_allFieldsPresent() throws Exception {
+        mockMvc.perform(get("/api/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.robot").isBoolean())
+                .andExpect(jsonPath("$.camera").isBoolean())
+                .andExpect(jsonPath("$.gps").isBoolean())
+                .andExpect(jsonPath("$.lidar").isBoolean())
+                .andExpect(jsonPath("$.sensor").isBoolean());
     }
 
     @Test
@@ -50,11 +67,32 @@ class DashboardControllerTest {
     }
 
     @Test
+    void getSensors_lidarStatusIsString() throws Exception {
+        mockMvc.perform(get("/api/sensors"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lidarStatus").isString());
+    }
+
+    @Test
     void getFireStatus_returns200() throws Exception {
         mockMvc.perform(get("/api/fire/status"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.hardwareConfirmed").value(true))
-                .andExpect(jsonPath("$.finalConfirmedFire").value(false));
+                .andExpect(jsonPath("$.state").value("SUSPECTED_FIRE"))
+                .andExpect(jsonPath("$.suspected").value(true))
+                .andExpect(jsonPath("$.verified").value(false));
+    }
+
+    @Test
+    void getFireStatus_allContractFieldsPresent() throws Exception {
+        mockMvc.perform(get("/api/fire/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").isString())
+                .andExpect(jsonPath("$.suspected").isBoolean())
+                .andExpect(jsonPath("$.verified").isBoolean())
+                .andExpect(jsonPath("$.cameraDetected").isBoolean())
+                .andExpect(jsonPath("$.sensorDetected").isBoolean())
+                .andExpect(jsonPath("$.latestAlertEvent").isEmpty())
+                .andExpect(jsonPath("$.latestReportEvent").isEmpty());
     }
 
     @Test
@@ -98,5 +136,29 @@ class DashboardControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"mode\":\"TURBO\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @SpringBootTest
+    @AutoConfigureMockMvc
+    static class GpsNullableTest {
+
+        @Autowired
+        private MockMvc mockMvc;
+
+        @MockBean
+        private RobotGatewayClient robotGatewayClient;
+
+        @Test
+        void getGps_nullableCoordinates_returnedSafely() throws Exception {
+            when(robotGatewayClient.getGps()).thenReturn(
+                    new GpsResponse(null, null, false, LocalDateTime.now())
+            );
+
+            mockMvc.perform(get("/api/gps"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.fix").value(false))
+                    .andExpect(jsonPath("$.latitude").doesNotExist())
+                    .andExpect(jsonPath("$.longitude").doesNotExist());
+        }
     }
 }

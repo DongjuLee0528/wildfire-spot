@@ -5,22 +5,30 @@ import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * HTTP implementation of {@link RobotGatewayClient}.
  *
- * <p>Communicates with the Python FastAPI server running on the robot over HTTP
- * using Spring's {@link RestClient}. Every read method returns a safe fallback
- * value when the robot is unreachable or returns an unexpected response, so the
- * dashboard remains functional during connectivity loss.
+ * <p>Communicates with the Python FastAPI server ({@code robot.robot_api}) running on the
+ * robot over HTTP using Spring's {@link RestClient}. All read and write operations are
+ * forwarded to the corresponding Python endpoints:
+ * <ul>
+ *   <li>GET  /robot/status, /robot/health, /robot/gps, /robot/sensors,
+ *       /robot/fire/status, /robot/logs</li>
+ *   <li>POST /robot/control — forwarded by {@link #sendControlCommand}</li>
+ *   <li>POST /robot/mode   — forwarded by {@link #changeMode}</li>
+ * </ul>
  *
- * <p>Write operations ({@link #sendControlCommand} and {@link #changeMode}) are
- * not yet wired to real robot endpoints; they return {@code accepted=false}.
+ * <p>Every method returns a safe fallback value when the Python API is unreachable,
+ * times out, or returns an unexpected response, so the dashboard remains functional
+ * during connectivity loss.
  */
 public class HttpRobotGatewayClient implements RobotGatewayClient {
 
@@ -118,12 +126,34 @@ public class HttpRobotGatewayClient implements RobotGatewayClient {
 
     @Override
     public ControlResponse sendControlCommand(ControlCommand command) {
-        return new ControlResponse(false, command.name());
+        try {
+            ControlResponse response = restClient.post()
+                    .uri("/robot/control")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("command", command.name()))
+                    .retrieve()
+                    .body(ControlResponse.class);
+            return response != null ? response : new ControlResponse(false, command.name());
+        } catch (RestClientException e) {
+            log.error("POST /robot/control failed: {}", e.getMessage());
+            return new ControlResponse(false, command.name());
+        }
     }
 
     @Override
     public ModeResponse changeMode(RobotMode mode) {
-        return new ModeResponse(false, mode.name());
+        try {
+            ModeResponse response = restClient.post()
+                    .uri("/robot/mode")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("mode", mode.name()))
+                    .retrieve()
+                    .body(ModeResponse.class);
+            return response != null ? response : new ModeResponse(false, mode.name());
+        } catch (RestClientException e) {
+            log.error("POST /robot/mode failed: {}", e.getMessage());
+            return new ModeResponse(false, mode.name());
+        }
     }
 
     private StatusResponse fallbackStatus() {
@@ -134,8 +164,9 @@ public class HttpRobotGatewayClient implements RobotGatewayClient {
         return new HealthResponse(false, false, false, false, false);
     }
 
+
     private GpsResponse fallbackGps() {
-        return new GpsResponse(0.0, 0.0, false, LocalDateTime.now());
+        return new GpsResponse(null, null, false, LocalDateTime.now());
     }
 
     private SensorResponse fallbackSensors() {
@@ -144,7 +175,7 @@ public class HttpRobotGatewayClient implements RobotGatewayClient {
     }
 
     private FireStatusResponse fallbackFireStatus() {
-        return new FireStatusResponse(false, false, false);
+        return new FireStatusResponse("NORMAL", false, false, false, false, null, null);
     }
 
     private LogResponse fallbackLogs() {
