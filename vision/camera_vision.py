@@ -11,8 +11,9 @@ from utils.config import (
     CAMERA_WIDTH,
     CAMERA_HEIGHT,
     CAMERA_FPS,
-    TRAIN_MODEL_PATH,
+    MODEL_PATH,
     CAMERA_CONFIDENCE_THRESHOLD,
+    CAMERA_IOU_THRESHOLD,
     CAMERA_FIRE_CLASSES,
 )
 from utils.logger import WildfireLogger
@@ -106,10 +107,10 @@ class CameraVision:
             self.logger.log_error("CameraVision.__init__", "ultralytics is not installed")
         else:
             try:
-                self._model = YOLO(TRAIN_MODEL_PATH)
+                self._model = YOLO(MODEL_PATH)
                 self._model_available = True
             except Exception as e:
-                self.logger.log_error("CameraVision.__init__", f"Model load error ({TRAIN_MODEL_PATH}): {e}")
+                self.logger.log_error("CameraVision.__init__", f"Model load error ({MODEL_PATH}): {e}")
 
     def is_available(self) -> bool:
         """Return True only if both camera and model are ready for inference."""
@@ -185,7 +186,7 @@ class CameraVision:
             return result
 
         try:
-            predictions = self._model(frame, verbose=False)
+            predictions = self._model(frame, verbose=False, conf=CAMERA_CONFIDENCE_THRESHOLD, iou=CAMERA_IOU_THRESHOLD)
         except Exception as e:
             self.logger.log_error("CameraVision.detect_from_frame", f"Inference error: {e}")
             self._latest_result = _copy_result(result)
