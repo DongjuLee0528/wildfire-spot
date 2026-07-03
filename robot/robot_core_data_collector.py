@@ -30,11 +30,8 @@ from robot.robot_api_types import (
 
 logger = logging.getLogger(__name__)
 
-# Phase 5 TODO:
-# Replace this placeholder with runtime mode from StateMachine or ModeManager.
-# For Phase 4-3 read-only scope, mode is always reported as AUTO.
-_ROBOT_MODE = "AUTO"
 _DEFAULT_LIDAR_STATUS = "UNAVAILABLE"
+_FALLBACK_MODE = "UNKNOWN"
 
 
 class RobotCoreDataCollector(RobotDataCollector):
@@ -86,9 +83,15 @@ class RobotCoreDataCollector(RobotDataCollector):
             logger.error("get_status: state_machine error: %s", e)
             state = "UNKNOWN"
 
+        try:
+            mode = self._state_machine.get_mode().value
+        except Exception as e:
+            logger.error("get_status: state_machine mode error: %s", e)
+            mode = _FALLBACK_MODE
+
         return RobotStatusData(
             state=state,
-            mode=_ROBOT_MODE,
+            mode=mode,
             robot_connected=True,
             last_update=datetime.now(),
         )

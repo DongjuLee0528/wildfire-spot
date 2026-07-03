@@ -8,6 +8,14 @@ to ensure the robot operates in a predictable and safe manner.
 from enum import Enum
 from utils.logger import WildfireLogger
 
+
+class RobotMode(Enum):
+    """Operating mode that controls which input sources may issue movement commands."""
+
+    AUTO = "AUTO"
+    MANUAL = "MANUAL"
+
+
 class RobotState(Enum):
     """All possible states the wildfire robot can be in."""
     CALIBRATING = "CALIBRATING"      # Setting up patrol zone boundaries
@@ -29,8 +37,9 @@ class StateMachine:
     """
 
     def __init__(self):
-        """Initialize state machine in IDLE state with transition rules."""
+        """Initialize state machine in IDLE state with AUTO mode and transition rules."""
         self._current_state = RobotState.IDLE
+        self._current_mode = RobotMode.AUTO
         try:
             self.logger = WildfireLogger("StateMachine")
         except Exception as e:
@@ -94,6 +103,29 @@ class StateMachine:
         self._current_state = state
         self.logger.log_system_state(f"{old_state.value} -> {state.value}")
         return True
+
+    def set_mode(self, mode):
+        """
+        Switch the operating mode.
+
+        Args:
+            mode: RobotMode value to switch to.
+
+        Returns:
+            True if mode was accepted and set, False if the value is invalid.
+        """
+        if not isinstance(mode, RobotMode):
+            if self.logger is not None:
+                self.logger.log_error("StateMachine.set_mode", f"Invalid mode type: {mode!r}")
+            return False
+        self._current_mode = mode
+        if self.logger is not None:
+            self.logger.info(f"MODE | {mode.value}")
+        return True
+
+    def get_mode(self):
+        """Return the current RobotMode."""
+        return self._current_mode
 
     def get_state(self):
         """Get the current robot state."""

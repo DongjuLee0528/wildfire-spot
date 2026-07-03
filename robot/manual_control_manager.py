@@ -18,6 +18,7 @@ from utils.config import (
 from utils.logger import WildfireLogger
 
 VALID_COMMANDS = {"FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP", "RESET"}
+_SAFE_COMMANDS = {"STOP", "RESET"}
 
 _FORWARD_STEP = FORWARD_DISTANCE / KB_X_STEP_DIVISOR
 _LATERAL_STEP = KB_Y_STEP
@@ -44,16 +45,20 @@ class ManualControlManager:
     monitor_commands() picks it up on its next read.
     """
 
-    def __init__(self, command_queue=None):
+    def __init__(self, command_queue=None, mode_manager=None):
         """
         Initialise the manual control manager.
 
         Args:
             command_queue: multiprocessing.Queue holding KB_CONTROL_OFFSET
                 dicts. If None, commands are validated but not dispatched.
+            mode_manager: Optional ModeControlManager instance. When provided,
+                non-safe commands are blocked unless the mode is MANUAL.
+                STOP and RESET are always forwarded regardless of mode.
         """
         self.logger = WildfireLogger("ManualControlManager")
         self._command_queue = command_queue
+        self._mode_manager = mode_manager
         self._current_command = "STOP"
 
     def send_command(self, command):
@@ -67,7 +72,7 @@ class ManualControlManager:
             dict with keys:
             - accepted (bool)
             - command (str): the submitted command
-            - reason (str): 'ok', 'invalid_command', or 'queue_unavailable'
+            - reason (str): 'ok', 'invalid_command', 'wrong_mode', or 'queue_unavailable'
         """
         command_upper = str(command).upper() if command is not None else ""
 
@@ -77,6 +82,14 @@ class ManualControlManager:
                 f"Rejected unknown command: {command!r}",
             )
             return {"accepted": False, "command": str(command), "reason": "invalid_command"}
+
+        if self._mode_manager is not None and command_upper not in _SAFE_COMMANDS:
+            if not self._mode_manager.is_manual():
+                self.logger.log_error(
+                    "ManualControlManager.send_command",
+                    f"Command {command_upper} blocked: mode is {self._mode_manager.get_current_mode()}",
+                )
+                return {"accepted": False, "command": command_upper, "reason": "wrong_mode"}
 
         if self._command_queue is None:
             if command_upper == "STOP":
