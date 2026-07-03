@@ -8,6 +8,7 @@ optional camera-based detection to identify and locate wildfires.
 from utils.config import (MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
                          DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT)
 from utils.logger import WildfireLogger
+from detection.fire_events import AlertEvent, DetectionState, ReportEvent
 from math import isfinite
 import time
 
@@ -291,3 +292,111 @@ class FireDetector:
         except (ValueError, RuntimeError) as e:
             self.logger.log_error("FireDetector.get_fire_location", str(e))
             return None
+
+    def evaluate(self):
+        """
+        Run staged fire verification and return current state with any generated event.
+
+        Detection rules:
+        - SUSPECTED_FIRE: camera detects fire/smoke OR MQ2 smoke threshold exceeded OR
+          any KY026 flame sensor triggered. DHT11 alone does not trigger.
+        - VERIFIED_FIRE: camera detection AND (MQ2 threshold exceeded OR KY026 triggered).
+          DHT11 readings alone never produce VERIFIED_FIRE.
+
+        Returns:
+            Tuple of (DetectionState, Optional[AlertEvent], Optional[ReportEvent]).
+            Exactly one of AlertEvent or ReportEvent is non-None when state is not NORMAL.
+        """
+        try:
+            sensor_data = self.sensor_manager.read_all()
+        except Exception as e:
+            self.logger.log_error("FireDetector.evaluate", f"sensor read failed: {e}")
+            sensor_data = {}
+
+        if sensor_data is None:
+            sensor_data = {}
+
+        smoke = _safe_number(sensor_data.get("smoke", 0), 0)
+        temperature = _safe_number(sensor_data.get("temperature", 0), 0)
+        humidity = _safe_number(sensor_data.get("humidity", 100), 100)
+        flame_raw = sensor_data.get("flame", False)
+        flame_values = _flame_values(flame_raw)
+
+        mq2_triggered = smoke > MQ2_SMOKE_THRESHOLD
+        ky026_triggered = any(bool(v) for v in flame_values)
+
+        try:
+            camera_result = self.camera_vision.detect() if self.camera_vision is not None else None
+            camera_fire = bool(camera_result.get("detected", False)) if camera_result else False
+        except Exception as e:
+            self.logger.log_error("FireDetector.evaluate", f"camera detection failed: {e}")
+            camera_result = None
+            camera_fire = False
+
+        self.camera_detected = camera_fire
+
+        try:
+            coords = self.gps_manager.get_coordinates()
+            lat = coords[0] if (coords and len(coords) >= 2) else None
+            lon = coords[1] if (coords and len(coords) >= 2) else None
+        except Exception:
+            lat = None
+            lon = None
+
+        sensor_hard_triggered = mq2_triggered or ky026_triggered
+        suspected = camera_fire or sensor_hard_triggered
+
+        if not suspected:
+            return DetectionState.NORMAL, None, None
+
+        if camera_fire and sensor_hard_triggered:
+            state = DetectionState.VERIFIED_FIRE
+            reasons = []
+            if mq2_triggered:
+                reasons.append("mq2")
+            if ky026_triggered:
+                reasons.append("ky026")
+            if camera_fire:
+                reasons.append("camera")
+            reason_str = "+".join(reasons)
+            event = ReportEvent(
+                state=state,
+                timestamp=time.time(),
+                report_timestamp=time.time(),
+                latitude=lat,
+                longitude=lon,
+                smoke=smoke,
+                temperature=temperature,
+                humidity=humidity,
+                flame=flame_raw,
+                camera_detected=camera_fire,
+                camera_result=camera_result,
+                verification_reason=reason_str,
+            )
+            self.logger.info(f"FIRE_EVAL | VERIFIED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
+            return state, None, event
+
+        reasons = []
+        if camera_fire:
+            reasons.append("camera")
+        if mq2_triggered:
+            reasons.append("mq2")
+        if ky026_triggered:
+            reasons.append("ky026")
+        reason_str = "+".join(reasons)
+        state = DetectionState.SUSPECTED_FIRE
+        event = AlertEvent(
+            state=state,
+            timestamp=time.time(),
+            latitude=lat,
+            longitude=lon,
+            smoke=smoke,
+            temperature=temperature,
+            humidity=humidity,
+            flame=flame_raw,
+            camera_detected=camera_fire,
+            camera_result=camera_result,
+            verification_reason=reason_str,
+        )
+        self.logger.info(f"FIRE_EVAL | SUSPECTED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
+        return state, event, None
