@@ -12,6 +12,18 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
+/**
+ * Spring configuration that selects and wires the active {@link RobotGatewayClient} bean.
+ *
+ * <p>The gateway mode is controlled by the {@code robot.gateway.mode} property:
+ * <ul>
+ *   <li>{@code http} — creates an {@link HttpRobotGatewayClient} backed by a
+ *       {@link org.springframework.web.client.RestClient} pointing at the robot's
+ *       FastAPI server ({@code robot.api.base-url}).</li>
+ *   <li>any other value (default: {@code mock}) — uses the injected
+ *       {@link com.wildfirespot.server.gateway.MockRobotGatewayClient}.</li>
+ * </ul>
+ */
 @Configuration
 public class RobotGatewayConfig {
 
