@@ -59,10 +59,14 @@ class RobotHealthData:
 
 @dataclass
 class RobotFireStatusData:
-    """Aggregated fire detection result from hardware and camera channels."""
-    hardware_confirmed: bool
+    """Aggregated fire detection result from staged evaluation pipeline."""
+    state: str
+    suspected: bool
+    verified: bool
     camera_detected: bool
-    final_confirmed_fire: bool
+    sensor_detected: bool
+    latest_alert_event: object
+    latest_report_event: object
 
 
 @dataclass

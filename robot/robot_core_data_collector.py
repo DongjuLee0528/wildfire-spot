@@ -208,26 +208,45 @@ class RobotCoreDataCollector(RobotDataCollector):
 
     def get_fire_status(self) -> RobotFireStatusData:
         """
-        Read the last fire detection state from FireDetector without triggering a new scan.
+        Read the latest staged fire detection result from FireDetector.
 
-        Reads sensor_detected, camera_detected, and _last_detection_result directly
-        from the FireDetector instance so no additional sensor I/O is performed.
+        Uses public FireDetector methods: get_current_fire_state(),
+        get_latest_alert_event(), get_latest_report_event().
+        No sensor I/O is performed.
         """
-        hardware_confirmed = False
+        state_str = "NORMAL"
+        suspected = False
+        verified = False
         camera_detected = False
-        final_confirmed_fire = False
+        sensor_detected = False
+        latest_alert_event = None
+        latest_report_event = None
 
         try:
-            hardware_confirmed = bool(self._fire_detector.sensor_detected)
+            from detection.fire_events import DetectionState
+            fire_state = self._fire_detector.get_current_fire_state()
+            state_str = {
+                "normal": "NORMAL",
+                "suspected_fire": "SUSPECTED_FIRE",
+                "verified_fire": "VERIFIED_FIRE",
+            }.get(fire_state.value, "NORMAL") if fire_state else "NORMAL"
+            suspected = fire_state in (DetectionState.SUSPECTED_FIRE, DetectionState.VERIFIED_FIRE)
+            verified = fire_state is DetectionState.VERIFIED_FIRE
             camera_detected = bool(self._fire_detector.camera_detected)
-            final_confirmed_fire = bool(self._fire_detector._last_detection_result)
+            sensor_detected = bool(self._fire_detector.sensor_detected)
+            latest_alert_event = self._fire_detector.get_latest_alert_event()
+            latest_report_event = self._fire_detector.get_latest_report_event()
         except Exception as e:
             logger.error("get_fire_status: fire_detector error: %s", e)
 
         return RobotFireStatusData(
-            hardware_confirmed=hardware_confirmed,
+            state=state_str,
+            suspected=suspected,
+            verified=verified,
             camera_detected=camera_detected,
-            final_confirmed_fire=final_confirmed_fire,
+            sensor_detected=sensor_detected,
+            latest_alert_event=latest_alert_event,
+            latest_report_event=latest_report_event,
         )
 
     def get_logs(self) -> RobotLogsData:

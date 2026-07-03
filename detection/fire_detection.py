@@ -11,6 +11,7 @@ from utils.config import (MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOL
 from utils.logger import WildfireLogger
 from detection.fire_events import AlertEvent, DetectionState, ReportEvent
 from math import isfinite
+import copy
 import time
 
 
@@ -68,6 +69,9 @@ class FireDetector:
         self.sensor_detected = False
         self.detection_log = []  # History of fire detections
         self._last_detection_result = False
+        self._current_fire_state = DetectionState.NORMAL
+        self._latest_alert_event = None
+        self._latest_report_event = None
         self.logger = WildfireLogger("FireDetector")
 
     def _check_sensor_thresholds(self, sensor_data):
@@ -347,7 +351,12 @@ class FireDetector:
         sensor_hard_triggered = mq2_triggered or ky026_triggered
         suspected = camera_fire or sensor_hard_triggered
 
+        self.sensor_detected = sensor_hard_triggered
+
         if not suspected:
+            self._current_fire_state = DetectionState.NORMAL
+            self._latest_alert_event = None
+            self._latest_report_event = None
             return DetectionState.NORMAL, None, None
 
         if camera_fire and sensor_hard_triggered:
@@ -382,6 +391,8 @@ class FireDetector:
                 verification_reason=reason_str,
                 image_path=image_path,
             )
+            self._current_fire_state = state
+            self._latest_report_event = event
             self.logger.info(f"FIRE_EVAL | VERIFIED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
             return state, None, event
 
@@ -414,5 +425,52 @@ class FireDetector:
             verification_reason=reason_str,
             image_path=image_path,
         )
+        self._current_fire_state = state
+        self._latest_alert_event = event
+        self._latest_report_event = None
         self.logger.info(f"FIRE_EVAL | SUSPECTED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
         return state, event, None
+
+    def get_current_fire_state(self):
+        """
+        Return the DetectionState from the most recent evaluate() call.
+
+        Returns:
+            DetectionState: NORMAL, SUSPECTED_FIRE, or VERIFIED_FIRE.
+        """
+        return self._current_fire_state
+
+    def get_latest_alert_event(self):
+        """
+        Return a defensive copy of the AlertEvent from the most recent SUSPECTED_FIRE evaluation.
+
+        Returns:
+            AlertEvent copy or None.
+        """
+        if self._latest_alert_event is None:
+            return None
+        return copy.deepcopy(self._latest_alert_event)
+
+    def get_latest_report_event(self):
+        """
+        Return a defensive copy of the ReportEvent from the most recent VERIFIED_FIRE evaluation.
+
+        Returns:
+            ReportEvent copy or None.
+        """
+        if self._latest_report_event is None:
+            return None
+        return copy.deepcopy(self._latest_report_event)
+
+    def get_latest_evaluation(self):
+        """
+        Return a defensive copy snapshot of the most recent evaluate() result.
+
+        Returns:
+            dict with keys: state, alert_event, report_event.
+        """
+        return {
+            "state": self._current_fire_state,
+            "alert_event": copy.deepcopy(self._latest_alert_event),
+            "report_event": copy.deepcopy(self._latest_report_event),
+        }
