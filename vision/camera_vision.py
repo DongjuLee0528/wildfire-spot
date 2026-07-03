@@ -82,6 +82,7 @@ class CameraVision:
         self._cap = None
         self._model = None
         self._latest_result = _empty_result()
+        self._latest_frame = None
 
         self._camera_available = False
         self._model_available = False
@@ -116,6 +117,15 @@ class CameraVision:
         """Return True only if both camera and model are ready for inference."""
         return self._camera_available and self._model_available
 
+    def get_latest_frame(self):
+        """
+        Return the most recently captured frame, or None if no frame has been captured.
+
+        Returns:
+            numpy ndarray (BGR) or None.
+        """
+        return self._latest_frame
+
     def read_frame(self):
         """
         Capture a single frame from the camera.
@@ -130,6 +140,7 @@ class CameraVision:
             ret, frame = self._cap.read()
             if not ret or frame is None:
                 return None
+            self._latest_frame = frame
             return frame
         except Exception as e:
             self.logger.log_error("CameraVision.read_frame", str(e))
@@ -230,6 +241,41 @@ class CameraVision:
 
         self._latest_result = _copy_result(result)
         return result
+
+    def save_evidence_image(self, state_name: str, output_dir: str) -> str | None:
+        """
+        Save the latest captured frame to disk as a JPEG evidence image.
+
+        Args:
+            state_name: Detection state label used in the filename (e.g. 'suspected_fire').
+            output_dir: Directory path where the image will be written.
+
+        Returns:
+            Path of the saved image on success, None on failure.
+        """
+        if cv2 is None:
+            self.logger.log_error("CameraVision.save_evidence_image", "cv2 not available")
+            return None
+        frame = self._latest_frame
+        if frame is None:
+            self.logger.log_error("CameraVision.save_evidence_image", "no frame available")
+            return None
+        try:
+            import os
+            from datetime import datetime
+            os.makedirs(output_dir, exist_ok=True)
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            filename = f"fire_{state_name}_{timestamp_str}.jpg"
+            filepath = os.path.join(output_dir, filename)
+            success = cv2.imwrite(filepath, frame)
+            if not success:
+                self.logger.log_error("CameraVision.save_evidence_image", f"cv2.imwrite failed: {filepath}")
+                return None
+            self.logger.info(f"EVIDENCE | Saved: {filepath}")
+            return filepath
+        except Exception as e:
+            self.logger.log_error("CameraVision.save_evidence_image", str(e))
+            return None
 
     def get_latest_result(self) -> dict:
         """Return the result from the most recent detect() or detect_from_frame() call."""

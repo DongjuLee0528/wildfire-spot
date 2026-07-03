@@ -229,6 +229,8 @@ SERVO_TEST_ENDPOINT_VALUES = [[100, -100, 87.5, 1], [100, -100, -87.5, 1], [-100
 PATROL_ZONE = []
 PATROL_ZONE_MIN_POINTS = 3
 
+EVIDENCE_DIR = _env_path("WILDFIRE_EVIDENCE_DIR", "evidence/fire_events")
+
 GPS_READ_MAX_ATTEMPTS = 10
 
 SENSOR_READ_TIMEOUT = 5.0  # Seconds to wait for a sensor read before timing out

@@ -6,7 +6,8 @@ optional camera-based detection to identify and locate wildfires.
 """
 
 from utils.config import (MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
-                         DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT)
+                         DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT,
+                         EVIDENCE_DIR)
 from utils.logger import WildfireLogger
 from detection.fire_events import AlertEvent, DetectionState, ReportEvent
 from math import isfinite
@@ -359,10 +360,17 @@ class FireDetector:
             if camera_fire:
                 reasons.append("camera")
             reason_str = "+".join(reasons)
+            image_path = None
+            if self.camera_vision is not None:
+                try:
+                    image_path = self.camera_vision.save_evidence_image("verified_fire", EVIDENCE_DIR)
+                except Exception as e:
+                    self.logger.log_error("FireDetector.evaluate", f"evidence save failed: {e}")
+            now = time.time()
             event = ReportEvent(
                 state=state,
-                timestamp=time.time(),
-                report_timestamp=time.time(),
+                timestamp=now,
+                report_timestamp=now,
                 latitude=lat,
                 longitude=lon,
                 smoke=smoke,
@@ -372,6 +380,7 @@ class FireDetector:
                 camera_detected=camera_fire,
                 camera_result=camera_result,
                 verification_reason=reason_str,
+                image_path=image_path,
             )
             self.logger.info(f"FIRE_EVAL | VERIFIED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
             return state, None, event
@@ -385,6 +394,12 @@ class FireDetector:
             reasons.append("ky026")
         reason_str = "+".join(reasons)
         state = DetectionState.SUSPECTED_FIRE
+        image_path = None
+        if self.camera_vision is not None:
+            try:
+                image_path = self.camera_vision.save_evidence_image("suspected_fire", EVIDENCE_DIR)
+            except Exception as e:
+                self.logger.log_error("FireDetector.evaluate", f"evidence save failed: {e}")
         event = AlertEvent(
             state=state,
             timestamp=time.time(),
@@ -397,6 +412,7 @@ class FireDetector:
             camera_detected=camera_fire,
             camera_result=camera_result,
             verification_reason=reason_str,
+            image_path=image_path,
         )
         self.logger.info(f"FIRE_EVAL | SUSPECTED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
         return state, event, None
