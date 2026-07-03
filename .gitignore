@@ -24,7 +24,25 @@ __pycache__/
 
 # AI Training
 training/runs/
+
+# Ignore all model weights
 *.pt
+
+# Keep paper/deployment model
+!models/wildfire/best.pt
+
+# Ignore intermediate checkpoints
+models/**/epoch*.pt
+models/**/last.pt
+
+# Ignore training sample images
+models/**/train_batch*.jpg
+models/**/val_batch*.jpg
+models/**/labels.jpg
+
+# Ignore archives
+*.tar
+*.tar.gz
 
 # Local AI Tools
 .claude/

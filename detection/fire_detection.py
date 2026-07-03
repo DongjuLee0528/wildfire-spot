@@ -43,12 +43,12 @@ class FireDetector:
 
     Integrates:
     - Sensor-based detection (smoke, temperature, humidity, flame)
-    - Camera-based detection (AI inference - not yet implemented)
+    - Optional CameraVision candidate detection
     - GPS location tracking
     - Pan-tilt camera control for fire direction tracking
     """
 
-    def __init__(self, sensor_manager, gps_manager, pan_tilt_controller):
+    def __init__(self, sensor_manager, gps_manager, pan_tilt_controller, camera_vision=None):
         """
         Initialize fire detector with hardware managers.
 
@@ -56,10 +56,12 @@ class FireDetector:
             sensor_manager: SensorManager instance for reading sensors
             gps_manager: GPSManager instance for location tracking
             pan_tilt_controller: PanTiltController for camera aiming
+            camera_vision: Optional CameraVision instance for AI-based detection
         """
         self.sensor_manager = sensor_manager
         self.gps_manager = gps_manager
         self.pan_tilt_controller = pan_tilt_controller
+        self.camera_vision = camera_vision
         self.camera_detected = False
         self.sensor_detected = False
         self.detection_log = []  # History of fire detections
@@ -131,11 +133,19 @@ class FireDetector:
         Perform camera-based fire detection using AI inference.
 
         Returns:
-            False (not yet implemented)
-
-        TODO: Implement AI model inference for visual fire detection
+            True if CameraVision detects fire or smoke, False otherwise.
+            Returns False if no CameraVision instance is attached or inference fails.
         """
-        return False
+        if self.camera_vision is None:
+            return False
+        try:
+            result = self.camera_vision.detect()
+            self.camera_detected = bool(result.get("detected", False))
+            return self.camera_detected
+        except Exception as e:
+            self.logger.log_error("FireDetector.detect_by_camera", str(e))
+            self.camera_detected = False
+            return False
 
     def track_fire_direction(self, sensor_data):
         """
@@ -234,30 +244,22 @@ class FireDetector:
         Perform comprehensive fire detection check.
 
         Returns:
-            True if fire detected by sensors or camera
+            True if fire detected by hardware sensors
             False otherwise
 
-        Combines both sensor and camera detection methods.
-        If fire detected, automatically logs the event with GPS location
-        and tracks fire direction with pan-tilt camera.
+        Camera detection is recorded as candidate evidence but does not
+        replace hardware sensor confirmation. If fire is confirmed by
+        sensors, automatically logs the event with GPS location and tracks
+        fire direction with pan-tilt camera.
         """
         try:
             sensor_data = self.sensor_manager.read_all()
 
             # Check both detection methods
-            camera_detection = self.detect_by_camera()
+            self.detect_by_camera()
             sensor_detection = self._check_sensor_thresholds(sensor_data)
 
-            fire_detected = False
-
-            # Fire confirmed if either detection method triggers
-            if sensor_detection:
-                fire_detected = True
-                if camera_detection:
-                    self.camera_detected = True
-            elif camera_detection:
-                fire_detected = True
-                self.camera_detected = True
+            fire_detected = sensor_detection
 
             # On detection, log full context and track fire direction
             if fire_detected:
