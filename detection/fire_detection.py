@@ -6,9 +6,12 @@ optional camera-based detection to identify and locate wildfires.
 """
 
 from utils.config import (MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
-                         DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT)
+                         DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT,
+                         EVIDENCE_DIR)
 from utils.logger import WildfireLogger
+from detection.fire_events import AlertEvent, DetectionState, ReportEvent
 from math import isfinite
+import copy
 import time
 
 
@@ -43,12 +46,12 @@ class FireDetector:
 
     Integrates:
     - Sensor-based detection (smoke, temperature, humidity, flame)
-    - Camera-based detection (AI inference - not yet implemented)
+    - Optional CameraVision candidate detection
     - GPS location tracking
     - Pan-tilt camera control for fire direction tracking
     """
 
-    def __init__(self, sensor_manager, gps_manager, pan_tilt_controller):
+    def __init__(self, sensor_manager, gps_manager, pan_tilt_controller, camera_vision=None):
         """
         Initialize fire detector with hardware managers.
 
@@ -56,14 +59,19 @@ class FireDetector:
             sensor_manager: SensorManager instance for reading sensors
             gps_manager: GPSManager instance for location tracking
             pan_tilt_controller: PanTiltController for camera aiming
+            camera_vision: Optional CameraVision instance for AI-based detection
         """
         self.sensor_manager = sensor_manager
         self.gps_manager = gps_manager
         self.pan_tilt_controller = pan_tilt_controller
+        self.camera_vision = camera_vision
         self.camera_detected = False
         self.sensor_detected = False
         self.detection_log = []  # History of fire detections
         self._last_detection_result = False
+        self._current_fire_state = DetectionState.NORMAL
+        self._latest_alert_event = None
+        self._latest_report_event = None
         self.logger = WildfireLogger("FireDetector")
 
     def _check_sensor_thresholds(self, sensor_data):
@@ -131,11 +139,19 @@ class FireDetector:
         Perform camera-based fire detection using AI inference.
 
         Returns:
-            False (not yet implemented)
-
-        TODO: Implement AI model inference for visual fire detection
+            True if CameraVision detects fire or smoke, False otherwise.
+            Returns False if no CameraVision instance is attached or inference fails.
         """
-        return False
+        if self.camera_vision is None:
+            return False
+        try:
+            result = self.camera_vision.detect()
+            self.camera_detected = bool(result.get("detected", False))
+            return self.camera_detected
+        except Exception as e:
+            self.logger.log_error("FireDetector.detect_by_camera", str(e))
+            self.camera_detected = False
+            return False
 
     def track_fire_direction(self, sensor_data):
         """
@@ -234,30 +250,22 @@ class FireDetector:
         Perform comprehensive fire detection check.
 
         Returns:
-            True if fire detected by sensors or camera
+            True if fire detected by hardware sensors
             False otherwise
 
-        Combines both sensor and camera detection methods.
-        If fire detected, automatically logs the event with GPS location
-        and tracks fire direction with pan-tilt camera.
+        Camera detection is recorded as candidate evidence but does not
+        replace hardware sensor confirmation. If fire is confirmed by
+        sensors, automatically logs the event with GPS location and tracks
+        fire direction with pan-tilt camera.
         """
         try:
             sensor_data = self.sensor_manager.read_all()
 
             # Check both detection methods
-            camera_detection = self.detect_by_camera()
+            self.detect_by_camera()
             sensor_detection = self._check_sensor_thresholds(sensor_data)
 
-            fire_detected = False
-
-            # Fire confirmed if either detection method triggers
-            if sensor_detection:
-                fire_detected = True
-                if camera_detection:
-                    self.camera_detected = True
-            elif camera_detection:
-                fire_detected = True
-                self.camera_detected = True
+            fire_detected = sensor_detection
 
             # On detection, log full context and track fire direction
             if fire_detected:
@@ -289,3 +297,180 @@ class FireDetector:
         except (ValueError, RuntimeError) as e:
             self.logger.log_error("FireDetector.get_fire_location", str(e))
             return None
+
+    def evaluate(self):
+        """
+        Run staged fire verification and return current state with any generated event.
+
+        Detection rules:
+        - SUSPECTED_FIRE: camera detects fire/smoke OR MQ2 smoke threshold exceeded OR
+          any KY026 flame sensor triggered. DHT11 alone does not trigger.
+        - VERIFIED_FIRE: camera detection AND (MQ2 threshold exceeded OR KY026 triggered).
+          DHT11 readings alone never produce VERIFIED_FIRE.
+
+        Returns:
+            Tuple of (DetectionState, Optional[AlertEvent], Optional[ReportEvent]).
+            Exactly one of AlertEvent or ReportEvent is non-None when state is not NORMAL.
+        """
+        try:
+            sensor_data = self.sensor_manager.read_all()
+        except Exception as e:
+            self.logger.log_error("FireDetector.evaluate", f"sensor read failed: {e}")
+            sensor_data = {}
+
+        if sensor_data is None:
+            sensor_data = {}
+
+        smoke = _safe_number(sensor_data.get("smoke", 0), 0)
+        temperature = _safe_number(sensor_data.get("temperature", 0), 0)
+        humidity = _safe_number(sensor_data.get("humidity", 100), 100)
+        flame_raw = sensor_data.get("flame", False)
+        flame_values = _flame_values(flame_raw)
+
+        mq2_triggered = smoke > MQ2_SMOKE_THRESHOLD
+        ky026_triggered = any(bool(v) for v in flame_values)
+
+        try:
+            camera_result = self.camera_vision.detect() if self.camera_vision is not None else None
+            camera_fire = bool(camera_result.get("detected", False)) if camera_result else False
+        except Exception as e:
+            self.logger.log_error("FireDetector.evaluate", f"camera detection failed: {e}")
+            camera_result = None
+            camera_fire = False
+
+        self.camera_detected = camera_fire
+
+        try:
+            coords = self.gps_manager.get_coordinates()
+            lat = coords[0] if (coords and len(coords) >= 2) else None
+            lon = coords[1] if (coords and len(coords) >= 2) else None
+        except Exception:
+            lat = None
+            lon = None
+
+        sensor_hard_triggered = mq2_triggered or ky026_triggered
+        suspected = camera_fire or sensor_hard_triggered
+
+        self.sensor_detected = sensor_hard_triggered
+
+        if not suspected:
+            self._current_fire_state = DetectionState.NORMAL
+            self._latest_alert_event = None
+            self._latest_report_event = None
+            return DetectionState.NORMAL, None, None
+
+        if camera_fire and sensor_hard_triggered:
+            state = DetectionState.VERIFIED_FIRE
+            reasons = []
+            if mq2_triggered:
+                reasons.append("mq2")
+            if ky026_triggered:
+                reasons.append("ky026")
+            if camera_fire:
+                reasons.append("camera")
+            reason_str = "+".join(reasons)
+            image_path = None
+            if self.camera_vision is not None:
+                try:
+                    image_path = self.camera_vision.save_evidence_image("verified_fire", EVIDENCE_DIR)
+                except Exception as e:
+                    self.logger.log_error("FireDetector.evaluate", f"evidence save failed: {e}")
+            now = time.time()
+            event = ReportEvent(
+                state=state,
+                timestamp=now,
+                report_timestamp=now,
+                latitude=lat,
+                longitude=lon,
+                smoke=smoke,
+                temperature=temperature,
+                humidity=humidity,
+                flame=flame_raw,
+                camera_detected=camera_fire,
+                camera_result=camera_result,
+                verification_reason=reason_str,
+                image_path=image_path,
+            )
+            self._current_fire_state = state
+            self._latest_report_event = event
+            self.logger.info(f"FIRE_EVAL | VERIFIED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
+            return state, None, event
+
+        reasons = []
+        if camera_fire:
+            reasons.append("camera")
+        if mq2_triggered:
+            reasons.append("mq2")
+        if ky026_triggered:
+            reasons.append("ky026")
+        reason_str = "+".join(reasons)
+        state = DetectionState.SUSPECTED_FIRE
+        image_path = None
+        if self.camera_vision is not None:
+            try:
+                image_path = self.camera_vision.save_evidence_image("suspected_fire", EVIDENCE_DIR)
+            except Exception as e:
+                self.logger.log_error("FireDetector.evaluate", f"evidence save failed: {e}")
+        event = AlertEvent(
+            state=state,
+            timestamp=time.time(),
+            latitude=lat,
+            longitude=lon,
+            smoke=smoke,
+            temperature=temperature,
+            humidity=humidity,
+            flame=flame_raw,
+            camera_detected=camera_fire,
+            camera_result=camera_result,
+            verification_reason=reason_str,
+            image_path=image_path,
+        )
+        self._current_fire_state = state
+        self._latest_alert_event = event
+        self._latest_report_event = None
+        self.logger.info(f"FIRE_EVAL | SUSPECTED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
+        return state, event, None
+
+    def get_current_fire_state(self):
+        """
+        Return the DetectionState from the most recent evaluate() call.
+
+        Returns:
+            DetectionState: NORMAL, SUSPECTED_FIRE, or VERIFIED_FIRE.
+        """
+        return self._current_fire_state
+
+    def get_latest_alert_event(self):
+        """
+        Return a defensive copy of the AlertEvent from the most recent SUSPECTED_FIRE evaluation.
+
+        Returns:
+            AlertEvent copy or None.
+        """
+        if self._latest_alert_event is None:
+            return None
+        return copy.deepcopy(self._latest_alert_event)
+
+    def get_latest_report_event(self):
+        """
+        Return a defensive copy of the ReportEvent from the most recent VERIFIED_FIRE evaluation.
+
+        Returns:
+            ReportEvent copy or None.
+        """
+        if self._latest_report_event is None:
+            return None
+        return copy.deepcopy(self._latest_report_event)
+
+    def get_latest_evaluation(self):
+        """
+        Return a defensive copy snapshot of the most recent evaluate() result.
+
+        Returns:
+            dict with keys: state, alert_event, report_event.
+        """
+        return {
+            "state": self._current_fire_state,
+            "alert_event": copy.deepcopy(self._latest_alert_event),
+            "report_event": copy.deepcopy(self._latest_report_event),
+        }
