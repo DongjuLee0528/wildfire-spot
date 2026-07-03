@@ -28,7 +28,9 @@ training/runs/
 # Ignore all model weights
 *.pt
 
-# Keep paper/deployment model
+# Keep final paper/deployment model
+!models/
+!models/wildfire/
 !models/wildfire/best.pt
 
 # Ignore intermediate checkpoints
