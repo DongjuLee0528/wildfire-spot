@@ -138,6 +138,102 @@ class DashboardControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void getMissionZone_returns200() throws Exception {
+        mockMvc.perform(get("/api/mission/zone"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.points").isArray())
+                .andExpect(jsonPath("$.pointCount").isNumber());
+    }
+
+    @Test
+    void postMissionZonePoint_validCoordinates_returns200() throws Exception {
+        mockMvc.perform(post("/api/mission/zone/points")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":37.5,\"longitude\":127.0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true))
+                .andExpect(jsonPath("$.latitude").value(37.5))
+                .andExpect(jsonPath("$.longitude").value(127.0));
+    }
+
+    @Test
+    void postMissionZonePoint_latitudeOutOfRange_returns400() throws Exception {
+        mockMvc.perform(post("/api/mission/zone/points")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":91.0,\"longitude\":127.0}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void postMissionZonePoint_longitudeOutOfRange_returns400() throws Exception {
+        mockMvc.perform(post("/api/mission/zone/points")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":37.5,\"longitude\":181.0}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void postMissionZonePoint_missingFields_returns400() throws Exception {
+        mockMvc.perform(post("/api/mission/zone/points")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":37.5}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void deleteMissionZone_returns200() throws Exception {
+        mockMvc.perform(delete("/api/mission/zone"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true));
+    }
+
+    @Test
+    void deleteMissionZone_calledTwice_noCrash() throws Exception {
+        mockMvc.perform(delete("/api/mission/zone"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true));
+        mockMvc.perform(delete("/api/mission/zone"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true));
+    }
+
+    @Test
+    void postMissionZonePoint_boundaryLatitude_minus90_returns200() throws Exception {
+        mockMvc.perform(post("/api/mission/zone/points")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":-90.0,\"longitude\":0.0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true));
+    }
+
+    @Test
+    void postMissionZonePoint_boundaryLatitude_plus90_returns200() throws Exception {
+        mockMvc.perform(post("/api/mission/zone/points")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":90.0,\"longitude\":0.0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true));
+    }
+
+    @Test
+    void postMissionZonePoint_boundaryLongitude_minus180_returns200() throws Exception {
+        mockMvc.perform(post("/api/mission/zone/points")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":0.0,\"longitude\":-180.0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true));
+    }
+
+    @Test
+    void postMissionZonePoint_boundaryLongitude_plus180_returns200() throws Exception {
+        mockMvc.perform(post("/api/mission/zone/points")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"latitude\":0.0,\"longitude\":180.0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true));
+    }
+
     @SpringBootTest
     @AutoConfigureMockMvc
     static class GpsNullableTest {
