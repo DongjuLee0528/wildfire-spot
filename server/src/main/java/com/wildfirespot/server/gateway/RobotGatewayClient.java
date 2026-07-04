@@ -37,4 +37,13 @@ public interface RobotGatewayClient {
 
     /** Request an operational mode change (AUTO / MANUAL). */
     ModeResponse changeMode(RobotMode mode);
+
+    /** Fetch the current patrol zone points. */
+    MissionZoneResponse getMissionZone();
+
+    /** Add a GPS point to the patrol zone. */
+    MissionPointResponse addMissionZonePoint(double latitude, double longitude);
+
+    /** Clear all patrol zone points. */
+    MissionZoneResetResponse resetMissionZone();
 }

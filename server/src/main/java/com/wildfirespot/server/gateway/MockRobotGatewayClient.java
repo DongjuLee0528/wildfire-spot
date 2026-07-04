@@ -65,9 +65,13 @@ public class MockRobotGatewayClient implements RobotGatewayClient {
     @Override
     public FireStatusResponse getFireStatus() {
         return new FireStatusResponse(
+                "SUSPECTED_FIRE",
                 true,
                 false,
-                false
+                false,
+                true,
+                null,
+                null
         );
     }
 

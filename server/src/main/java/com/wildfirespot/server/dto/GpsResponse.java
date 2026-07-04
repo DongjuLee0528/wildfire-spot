@@ -3,8 +3,8 @@ package com.wildfirespot.server.dto;
 import java.time.LocalDateTime;
 
 public record GpsResponse(
-        double latitude,
-        double longitude,
+        Double latitude,
+        Double longitude,
         boolean fix,
         LocalDateTime updatedAt
 ) {}

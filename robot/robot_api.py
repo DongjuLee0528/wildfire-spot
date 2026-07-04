@@ -107,11 +107,11 @@ def get_sensors():
     try:
         if _collector is None:
             return {
-                "temperature": None,
-                "humidity": None,
+                "temperature": 0.0,
+                "humidity": 0.0,
                 "mq2Gas": 0,
                 "flame": {"frontLeft": False, "frontRight": False, "left": False, "right": False},
-                "lidarStatus": False,
+                "lidarStatus": "UNAVAILABLE",
             }
         data = _collector.get_sensors()
         return {
@@ -124,7 +124,7 @@ def get_sensors():
                 "left": data.flame.left,
                 "right": data.flame.right,
             },
-            "lidarStatus": data.lidar_status != "UNAVAILABLE",
+            "lidarStatus": data.lidar_status,
         }
     except Exception as e:
         logger.error("GET /robot/sensors failed: %s", e)
