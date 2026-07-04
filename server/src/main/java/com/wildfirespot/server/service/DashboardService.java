@@ -53,4 +53,16 @@ public class DashboardService {
     public ModeResponse processMode(RobotMode mode) {
         return robotGatewayClient.changeMode(mode);
     }
+
+    public MissionZoneResponse getMissionZone() {
+        return robotGatewayClient.getMissionZone();
+    }
+
+    public MissionPointResponse addMissionZonePoint(double latitude, double longitude) {
+        return robotGatewayClient.addMissionZonePoint(latitude, longitude);
+    }
+
+    public MissionZoneResetResponse resetMissionZone() {
+        return robotGatewayClient.resetMissionZone();
+    }
 }
