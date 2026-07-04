@@ -63,4 +63,19 @@ public class DashboardController {
     public ResponseEntity<ModeResponse> postMode(@Valid @RequestBody ModeRequest request) {
         return ResponseEntity.ok(dashboardService.processMode(request.mode()));
     }
+
+    @GetMapping("/mission/zone")
+    public ResponseEntity<MissionZoneResponse> getMissionZone() {
+        return ResponseEntity.ok(dashboardService.getMissionZone());
+    }
+
+    @PostMapping("/mission/zone/points")
+    public ResponseEntity<MissionPointResponse> addMissionZonePoint(@Valid @RequestBody MissionPointRequest request) {
+        return ResponseEntity.ok(dashboardService.addMissionZonePoint(request.latitude(), request.longitude()));
+    }
+
+    @DeleteMapping("/mission/zone")
+    public ResponseEntity<MissionZoneResetResponse> resetMissionZone() {
+        return ResponseEntity.ok(dashboardService.resetMissionZone());
+    }
 }
