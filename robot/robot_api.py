@@ -107,8 +107,8 @@ def get_sensors():
     try:
         if _collector is None:
             return {
-                "temperature": None,
-                "humidity": None,
+                "temperature": 0.0,
+                "humidity": 0.0,
                 "mq2Gas": 0,
                 "flame": {"frontLeft": False, "frontRight": False, "left": False, "right": False},
                 "lidarStatus": "UNAVAILABLE",
