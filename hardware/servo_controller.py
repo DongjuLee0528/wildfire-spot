@@ -1,19 +1,21 @@
 """
 Servo controller for the Wildfire Spot quadruped robot.
 
-Manages three PCA9685 PWM driver boards via I2C:
+Manages two PCA9685 PWM driver boards via I2C:
 - Front leg servos  (channels 0-5,  address PCA9685_FRONT_LEGS)
-- Rear leg servos   (channels 6-11, address PCA9685_BACK_LEGS)
-- Camera pan/tilt   (channels 0-1,  address PCA9685_CAMERA)
+- Rear leg servos   (channels 0-5,  address PCA9685_BACK_LEGS)
+
+Camera pan/tilt (front board channels 6-7) is managed separately
+by CameraControlManager.
 
 Accepts joint angles in radians from the kinematics solver, converts them
 to per-servo degree commands with per-channel offset correction, and writes
 the values to the hardware.
 """
 
-from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEGS, PCA9685_CAMERA,
+from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEGS,
                          PWM_FREQUENCY, PWM_MIN_PULSE, PWM_MAX_PULSE, SERVO_CHANNELS,
-                         FRONT_LEG_CHANNELS, CAMERA_PAN, CAMERA_TILT, SERVO_OFFSETS,
+                         FRONT_LEG_CHANNELS, SERVO_OFFSETS,
                          SERVO_ANGLE_MIN, SERVO_ANGLE_MAX, SERVO_TEST_ENDPOINT_VALUES,
                          SERVO_MAX_ANGLE, SERVO_MIN_ANGLE, SERVO_ANGLE_ADJUSTMENT)
 
@@ -31,16 +33,16 @@ def _load_servo_hardware():
 
 class QuadrupedServoManager:
     """
-    Controls all servos on the Wildfire Spot quadruped robot.
+    Controls all leg servos on the Wildfire Spot quadruped robot.
 
-    Initializes three PCA9685 boards over a shared I2C bus and exposes
+    Initializes two PCA9685 boards over a shared I2C bus and exposes
     methods to convert kinematics solver output into physical servo movements.
-    Also drives the camera pan/tilt gimbal.
+    Camera pan/tilt is managed by CameraControlManager.
     """
 
     def __init__(self):
         """
-        Open the I2C bus and initialise the three PCA9685 PWM drivers.
+        Open the I2C bus and initialise the two PCA9685 PWM drivers.
 
         All 12 leg servos are configured with PWM_MIN_PULSE/PWM_MAX_PULSE limits.
         Raises RuntimeError if hardware dependencies or the I2C bus are unavailable.
@@ -48,7 +50,6 @@ class QuadrupedServoManager:
         self._i2c_interface = None
         self._front_driver = None
         self._rear_driver = None
-        self._camera_driver = None
         try:
             PCA9685, servo, busio = _load_servo_hardware()
             print("Initializing servo hardware")
@@ -59,8 +60,6 @@ class QuadrupedServoManager:
             self._front_driver.frequency = PWM_FREQUENCY
             self._rear_driver = PCA9685(self._i2c_interface, address=PCA9685_BACK_LEGS)
             self._rear_driver.frequency = PWM_FREQUENCY
-            self._camera_driver = PCA9685(self._i2c_interface, address=PCA9685_CAMERA)
-            self._camera_driver.frequency = PWM_FREQUENCY
         except (ValueError, RuntimeError, OSError) as e:
             print(f"Servo driver initialization failed: {type(e).__name__}: {e}")
             self.shutdown_servos()
@@ -72,9 +71,6 @@ class QuadrupedServoManager:
                 self._servo_array.append(servo.Servo(self._front_driver.channels[servo_index], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
             else:
                 self._servo_array.append(servo.Servo(self._rear_driver.channels[servo_index-FRONT_LEG_CHANNELS], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
-
-        self._pan_motor = servo.Servo(self._camera_driver.channels[CAMERA_PAN], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
-        self._tilt_motor = servo.Servo(self._camera_driver.channels[CAMERA_TILT], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE)
 
         print("Servo initialization complete")
 
@@ -163,34 +159,6 @@ class QuadrupedServoManager:
                 self._angle_array[servo_index] = SERVO_MIN_ANGLE + SERVO_ANGLE_ADJUSTMENT
             self._servo_array[servo_index].angle = float(self._angle_array[servo_index])
 
-    def set_pan_angle(self, target_angle):
-        """
-        Set the camera pan (horizontal) servo to the given angle.
-
-        Args:
-            target_angle: Desired pan angle in degrees; clamped to [SERVO_ANGLE_MIN, SERVO_ANGLE_MAX].
-        """
-
-        if target_angle < SERVO_ANGLE_MIN:
-            target_angle = SERVO_ANGLE_MIN
-        if target_angle > SERVO_ANGLE_MAX:
-            target_angle = SERVO_ANGLE_MAX
-        self._pan_motor.angle = float(target_angle)
-
-    def set_tilt_angle(self, target_angle):
-        """
-        Set the camera tilt (vertical) servo to the given angle.
-
-        Args:
-            target_angle: Desired tilt angle in degrees; clamped to [SERVO_ANGLE_MIN, SERVO_ANGLE_MAX].
-        """
-
-        if target_angle < SERVO_ANGLE_MIN:
-            target_angle = SERVO_ANGLE_MIN
-        if target_angle > SERVO_ANGLE_MAX:
-            target_angle = SERVO_ANGLE_MAX
-        self._tilt_motor.angle = float(target_angle)
-
     def shutdown_servos(self):
         """
         Deinitialize all PCA9685 drivers and release the I2C bus.
@@ -209,11 +177,6 @@ class QuadrupedServoManager:
                 self._rear_driver.deinit()
         except (ValueError, RuntimeError, AttributeError) as e:
             print(f"Rear servo driver shutdown failed: {type(e).__name__}: {e}")
-        try:
-            if self._camera_driver is not None:
-                self._camera_driver.deinit()
-        except (ValueError, RuntimeError, AttributeError) as e:
-            print(f"Camera servo driver shutdown failed: {type(e).__name__}: {e}")
         try:
             if self._i2c_interface is not None:
                 self._i2c_interface.deinit()
