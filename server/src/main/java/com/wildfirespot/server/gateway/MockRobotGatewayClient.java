@@ -98,4 +98,19 @@ public class MockRobotGatewayClient implements RobotGatewayClient {
     public ModeResponse changeMode(RobotMode mode) {
         return new ModeResponse(true, mode.name());
     }
+
+    @Override
+    public MissionZoneResponse getMissionZone() {
+        return new MissionZoneResponse(List.of(), 0);
+    }
+
+    @Override
+    public MissionPointResponse addMissionZonePoint(double latitude, double longitude) {
+        return new MissionPointResponse(true, latitude, longitude);
+    }
+
+    @Override
+    public MissionZoneResetResponse resetMissionZone() {
+        return new MissionZoneResetResponse(true);
+    }
 }
