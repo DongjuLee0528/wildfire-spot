@@ -5,6 +5,9 @@ import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.ControlResponse;
 import com.wildfirespot.server.dto.FireStatusResponse;
 import com.wildfirespot.server.dto.GpsResponse;
+import com.wildfirespot.server.dto.MissionPointResponse;
+import com.wildfirespot.server.dto.MissionZoneResetResponse;
+import com.wildfirespot.server.dto.MissionZoneResponse;
 import com.wildfirespot.server.dto.ModeResponse;
 import com.wildfirespot.server.gateway.HttpRobotGatewayClient;
 import org.junit.jupiter.api.BeforeEach;
@@ -395,5 +398,189 @@ class HttpRobotGatewayClientTest {
         assertThat(result.state()).isEqualTo("SUSPECTED_FIRE");
         assertThat(result.latestAlertEvent()).isNotNull();
         assertThat(result.latestAlertEvent().get("verification_reason")).isEqualTo("camera");
+    }
+
+    @Test
+    void getMissionZone_pythonUnavailable_returnsFallbackEmptyList() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withServerError());
+
+        MissionZoneResponse result = client.getMissionZone();
+
+        assertThat(result.points()).isEmpty();
+        assertThat(result.pointCount()).isEqualTo(0);
+    }
+
+    @Test
+    void getMissionZone_pointsDeserializedCorrectly() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"points\":[{\"latitude\":37.1,\"longitude\":127.1},{\"latitude\":37.2,\"longitude\":127.2}],\"ready\":true}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionZoneResponse result = client.getMissionZone();
+
+        assertThat(result.points()).hasSize(2);
+        assertThat(result.pointCount()).isEqualTo(2);
+        assertThat(result.points().get(0).latitude()).isEqualTo(37.1);
+        assertThat(result.points().get(0).longitude()).isEqualTo(127.1);
+        assertThat(result.points().get(1).latitude()).isEqualTo(37.2);
+        assertThat(result.points().get(1).longitude()).isEqualTo(127.2);
+    }
+
+    @Test
+    void getMissionZone_emptyPoints_returnedCorrectly() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"points\":[],\"ready\":false}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionZoneResponse result = client.getMissionZone();
+
+        assertThat(result.points()).isEmpty();
+        assertThat(result.pointCount()).isEqualTo(0);
+    }
+
+    @Test
+    void addMissionZonePoint_forwardsToRobotEndpoint() {
+        mockServer.expect(requestTo("/robot/mission/zone/points"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"latitude\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"longitude\"")))
+                .andRespond(withSuccess(
+                        "{\"accepted\":true,\"latitude\":37.5,\"longitude\":127.0}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionPointResponse result = client.addMissionZonePoint(37.5, 127.0);
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.latitude()).isEqualTo(37.5);
+        assertThat(result.longitude()).isEqualTo(127.0);
+        mockServer.verify();
+    }
+
+    @Test
+    void addMissionZonePoint_pythonUnavailable_returnsFallback() {
+        mockServer.expect(requestTo("/robot/mission/zone/points"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withServerError());
+
+        MissionPointResponse result = client.addMissionZonePoint(37.5, 127.0);
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.latitude()).isEqualTo(37.5);
+        assertThat(result.longitude()).isEqualTo(127.0);
+    }
+
+    @Test
+    void resetMissionZone_forwardsToRobotEndpoint() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess(
+                        "{\"accepted\":true}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionZoneResetResponse result = client.resetMissionZone();
+
+        assertThat(result.accepted()).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    void resetMissionZone_pythonUnavailable_returnsFallback() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withServerError());
+
+        MissionZoneResetResponse result = client.resetMissionZone();
+
+        assertThat(result.accepted()).isFalse();
+    }
+
+    @Test
+    void getMissionZone_pointsContainsNullElement_skipsNullReturnsValidOnly() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"points\":[{\"latitude\":37.1,\"longitude\":127.1},null,{\"latitude\":37.2,\"longitude\":127.2}],\"ready\":true}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionZoneResponse result = client.getMissionZone();
+
+        assertThat(result.points()).hasSize(2);
+        assertThat(result.pointCount()).isEqualTo(2);
+        assertThat(result.points().get(0).latitude()).isEqualTo(37.1);
+        assertThat(result.points().get(1).latitude()).isEqualTo(37.2);
+    }
+
+    @Test
+    void getMissionZone_pointHasNullLatitude_skipsInvalidPoint() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"points\":[{\"latitude\":null,\"longitude\":127.1},{\"latitude\":37.2,\"longitude\":127.2}],\"ready\":true}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionZoneResponse result = client.getMissionZone();
+
+        assertThat(result.points()).hasSize(1);
+        assertThat(result.pointCount()).isEqualTo(1);
+        assertThat(result.points().get(0).latitude()).isEqualTo(37.2);
+    }
+
+    @Test
+    void getMissionZone_pointHasNullLongitude_skipsInvalidPoint() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"points\":[{\"latitude\":37.1,\"longitude\":null},{\"latitude\":37.2,\"longitude\":127.2}],\"ready\":true}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionZoneResponse result = client.getMissionZone();
+
+        assertThat(result.points()).hasSize(1);
+        assertThat(result.pointCount()).isEqualTo(1);
+        assertThat(result.points().get(0).longitude()).isEqualTo(127.2);
+    }
+
+    @Test
+    void getMissionZone_allPointsInvalid_returnsEmptyZone() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"points\":[{\"latitude\":null,\"longitude\":null},{\"latitude\":null,\"longitude\":127.1}],\"ready\":false}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionZoneResponse result = client.getMissionZone();
+
+        assertThat(result.points()).isEmpty();
+        assertThat(result.pointCount()).isEqualTo(0);
+    }
+
+    @Test
+    void getMissionZone_pointCountMatchesSanitizedValidPoints() {
+        mockServer.expect(requestTo("/robot/mission/zone"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"points\":[{\"latitude\":37.1,\"longitude\":127.1},null,{\"latitude\":null,\"longitude\":127.2},{\"latitude\":37.3,\"longitude\":127.3}],\"ready\":true}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        MissionZoneResponse result = client.getMissionZone();
+
+        assertThat(result.points()).hasSize(2);
+        assertThat(result.pointCount()).isEqualTo(result.points().size());
     }
 }
