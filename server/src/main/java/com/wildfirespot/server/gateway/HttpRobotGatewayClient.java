@@ -9,9 +9,12 @@ import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * HTTP implementation of {@link RobotGatewayClient}.
@@ -181,4 +184,69 @@ public class HttpRobotGatewayClient implements RobotGatewayClient {
     private LogResponse fallbackLogs() {
         return new LogResponse(List.of());
     }
+
+    @Override
+    public MissionZoneResponse getMissionZone() {
+        try {
+            PythonMissionZoneResponse response = restClient.get()
+                    .uri("/robot/mission/zone")
+                    .retrieve()
+                    .body(PythonMissionZoneResponse.class);
+            if (response == null || response.points() == null) {
+                return fallbackMissionZone();
+            }
+            List<MissionZoneResponse.ZonePoint> validPoints = response.points().stream()
+                    .filter(Objects::nonNull)
+                    .filter(p -> p.latitude() != null && p.longitude() != null)
+                    .map(p -> new MissionZoneResponse.ZonePoint(p.latitude(), p.longitude()))
+                    .toList();
+            return new MissionZoneResponse(validPoints, validPoints.size());
+        } catch (RestClientException e) {
+            log.error("GET /robot/mission/zone failed: {}", e.getMessage());
+            return fallbackMissionZone();
+        } catch (RuntimeException e) {
+            log.error("GET /robot/mission/zone mapping failed: {}", e.getMessage());
+            return fallbackMissionZone();
+        }
+    }
+
+    @Override
+    public MissionPointResponse addMissionZonePoint(double latitude, double longitude) {
+        try {
+            MissionPointResponse response = restClient.post()
+                    .uri("/robot/mission/zone/points")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("latitude", latitude, "longitude", longitude))
+                    .retrieve()
+                    .body(MissionPointResponse.class);
+            return response != null ? response : new MissionPointResponse(false, latitude, longitude);
+        } catch (RestClientException e) {
+            log.error("POST /robot/mission/zone/points failed: {}", e.getMessage());
+            return new MissionPointResponse(false, latitude, longitude);
+        }
+    }
+
+    @Override
+    public MissionZoneResetResponse resetMissionZone() {
+        try {
+            MissionZoneResetResponse response = restClient.delete()
+                    .uri("/robot/mission/zone")
+                    .retrieve()
+                    .body(MissionZoneResetResponse.class);
+            return response != null ? response : new MissionZoneResetResponse(false);
+        } catch (RestClientException e) {
+            log.error("DELETE /robot/mission/zone failed: {}", e.getMessage());
+            return new MissionZoneResetResponse(false);
+        }
+    }
+
+    private MissionZoneResponse fallbackMissionZone() {
+        return new MissionZoneResponse(List.of(), 0);
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record PythonMissionZoneResponse(List<PythonZonePoint> points) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record PythonZonePoint(Double latitude, Double longitude) {}
 }
