@@ -132,6 +132,16 @@ class QuadrupedServoManager:
         self._angle_array[10] = self._offset_values[10] + self._joint_angles[3][1]
         self._angle_array[11] = self._offset_values[11] + self._joint_angles[3][0]
 
+    def get_front_driver(self):
+        """
+        Return the front PCA9685 driver instance.
+
+        Allows callers (e.g. CameraControlManager) to reuse the same driver
+        object for camera channels CH6/CH7, avoiding a second deinit on the
+        shared board.  Returns None if the driver was not initialised.
+        """
+        return self._front_driver
+
     def get_current_angles(self):
         """Return the most recently computed per-channel servo angles (degrees)."""
 
