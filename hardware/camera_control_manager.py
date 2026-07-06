@@ -4,6 +4,16 @@ Camera pan/tilt control manager for the Wildfire Spot robot.
 Drives two servos on the front PCA9685 board (address PCA9685_FRONT_LEGS):
 - Channel CAMERA_PAN_CHANNEL  (6): 360-degree continuous servo — throttle-controlled
 - Channel CAMERA_TILT_CHANNEL (7): 180-degree positional servo — angle-controlled
+
+The front PCA9685 board is shared with QuadrupedServoManager (CH0-CH5 are leg
+servos). To avoid double-deinit of the shared board, callers may inject the
+already-initialised PCA9685 driver via the `front_driver` parameter.
+
+Ownership rules:
+- If `front_driver` is provided by the caller → CameraControlManager does NOT
+  own it and will NOT call deinit() on it in close().
+- If `front_driver` is None → CameraControlManager creates its own driver and
+  owns it; close() will deinit it.
 """
 
 from utils.config import (
@@ -16,17 +26,6 @@ from utils.config import (
 )
 
 
-def _load_camera_hardware():
-    """Import and return PCA9685, servo, and busio modules; raises RuntimeError if unavailable."""
-    try:
-        from adafruit_pca9685 import PCA9685
-        from adafruit_motor import servo
-        import busio
-    except ImportError as exc:
-        raise RuntimeError("Camera hardware dependencies are not available") from exc
-    return PCA9685, servo, busio
-
-
 class CameraControlManager:
     """
     Controls the camera pan/tilt gimbal on the Wildfire Spot robot.
@@ -36,44 +35,63 @@ class CameraControlManager:
 
     Both servos reside on the front PCA9685 board (PCA9685_FRONT_LEGS)
     at channels CAMERA_PAN_CHANNEL and CAMERA_TILT_CHANNEL respectively.
+
+    Construction never raises — hardware unavailability is handled gracefully.
+    Use is_available() to check readiness before issuing commands.
     """
 
-    def __init__(self):
+    def __init__(self, front_driver=None):
         """
-        Open an I2C connection to the front PCA9685 board and initialise
-        the pan and tilt servo channels.
+        Initialise the camera servo channels.
 
-        Raises RuntimeError if hardware dependencies or the I2C bus are
-        unavailable.
+        Args:
+            front_driver: Optional externally-owned PCA9685 driver for the front
+                board. If provided, this manager will NOT deinit it on close().
+                If None, an independent driver is created and owned by this manager.
+
+        Never raises. On any hardware or library failure the manager enters an
+        unavailable state; is_available() will return False.
         """
         self._i2c_interface = None
         self._front_driver = None
+        self._owns_driver = False
         self._pan_motor = None
         self._tilt_motor = None
         self._tilt_angle = float(CAMERA_TILT_INITIAL_ANGLE)
         self._pan_state = "stopped"
 
         try:
-            PCA9685, servo, busio = _load_camera_hardware()
-            self._i2c_interface = busio.I2C(I2C_SCL, I2C_SDA)
-            self._front_driver = PCA9685(self._i2c_interface, address=PCA9685_FRONT_LEGS)
-            self._front_driver.frequency = PWM_FREQUENCY
-            self._pan_motor = servo.ContinuousServo(
+            from adafruit_motor import servo as servo_module
+
+            if front_driver is not None:
+                self._front_driver = front_driver
+                self._owns_driver = False
+            else:
+                from adafruit_pca9685 import PCA9685
+                import busio
+                self._i2c_interface = busio.I2C(I2C_SCL, I2C_SDA)
+                self._front_driver = PCA9685(self._i2c_interface, address=PCA9685_FRONT_LEGS)
+                self._front_driver.frequency = PWM_FREQUENCY
+                self._owns_driver = True
+
+            self._pan_motor = servo_module.ContinuousServo(
                 self._front_driver.channels[CAMERA_PAN_CHANNEL],
                 min_pulse=PWM_MIN_PULSE,
                 max_pulse=PWM_MAX_PULSE,
             )
-            self._tilt_motor = servo.Servo(
+            self._tilt_motor = servo_module.Servo(
                 self._front_driver.channels[CAMERA_TILT_CHANNEL],
                 min_pulse=PWM_MIN_PULSE,
                 max_pulse=PWM_MAX_PULSE,
             )
             self._pan_motor.throttle = CAMERA_PAN_STOP_THROTTLE
             self._tilt_motor.angle = self._tilt_angle
-        except (ValueError, RuntimeError, OSError) as e:
+        except Exception as e:
             print(f"Camera hardware initialization failed: {type(e).__name__}: {e}")
-            self.close()
-            raise
+            self._pan_motor = None
+            self._tilt_motor = None
+            if self._owns_driver:
+                self._safe_deinit_owned()
 
     def is_available(self):
         """Return True if the camera hardware is initialised and ready."""
@@ -116,7 +134,7 @@ class CameraControlManager:
                 "reason": "ok",
                 "position": self._position(),
             }
-        except (ValueError, RuntimeError, OSError) as e:
+        except Exception as e:
             print(f"camera_center failed: {type(e).__name__}: {e}")
             return {"accepted": False, "command": "CAMERA_CENTER", "reason": str(e), "position": self._position()}
 
@@ -130,17 +148,41 @@ class CameraControlManager:
         }
 
     def close(self):
-        """Deinitialise the PCA9685 driver and release the I2C bus."""
+        """
+        Stop pan and release owned resources.
+
+        - Always attempts to stop pan throttle before releasing.
+        - Deinits the PCA9685 driver only if this manager owns it
+          (_owns_driver=True). Externally-provided drivers are never deinited.
+        - Idempotent: safe to call multiple times.
+        """
+        if self._pan_motor is not None:
+            try:
+                self._pan_motor.throttle = CAMERA_PAN_STOP_THROTTLE
+            except Exception as e:
+                print(f"Camera pan stop on close failed: {type(e).__name__}: {e}")
+        self._pan_motor = None
+        self._tilt_motor = None
+
+        if self._owns_driver:
+            self._safe_deinit_owned()
+
+    def _safe_deinit_owned(self):
+        """Deinit driver and I2C resources that this manager owns."""
         try:
             if self._front_driver is not None:
                 self._front_driver.deinit()
-        except (ValueError, RuntimeError, AttributeError) as e:
+        except Exception as e:
             print(f"Camera driver shutdown failed: {type(e).__name__}: {e}")
+        finally:
+            self._front_driver = None
         try:
             if self._i2c_interface is not None:
                 self._i2c_interface.deinit()
-        except (ValueError, RuntimeError, AttributeError) as e:
+        except Exception as e:
             print(f"Camera I2C shutdown failed: {type(e).__name__}: {e}")
+        finally:
+            self._i2c_interface = None
 
     def _set_pan(self, throttle, state_label, command):
         if not self.is_available():
@@ -154,7 +196,7 @@ class CameraControlManager:
                 "reason": "ok",
                 "position": self._position(),
             }
-        except (ValueError, RuntimeError, OSError) as e:
+        except Exception as e:
             print(f"{command} failed: {type(e).__name__}: {e}")
             return {"accepted": False, "command": command, "reason": str(e), "position": self._position()}
 
@@ -170,7 +212,7 @@ class CameraControlManager:
                 "reason": "ok",
                 "position": self._position(),
             }
-        except (ValueError, RuntimeError, OSError) as e:
+        except Exception as e:
             print(f"{command} failed: {type(e).__name__}: {e}")
             return {"accepted": False, "command": command, "reason": str(e), "position": self._position()}
 
