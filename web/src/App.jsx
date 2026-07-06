@@ -17,7 +17,6 @@ export default function App() {
         { label: 'Final Confirmed Fire', status: 'CLEAR', level: 'clear' },
     ];
 
-    // 실시간 시간 업데이트 (학술/데모용 UTC 표현 스타일)
     useEffect(() => {
         const timer = setInterval(() => {
             setCurrentTime(new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC');
@@ -25,7 +24,6 @@ export default function App() {
         return () => clearInterval(timer);
     }, []);
 
-    // 키보드 제어 상태 시각화 핸들러 (실제 로봇 제어 없음, UI 피드백용)
     useEffect(() => {
         const handleKeyDown = (e) => {
             const key = e.key.toUpperCase();
@@ -37,7 +35,6 @@ export default function App() {
         };
 
         const handleKeyUp = () => {
-            // 키를 떼면 데모 편의상 STOP으로 복귀 처리
             setCurrentKeyCommand('STOP');
         };
 
@@ -49,7 +46,6 @@ export default function App() {
         };
     }, []);
 
-    // 모의 로그 데이터
     const logs = [
         { time: '12:45:02', text: 'SYSTEM INITIALIZED SUCCESSFULLY' },
         { time: '12:45:05', text: 'AUTO MODE ENABLED' },
@@ -59,14 +55,8 @@ export default function App() {
         { time: '12:45:15', text: 'CAMERA STREAM WAITING (FEED_UNAVAILABLE)' },
     ];
 
-    const handleCameraControl = (command) => {
-        console.log(`Camera command: ${command}`);
-        // API call will be implemented here
-    };
-
     return (
         <div className="dashboard-container">
-            {/* 1. Header */}
             <header className="dashboard-header">
                 <div className="header-brand">
                     <span className="brand-icon">🔥</span>
@@ -88,12 +78,9 @@ export default function App() {
                 </div>
             </header>
 
-            {/* Main Grid Layout */}
             <main className="dashboard-grid">
 
-                {/* Left Column */}
                 <section className="grid-column col-left">
-                    {/* 3. Robot Status Panel */}
                     <div className="panel animate-border">
                         <h2 className="panel-title">Robot Status</h2>
                         <div className="panel-content status-grid">
@@ -116,7 +103,6 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* 4. Current Mode Panel */}
                     <div className="panel">
                         <h2 className="panel-title">Current Mode Selection</h2>
                         <div className="panel-content mode-container">
@@ -137,7 +123,6 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* 8. Health Check Panel */}
                     <div className="panel">
                         <h2 className="panel-title">System Health Check</h2>
                         <div className="panel-content health-list">
@@ -165,16 +150,13 @@ export default function App() {
                     </div>
                 </section>
 
-                {/* Center Column */}
                 <section className="grid-column col-center">
-                    {/* 2. Camera Panel */}
                     <div className="panel main-camera-panel">
                         <div className="panel-header-actions">
                             <h2 className="panel-title">Primary Live Camera Stream</h2>
                             <span className="badge-overlay-reserved">AI Overlay Space Reserved</span>
                         </div>
                         <div className="panel-content camera-viewport">
-                            {/* Future AI Overlay Bounding Box Grid Mock */}
                             <div className="ai-overlay-placeholder">
                                 <div className="corner tl"></div>
                                 <div className="corner tr"></div>
@@ -187,28 +169,26 @@ export default function App() {
                                 </div>
                             </div>
                         </div>
-                    </div>
-
-                    {/* New Camera Control Panel */}
-                    <div className="panel camera-control-panel">
-                        <h2 className="panel-title">Camera Pan/Tilt Control</h2>
-                        <div className="panel-content camera-controls">
-                            <div className="camera-status">
-                                <span className="status-label">Status:</span>
-                                <span className="status-value">IDLE</span>
+                        <div className="camera-control-inline">
+                            <span className="camera-stream-label">Camera Status: IDLE</span>
+                            <div className="camera-d-pad">
+                                <div className="camera-d-pad-row">
+                                    <button className="camera-btn">Up (I)</button>
+                                </div>
+                                <div className="camera-d-pad-row">
+                                    <button className="camera-btn">Left (J)</button>
+                                    <button className="camera-btn">Center (O)</button>
+                                    <button className="camera-btn">Right (L)</button>
+                                </div>
+                                <div className="camera-d-pad-row">
+                                    <button className="camera-btn">Down (K)</button>
+                                </div>
                             </div>
-                            <div className="d-pad">
-                                <button className="d-pad-btn up" onClick={() => handleCameraControl('CAMERA_UP')}>Up</button>
-                                <button className="d-pad-btn left" onClick={() => handleCameraControl('CAMERA_LEFT')}>Left</button>
-                                <button className="d-pad-btn center" onClick={() => handleCameraControl('CAMERA_CENTER')}>Center</button>
-                                <button className="d-pad-btn right" onClick={() => handleCameraControl('CAMERA_RIGHT')}>Right</button>
-                                <button className="d-pad-btn down" onClick={() => handleCameraControl('CAMERA_DOWN')}>Down</button>
-                            </div>
+                            <span className="camera-shortcut-hint">Shortcuts: I / J / K / L / O</span>
                         </div>
                     </div>
 
                     <div className="center-bottom-split">
-                        {/* 9. Current Command Panel */}
                         <div className="panel command-panel">
                             <h2 className="panel-title">Manual Override Commands</h2>
                             <div className="panel-content command-layout">
@@ -234,7 +214,6 @@ export default function App() {
                             </div>
                         </div>
 
-                        {/* 7. Fire Status Panel */}
                         <div className="panel fire-status-panel">
                             <h2 className="panel-title">Analysis & Verification Status</h2>
                             <div className="panel-content fire-grid">
@@ -249,9 +228,7 @@ export default function App() {
                     </div>
                 </section>
 
-                {/* Right Column */}
                 <section className="grid-column col-right">
-                    {/* 6. Sensor Data Panel */}
                     <div className="panel">
                         <h2 className="panel-title">Sensor Telemetry Monitoring</h2>
                         <div className="panel-content sensor-list">
@@ -293,7 +270,6 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* 5. GPS Map Panel */}
                     <div className="panel">
                         <h2 className="panel-title">Geospatial Telemetry (GPS)</h2>
                         <div className="panel-content map-wrapper">
@@ -318,7 +294,6 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* 10. System Log Panel */}
                     <div className="panel log-panel">
                         <h2 className="panel-title">Terminal System Logs</h2>
                         <div className="panel-content log-terminal">
