@@ -13,7 +13,9 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI
+from typing import Optional
+
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -24,6 +26,22 @@ _collector = None
 _manual_control_manager = None
 _mode_control_manager = None
 _patrol_zone_manager = None
+_camera_control_manager = None
+
+_CAMERA_COMMANDS = {
+    "CAMERA_LEFT",
+    "CAMERA_RIGHT",
+    "CAMERA_STOP",
+    "CAMERA_UP",
+    "CAMERA_DOWN",
+    "CAMERA_CENTER",
+}
+
+_PAN_STATE_MAP = {
+    "left": "LEFT",
+    "right": "RIGHT",
+    "stopped": "STOP",
+}
 
 
 def configure(
@@ -32,14 +50,16 @@ def configure(
     manual_control_manager=None,
     mode_control_manager=None,
     patrol_zone_manager=None,
+    camera_control_manager=None,
 ):
     global _state_machine, _collector, _manual_control_manager
-    global _mode_control_manager, _patrol_zone_manager
+    global _mode_control_manager, _patrol_zone_manager, _camera_control_manager
     _state_machine = state_machine
     _collector = collector
     _manual_control_manager = manual_control_manager
     _mode_control_manager = mode_control_manager
     _patrol_zone_manager = patrol_zone_manager
+    _camera_control_manager = camera_control_manager
 
 
 @asynccontextmanager
@@ -291,3 +311,71 @@ def delete_mission_zone():
     except Exception as e:
         logger.error("DELETE /robot/mission/zone failed: %s", e)
         return JSONResponse(status_code=503, content={"error": "zone unavailable"})
+
+
+@app.post("/robot/camera/control")
+async def post_camera_control(request: Request):
+    try:
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"accepted": False, "command": "", "reason": "malformed_json"},
+            )
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"accepted": False, "command": "", "reason": "invalid_request"},
+            )
+        cmd = payload.get("command") or ""
+        if not cmd:
+            return JSONResponse(
+                status_code=400,
+                content={"accepted": False, "command": "", "reason": "missing_command"},
+            )
+        if cmd not in _CAMERA_COMMANDS:
+            return JSONResponse(
+                status_code=400,
+                content={"accepted": False, "command": cmd, "reason": "invalid_command"},
+            )
+        if _camera_control_manager is None:
+            return JSONResponse(
+                status_code=503,
+                content={"accepted": False, "command": cmd, "reason": "manager_unavailable"},
+            )
+        if cmd == "CAMERA_LEFT":
+            result = _camera_control_manager.camera_left()
+        elif cmd == "CAMERA_RIGHT":
+            result = _camera_control_manager.camera_right()
+        elif cmd == "CAMERA_STOP":
+            result = _camera_control_manager.camera_pan_stop()
+        elif cmd == "CAMERA_UP":
+            result = _camera_control_manager.camera_up()
+        elif cmd == "CAMERA_DOWN":
+            result = _camera_control_manager.camera_down()
+        else:
+            result = _camera_control_manager.camera_center()
+        result["command"] = cmd
+        status = 200 if result.get("accepted") else 503
+        return JSONResponse(status_code=status, content=result)
+    except Exception as e:
+        logger.error("POST /robot/camera/control failed: %s", e)
+        return JSONResponse(status_code=503, content={"accepted": False, "command": "", "reason": "camera_unavailable"})
+
+
+@app.get("/robot/camera/status")
+def get_camera_status():
+    try:
+        if _camera_control_manager is None or not _camera_control_manager.is_available():
+            return {"available": False, "pan": "STOP", "tilt": None}
+        position = _camera_control_manager.get_camera_position().get("position", {})
+        pan_raw = position.get("pan", "stopped")
+        return {
+            "available": True,
+            "pan": _PAN_STATE_MAP.get(pan_raw, "STOP"),
+            "tilt": position.get("tilt"),
+        }
+    except Exception as e:
+        logger.error("GET /robot/camera/status failed: %s", e)
+        return {"available": False, "pan": "STOP", "tilt": None}
