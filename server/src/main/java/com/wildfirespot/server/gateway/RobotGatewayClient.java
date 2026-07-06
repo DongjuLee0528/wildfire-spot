@@ -1,5 +1,6 @@
 package com.wildfirespot.server.gateway;
 
+import com.wildfirespot.server.common.CameraCommand;
 import com.wildfirespot.server.common.ControlCommand;
 import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
@@ -46,4 +47,10 @@ public interface RobotGatewayClient {
 
     /** Clear all patrol zone points. */
     MissionZoneResetResponse resetMissionZone();
+
+    /** Send a camera gimbal command to the robot. */
+    CameraControlResponse sendCameraCommand(CameraCommand command);
+
+    /** Fetch the current camera pan/tilt status. */
+    CameraStatusResponse getCameraStatus();
 }
