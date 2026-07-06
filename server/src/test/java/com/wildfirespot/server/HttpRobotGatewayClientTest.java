@@ -1,7 +1,10 @@
 package com.wildfirespot.server;
 
+import com.wildfirespot.server.common.CameraCommand;
 import com.wildfirespot.server.common.ControlCommand;
 import com.wildfirespot.server.common.RobotMode;
+import com.wildfirespot.server.dto.CameraControlResponse;
+import com.wildfirespot.server.dto.CameraStatusResponse;
 import com.wildfirespot.server.dto.ControlResponse;
 import com.wildfirespot.server.dto.FireStatusResponse;
 import com.wildfirespot.server.dto.GpsResponse;
@@ -582,5 +585,89 @@ class HttpRobotGatewayClientTest {
 
         assertThat(result.points()).hasSize(2);
         assertThat(result.pointCount()).isEqualTo(result.points().size());
+    }
+
+    @Test
+    void sendCameraCommand_forwardsToRobotCameraControlEndpoint() {
+        mockServer.expect(requestTo("/robot/camera/control"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"command\":\"CAMERA_LEFT\"")))
+                .andRespond(withSuccess(
+                        "{\"accepted\":true,\"command\":\"CAMERA_LEFT\",\"reason\":\"ok\",\"position\":{\"pan\":\"LEFT\",\"tilt\":90.0}}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        CameraControlResponse result = client.sendCameraCommand(CameraCommand.CAMERA_LEFT);
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.command()).isEqualTo("CAMERA_LEFT");
+        assertThat(result.reason()).isEqualTo("ok");
+        assertThat(result.position()).isNotNull();
+        assertThat(result.position().pan()).isEqualTo("LEFT");
+        assertThat(result.position().tilt()).isEqualTo(90.0);
+        mockServer.verify();
+    }
+
+    @Test
+    void sendCameraCommand_pythonUnavailable_returnsFallback() {
+        mockServer.expect(requestTo("/robot/camera/control"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withServerError());
+
+        CameraControlResponse result = client.sendCameraCommand(CameraCommand.CAMERA_STOP);
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.command()).isEqualTo("CAMERA_STOP");
+        assertThat(result.reason()).isEqualTo("robot_api_unavailable");
+        assertThat(result.position()).isNotNull();
+        assertThat(result.position().pan()).isEqualTo("STOP");
+        assertThat(result.position().tilt()).isNull();
+    }
+
+    @Test
+    void getCameraStatus_forwardsToRobotCameraStatusEndpoint() {
+        mockServer.expect(requestTo("/robot/camera/status"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"available\":true,\"pan\":\"STOP\",\"tilt\":90.0}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        CameraStatusResponse result = client.getCameraStatus();
+
+        assertThat(result.available()).isTrue();
+        assertThat(result.pan()).isEqualTo("STOP");
+        assertThat(result.tilt()).isEqualTo(90.0);
+        mockServer.verify();
+    }
+
+    @Test
+    void getCameraStatus_pythonUnavailable_returnsFallback() {
+        mockServer.expect(requestTo("/robot/camera/status"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withServerError());
+
+        CameraStatusResponse result = client.getCameraStatus();
+
+        assertThat(result.available()).isFalse();
+        assertThat(result.pan()).isEqualTo("STOP");
+        assertThat(result.tilt()).isNull();
+    }
+
+    @Test
+    void getCameraStatus_tiltNullable_returnedSafely() {
+        mockServer.expect(requestTo("/robot/camera/status"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"available\":false,\"pan\":\"STOP\",\"tilt\":null}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        CameraStatusResponse result = client.getCameraStatus();
+
+        assertThat(result.available()).isFalse();
+        assertThat(result.pan()).isEqualTo("STOP");
+        assertThat(result.tilt()).isNull();
     }
 }
