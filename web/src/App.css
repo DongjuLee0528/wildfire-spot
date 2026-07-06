@@ -710,6 +710,68 @@ body {
     50% { opacity: 1; }
 }
 
+/* --- New Camera Control Panel Styles --- */
+.camera-control-panel .panel-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.camera-status {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(38, 50, 63, 0.4);
+}
+
+.camera-status .status-value {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--success);
+}
+
+.d-pad {
+    display: grid;
+    grid-template-areas:
+        ". up ."
+        "left center right"
+        ". down .";
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 8px;
+    justify-items: center;
+    align-items: center;
+}
+
+.d-pad-btn {
+    width: 100%;
+    height: 38px;
+    border: 1px solid var(--border-color);
+    background-color: #192028;
+    color: var(--text-main);
+    font-weight: 600;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.d-pad-btn:hover {
+    background-color: #26323f;
+}
+
+.d-pad-btn:active {
+    background-color: var(--accent-color);
+    color: #000;
+}
+
+.d-pad-btn.up { grid-area: up; }
+.d-pad-btn.down { grid-area: down; }
+.d-pad-btn.left { grid-area: left; }
+.d-pad-btn.right { grid-area: right; }
+.d-pad-btn.center { grid-area: center; }
+
+
 /* Global Utility Helper Typography Classes */
 .text-success { color: var(--success); }
 .text-highlight { color: var(--accent-color); font-weight: bold; }
@@ -732,28 +794,33 @@ body {
         order: 1;
     }
 
-    .col-left > .panel:nth-child(1) {
+    .camera-control-panel {
+        grid-column: 1 / -1;
         order: 2;
     }
 
-    .col-left > .panel:nth-child(2) {
+    .col-left > .panel:nth-child(1) {
         order: 3;
     }
 
-    .col-left > .panel:nth-child(3) {
+    .col-left > .panel:nth-child(2) {
         order: 4;
     }
 
-    .col-right > .panel:nth-child(1) {
+    .col-left > .panel:nth-child(3) {
         order: 5;
     }
 
-    .col-right > .panel:nth-child(2) {
+    .col-right > .panel:nth-child(1) {
         order: 6;
     }
 
-    .col-right > .panel:nth-child(3) {
+    .col-right > .panel:nth-child(2) {
         order: 7;
+    }
+
+    .col-right > .panel:nth-child(3) {
+        order: 8;
     }
 
     .center-bottom-split {
@@ -761,11 +828,11 @@ body {
     }
 
     .fire-status-panel {
-        order: 8;
+        order: 9;
     }
 
     .command-panel {
-        order: 9;
+        order: 10;
     }
 
     .camera-viewport {
@@ -828,36 +895,40 @@ body {
         order: 1;
     }
 
-    .col-left > .panel:nth-child(1) {
+    .camera-control-panel {
         order: 2;
     }
 
-    .col-left > .panel:nth-child(2) {
+    .col-left > .panel:nth-child(1) {
         order: 3;
     }
 
-    .fire-status-panel {
+    .col-left > .panel:nth-child(2) {
         order: 4;
     }
 
-    .col-right > .panel:nth-child(1) {
+    .fire-status-panel {
         order: 5;
     }
 
-    .col-right > .panel:nth-child(2) {
+    .col-right > .panel:nth-child(1) {
         order: 6;
     }
 
-    .col-left > .panel:nth-child(3) {
+    .col-right > .panel:nth-child(2) {
         order: 7;
     }
 
-    .command-panel {
+    .col-left > .panel:nth-child(3) {
         order: 8;
     }
 
-    .col-right > .panel:nth-child(3) {
+    .command-panel {
         order: 9;
+    }
+
+    .col-right > .panel:nth-child(3) {
+        order: 10;
     }
 
     .panel-header-actions {

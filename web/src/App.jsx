@@ -59,6 +59,11 @@ export default function App() {
         { time: '12:45:15', text: 'CAMERA STREAM WAITING (FEED_UNAVAILABLE)' },
     ];
 
+    const handleCameraControl = (command) => {
+        console.log(`Camera command: ${command}`);
+        // API call will be implemented here
+    };
+
     return (
         <div className="dashboard-container">
             {/* 1. Header */}
@@ -180,6 +185,24 @@ export default function App() {
                                     <p className="main-msg">CAMERA FEED UNAVAILABLE</p>
                                     <p className="sub-msg">Hardware pipeline active. Awaiting visual stream data sync...</p>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* New Camera Control Panel */}
+                    <div className="panel camera-control-panel">
+                        <h2 className="panel-title">Camera Pan/Tilt Control</h2>
+                        <div className="panel-content camera-controls">
+                            <div className="camera-status">
+                                <span className="status-label">Status:</span>
+                                <span className="status-value">IDLE</span>
+                            </div>
+                            <div className="d-pad">
+                                <button className="d-pad-btn up" onClick={() => handleCameraControl('CAMERA_UP')}>Up</button>
+                                <button className="d-pad-btn left" onClick={() => handleCameraControl('CAMERA_LEFT')}>Left</button>
+                                <button className="d-pad-btn center" onClick={() => handleCameraControl('CAMERA_CENTER')}>Center</button>
+                                <button className="d-pad-btn right" onClick={() => handleCameraControl('CAMERA_RIGHT')}>Right</button>
+                                <button className="d-pad-btn down" onClick={() => handleCameraControl('CAMERA_DOWN')}>Down</button>
                             </div>
                         </div>
                     </div>
