@@ -59,6 +59,26 @@ def _env_bool(name, default=False):
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
+
+def _env_int_or_none(name, default):
+    """Return an int (hex or decimal), None, or default from an env variable.
+
+    Accepts: hex string ("0x48"), decimal string ("72"), empty string or
+    case-insensitive "none" (both become None). Invalid values fall back to
+    default with a warning print.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    stripped = value.strip()
+    if stripped == "" or stripped.lower() == "none":
+        return None
+    try:
+        return int(stripped, 0)
+    except ValueError:
+        print(f"Invalid int/hex for {name}: {value!r}. Using default: {default}")
+        return default
+
 try:
     import board
     I2C_SCL = board.SCL_1
@@ -73,8 +93,8 @@ LOG_DIR = _env_path("WILDFIRE_LOG_DIR", os.path.join(BASE_DIR, "wildfire_logs"))
 PCA9685_FRONT_LEGS = 0x41
 PCA9685_BACK_LEGS = 0x42
 
-ADS1115_MQ2_1 = 0x48
-ADS1115_MQ2_2 = None
+ADS1115_MQ2_1 = _env_int_or_none("WILDFIRE_ADS1115_MQ2_1", 0x48)
+ADS1115_MQ2_2 = _env_int_or_none("WILDFIRE_ADS1115_MQ2_2", None)
 
 MPU6050_ADDRESS = 0x68
 
@@ -112,14 +132,14 @@ CAMERA_TILT_STEP_ANGLE = 10
 
 SERVO_OFFSETS = [180, 90, 90, 1, 90, 90, 180, 90, 90, 1, 90, 90]  # Per-channel angle offsets that correct for physical servo mounting orientation
 
-GPS_UART_PORT = "/dev/ttyTHS1"
-GPS_BAUDRATE = 9600
+GPS_UART_PORT = os.environ.get("WILDFIRE_GPS_UART_PORT", "/dev/ttyTHS1")
+GPS_BAUDRATE = _env_int("WILDFIRE_GPS_BAUDRATE", 9600)
 
 LIDAR_TRANSPORT = "ethernet"
 
-LIDAR_ETHERNET_LIDAR_IP = "192.168.1.62"
-LIDAR_ETHERNET_HOST_IP = "192.168.1.2"
-LIDAR_ETHERNET_GATEWAY = "192.168.1.1"
+LIDAR_ETHERNET_LIDAR_IP = os.environ.get("WILDFIRE_LIDAR_IP", "192.168.1.62")
+LIDAR_ETHERNET_HOST_IP = os.environ.get("WILDFIRE_LIDAR_HOST_IP", "192.168.1.2")
+LIDAR_ETHERNET_GATEWAY = os.environ.get("WILDFIRE_LIDAR_GATEWAY", "192.168.1.1")
 LIDAR_ETHERNET_SUBNET = "255.255.255.0"
 
 LIDAR_ETHERNET_TX_PORT = 6101
@@ -136,11 +156,16 @@ KY026_PIN_3 = KY026_LEFT_PIN
 KY026_PIN_4 = KY026_RIGHT_PIN
 KY026_COUNT = 4
 
-DHT11_DATA_PIN = 18
+FLAME_SENSOR_FRONT_LEFT_PIN = _env_int("WILDFIRE_FLAME_FRONT_LEFT_PIN", KY026_FRONT_LEFT_PIN)
+FLAME_SENSOR_FRONT_RIGHT_PIN = _env_int("WILDFIRE_FLAME_FRONT_RIGHT_PIN", KY026_FRONT_RIGHT_PIN)
+FLAME_SENSOR_LEFT_PIN = _env_int("WILDFIRE_FLAME_LEFT_PIN", KY026_LEFT_PIN)
+FLAME_SENSOR_RIGHT_PIN = _env_int("WILDFIRE_FLAME_RIGHT_PIN", KY026_RIGHT_PIN)
+
+DHT11_DATA_PIN = _env_int("WILDFIRE_DHT11_DATA_PIN", 18)
 HCSR04_TRIGGER_PIN = None
 HCSR04_ECHO_PIN = None
 
-CAMERA_DEVICE = "/dev/video0"
+CAMERA_DEVICE = os.environ.get("WILDFIRE_CAMERA_DEVICE", "/dev/video0")
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
