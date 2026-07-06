@@ -1,5 +1,6 @@
 package com.wildfirespot.server.gateway;
 
+import com.wildfirespot.server.common.CameraCommand;
 import com.wildfirespot.server.common.ControlCommand;
 import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
@@ -242,6 +243,49 @@ public class HttpRobotGatewayClient implements RobotGatewayClient {
 
     private MissionZoneResponse fallbackMissionZone() {
         return new MissionZoneResponse(List.of(), 0);
+    }
+
+    @Override
+    public CameraControlResponse sendCameraCommand(CameraCommand command) {
+        try {
+            CameraControlResponse response = restClient.post()
+                    .uri("/robot/camera/control")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("command", command.name()))
+                    .retrieve()
+                    .body(CameraControlResponse.class);
+            return response != null ? response : fallbackCameraControl(command);
+        } catch (RestClientException e) {
+            log.error("POST /robot/camera/control failed: {}", e.getMessage());
+            return fallbackCameraControl(command);
+        }
+    }
+
+    @Override
+    public CameraStatusResponse getCameraStatus() {
+        try {
+            CameraStatusResponse response = restClient.get()
+                    .uri("/robot/camera/status")
+                    .retrieve()
+                    .body(CameraStatusResponse.class);
+            return response != null ? response : fallbackCameraStatus();
+        } catch (RestClientException e) {
+            log.error("GET /robot/camera/status failed: {}", e.getMessage());
+            return fallbackCameraStatus();
+        }
+    }
+
+    private CameraControlResponse fallbackCameraControl(CameraCommand command) {
+        return new CameraControlResponse(
+                false,
+                command.name(),
+                "robot_api_unavailable",
+                new CameraControlResponse.Position("STOP", null)
+        );
+    }
+
+    private CameraStatusResponse fallbackCameraStatus() {
+        return new CameraStatusResponse(false, "STOP", null);
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
