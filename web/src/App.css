@@ -710,73 +710,70 @@ body {
     50% { opacity: 1; }
 }
 
-/* --- New Camera Control Panel Styles --- */
-.camera-control-panel .panel-content {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.camera-status {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.85rem;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(38, 50, 63, 0.4);
-}
-
-.camera-status .status-value {
-    font-family: var(--font-mono);
-    font-weight: 700;
-    color: var(--success);
-}
-
-.d-pad {
-    display: grid;
-    grid-template-areas:
-        ". up ."
-        "left center right"
-        ". down .";
-    grid-template-columns: 1fr 1fr 1fr;
-    grid-template-rows: 1fr 1fr 1fr;
-    gap: 8px;
-    justify-items: center;
-    align-items: center;
-}
-
-.d-pad-btn {
-    width: 100%;
-    height: 38px;
-    border: 1px solid var(--border-color);
-    background-color: #192028;
-    color: var(--text-main);
-    font-weight: 600;
-    border-radius: 3px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.d-pad-btn:hover {
-    background-color: #26323f;
-}
-
-.d-pad-btn:active {
-    background-color: var(--accent-color);
-    color: #000;
-}
-
-.d-pad-btn.up { grid-area: up; }
-.d-pad-btn.down { grid-area: down; }
-.d-pad-btn.left { grid-area: left; }
-.d-pad-btn.right { grid-area: right; }
-.d-pad-btn.center { grid-area: center; }
-
-
 /* Global Utility Helper Typography Classes */
 .text-success { color: var(--success); }
 .text-highlight { color: var(--accent-color); font-weight: bold; }
 .text-active { color: #fff; background-color: rgba(0, 188, 212, 0.2); padding: 2px 6px; border-radius: 2px; }
 .subtext { color: var(--text-muted); font-size: 0.8rem; }
+
+/* --- Camera Control Inline (inside Camera Panel) --- */
+.camera-control-inline {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--border-color);
+}
+
+.camera-stream-label {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.camera-d-pad {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+}
+
+.camera-d-pad-row {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+}
+
+.camera-btn {
+    border: 1px solid var(--border-color);
+    background-color: #192028;
+    color: var(--text-main);
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    min-width: 76px;
+    text-align: center;
+    transition: background-color 0.1s;
+}
+
+.camera-btn:hover {
+    background-color: #26323f;
+}
+
+.camera-btn:active {
+    background-color: var(--accent-color);
+    color: #000;
+}
+
+.camera-shortcut-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    font-family: var(--font-mono);
+}
 
 /* --- Tablet / Mobile Optimization Viewport Query (Responsive Breakdowns) --- */
 @media (max-width: 1199px) {
@@ -794,33 +791,28 @@ body {
         order: 1;
     }
 
-    .camera-control-panel {
-        grid-column: 1 / -1;
+    .col-left > .panel:nth-child(1) {
         order: 2;
     }
 
-    .col-left > .panel:nth-child(1) {
+    .col-left > .panel:nth-child(2) {
         order: 3;
     }
 
-    .col-left > .panel:nth-child(2) {
+    .col-left > .panel:nth-child(3) {
         order: 4;
     }
 
-    .col-left > .panel:nth-child(3) {
+    .col-right > .panel:nth-child(1) {
         order: 5;
     }
 
-    .col-right > .panel:nth-child(1) {
+    .col-right > .panel:nth-child(2) {
         order: 6;
     }
 
-    .col-right > .panel:nth-child(2) {
-        order: 7;
-    }
-
     .col-right > .panel:nth-child(3) {
-        order: 8;
+        order: 7;
     }
 
     .center-bottom-split {
@@ -828,11 +820,11 @@ body {
     }
 
     .fire-status-panel {
-        order: 9;
+        order: 8;
     }
 
     .command-panel {
-        order: 10;
+        order: 9;
     }
 
     .camera-viewport {
@@ -895,27 +887,27 @@ body {
         order: 1;
     }
 
-    .camera-control-panel {
+    .col-left > .panel:nth-child(1) {
         order: 2;
     }
 
-    .col-left > .panel:nth-child(1) {
+    .col-left > .panel:nth-child(2) {
         order: 3;
     }
 
-    .col-left > .panel:nth-child(2) {
+    .fire-status-panel {
         order: 4;
     }
 
-    .fire-status-panel {
+    .col-right > .panel:nth-child(1) {
         order: 5;
     }
 
-    .col-right > .panel:nth-child(1) {
+    .col-right > .panel:nth-child(2) {
         order: 6;
     }
 
-    .col-right > .panel:nth-child(2) {
+    .col-right > .panel:nth-child(3) {
         order: 7;
     }
 
@@ -925,10 +917,6 @@ body {
 
     .command-panel {
         order: 9;
-    }
-
-    .col-right > .panel:nth-child(3) {
-        order: 10;
     }
 
     .panel-header-actions {
