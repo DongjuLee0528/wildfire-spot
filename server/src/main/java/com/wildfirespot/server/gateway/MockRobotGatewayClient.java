@@ -3,6 +3,7 @@ package com.wildfirespot.server.gateway;
 import com.wildfirespot.server.adapter.RobotGpsProvider;
 import com.wildfirespot.server.adapter.RobotSensorProvider;
 import com.wildfirespot.server.adapter.RobotStatusProvider;
+import com.wildfirespot.server.common.CameraCommand;
 import com.wildfirespot.server.common.ControlCommand;
 import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
@@ -112,5 +113,20 @@ public class MockRobotGatewayClient implements RobotGatewayClient {
     @Override
     public MissionZoneResetResponse resetMissionZone() {
         return new MissionZoneResetResponse(true);
+    }
+
+    @Override
+    public CameraControlResponse sendCameraCommand(CameraCommand command) {
+        return new CameraControlResponse(
+                true,
+                command.name(),
+                "accepted",
+                new CameraControlResponse.Position("STOP", 90.0)
+        );
+    }
+
+    @Override
+    public CameraStatusResponse getCameraStatus() {
+        return new CameraStatusResponse(true, "STOP", 90.0);
     }
 }

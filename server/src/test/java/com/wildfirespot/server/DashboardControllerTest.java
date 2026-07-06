@@ -234,6 +234,52 @@ class DashboardControllerTest {
                 .andExpect(jsonPath("$.accepted").value(true));
     }
 
+    @Test
+    void postCameraControl_validCommand_returns200() throws Exception {
+        mockMvc.perform(post("/api/camera/control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"command\":\"CAMERA_LEFT\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accepted").value(true))
+                .andExpect(jsonPath("$.command").value("CAMERA_LEFT"));
+    }
+
+    @Test
+    void postCameraControl_allValidCommands_return200() throws Exception {
+        for (String cmd : new String[]{"CAMERA_LEFT", "CAMERA_RIGHT", "CAMERA_STOP", "CAMERA_UP", "CAMERA_DOWN", "CAMERA_CENTER"}) {
+            mockMvc.perform(post("/api/camera/control")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"command\":\"" + cmd + "\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.accepted").value(true));
+        }
+    }
+
+    @Test
+    void postCameraControl_invalidCommand_returns400() throws Exception {
+        mockMvc.perform(post("/api/camera/control")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"command\":\"FLY\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getCameraStatus_returns200() throws Exception {
+        mockMvc.perform(get("/api/camera/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").isBoolean())
+                .andExpect(jsonPath("$.pan").isString());
+    }
+
+    @Test
+    void getCameraStatus_allContractFieldsPresent() throws Exception {
+        mockMvc.perform(get("/api/camera/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(true))
+                .andExpect(jsonPath("$.pan").value("STOP"))
+                .andExpect(jsonPath("$.tilt").value(90.0));
+    }
+
     @SpringBootTest
     @AutoConfigureMockMvc
     static class GpsNullableTest {

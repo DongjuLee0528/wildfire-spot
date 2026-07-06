@@ -1,5 +1,6 @@
 package com.wildfirespot.server.service;
 
+import com.wildfirespot.server.common.CameraCommand;
 import com.wildfirespot.server.common.ControlCommand;
 import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
@@ -64,5 +65,13 @@ public class DashboardService {
 
     public MissionZoneResetResponse resetMissionZone() {
         return robotGatewayClient.resetMissionZone();
+    }
+
+    public CameraControlResponse processCameraCommand(CameraCommand command) {
+        return robotGatewayClient.sendCameraCommand(command);
+    }
+
+    public CameraStatusResponse getCameraStatus() {
+        return robotGatewayClient.getCameraStatus();
     }
 }

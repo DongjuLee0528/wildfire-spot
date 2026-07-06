@@ -1,5 +1,6 @@
 package com.wildfirespot.server.controller;
 
+import com.wildfirespot.server.common.CameraCommand;
 import com.wildfirespot.server.dto.*;
 import com.wildfirespot.server.service.DashboardService;
 import jakarta.validation.Valid;
@@ -77,5 +78,15 @@ public class DashboardController {
     @DeleteMapping("/mission/zone")
     public ResponseEntity<MissionZoneResetResponse> resetMissionZone() {
         return ResponseEntity.ok(dashboardService.resetMissionZone());
+    }
+
+    @PostMapping("/camera/control")
+    public ResponseEntity<CameraControlResponse> postCameraControl(@Valid @RequestBody CameraControlRequest request) {
+        return ResponseEntity.ok(dashboardService.processCameraCommand(request.command()));
+    }
+
+    @GetMapping("/camera/status")
+    public ResponseEntity<CameraStatusResponse> getCameraStatus() {
+        return ResponseEntity.ok(dashboardService.getCameraStatus());
     }
 }
