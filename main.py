@@ -15,9 +15,11 @@ import time
 import re
 import json
 from pathlib import Path
+from hardware.camera_control_manager import CameraControlManager
 from hardware.gps_manager import GPSManager
 from utils.config import PATROL_ZONE_MIN_POINTS
 from utils.logger import WildfireLogger
+import robot.robot_api as robot_api
 
 class KeyboardInput:
     """
@@ -228,6 +230,7 @@ def main():
     logger = None
     calibrator = None
     keyboard_input = None
+    camera_control_manager = None
 
     # Initialize logger first
     try:
@@ -241,6 +244,14 @@ def main():
         logger.log_system_state("STARTING")
         calibrator = PatrolZoneCalibrator(logger)
         keyboard_input = KeyboardInput(logger)
+
+        try:
+            camera_control_manager = CameraControlManager()
+            robot_api.configure(camera_control_manager=camera_control_manager)
+            logger.log_system_state(f"CAMERA_INIT available={camera_control_manager.is_available()}")
+        except Exception as e:
+            logger.log_error("Main.camera_init", str(e))
+            print(f"Camera control manager unavailable: {e}")
 
         # Display control instructions
         print("Robot Control Interface")
@@ -285,6 +296,8 @@ def main():
             keyboard_input.restore()
         if calibrator is not None:
             calibrator.cleanup()
+        if camera_control_manager is not None:
+            camera_control_manager.close()
         if logger is not None:
             logger.log_system_state("STOPPED")
             logger.close()

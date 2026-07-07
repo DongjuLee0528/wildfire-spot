@@ -44,22 +44,31 @@ _PAN_STATE_MAP = {
 }
 
 
+_UNSET = object()
+
+
 def configure(
-    state_machine=None,
-    collector=None,
-    manual_control_manager=None,
-    mode_control_manager=None,
-    patrol_zone_manager=None,
-    camera_control_manager=None,
+    state_machine=_UNSET,
+    collector=_UNSET,
+    manual_control_manager=_UNSET,
+    mode_control_manager=_UNSET,
+    patrol_zone_manager=_UNSET,
+    camera_control_manager=_UNSET,
 ):
     global _state_machine, _collector, _manual_control_manager
     global _mode_control_manager, _patrol_zone_manager, _camera_control_manager
-    _state_machine = state_machine
-    _collector = collector
-    _manual_control_manager = manual_control_manager
-    _mode_control_manager = mode_control_manager
-    _patrol_zone_manager = patrol_zone_manager
-    _camera_control_manager = camera_control_manager
+    if state_machine is not _UNSET:
+        _state_machine = state_machine
+    if collector is not _UNSET:
+        _collector = collector
+    if manual_control_manager is not _UNSET:
+        _manual_control_manager = manual_control_manager
+    if mode_control_manager is not _UNSET:
+        _mode_control_manager = mode_control_manager
+    if patrol_zone_manager is not _UNSET:
+        _patrol_zone_manager = patrol_zone_manager
+    if camera_control_manager is not _UNSET:
+        _camera_control_manager = camera_control_manager
 
 
 @asynccontextmanager
