@@ -13,12 +13,12 @@ export default function App() {
     const [robotStatus, setRobotStatus] = useState(STATUS_FALLBACK);
     const GPS_FALLBACK = { latitude: null, longitude: null, fix: null };
     const [gpsData, setGpsData] = useState(GPS_FALLBACK);
-    const flameSensors = [
-        { label: 'Flame Front Left', status: 'CLEAR' },
-        { label: 'Flame Front Right', status: 'CLEAR' },
-        { label: 'Flame Left', status: 'DETECTED' },
-        { label: 'Flame Right', status: 'CLEAR' },
-    ];
+    const SENSOR_FALLBACK = {
+        temperature: null, humidity: null, mq2Gas: null,
+        flame: { frontLeft: null, frontRight: null, left: null, right: null },
+        lidarStatus: null,
+    };
+    const [sensorData, setSensorData] = useState(SENSOR_FALLBACK);
     const fireStatus = [
         { label: 'Hardware Confirmed', status: 'DETECTED', level: 'detected' },
         { label: 'Camera Detected', status: 'CLEAR', level: 'clear' },
@@ -99,6 +99,27 @@ export default function App() {
         fetchGps();
         const gpsTimer = setInterval(fetchGps, 3000);
         return () => clearInterval(gpsTimer);
+    }, []);
+
+    useEffect(() => {
+        const fetchSensors = () => (
+            fetchWithTimeout('/api/sensors')
+                .then(readJsonResponse)
+                .then((data) => {
+                    if (!data || typeof data !== 'object') return;
+                    setSensorData({
+                        temperature: typeof data.temperature === 'number' ? data.temperature : null,
+                        humidity: typeof data.humidity === 'number' ? data.humidity : null,
+                        mq2Gas: typeof data.mq2Gas === 'number' ? data.mq2Gas : null,
+                        flame: data.flame && typeof data.flame === 'object' ? data.flame : SENSOR_FALLBACK.flame,
+                        lidarStatus: typeof data.lidarStatus === 'string' ? data.lidarStatus : null,
+                    });
+                })
+                .catch((err) => console.error('Sensor fetch failed:', err))
+        );
+        fetchSensors();
+        const sensorTimer = setInterval(fetchSensors, 4000);
+        return () => clearInterval(sensorTimer);
     }, []);
 
     useEffect(() => {
@@ -403,36 +424,50 @@ export default function App() {
                             <div className="sensor-item">
                                 <div className="sensor-meta">
                                     <span className="sensor-name">Temperature</span>
-                                    <span className="sensor-val">24.8 °C</span>
+                                    <span className="sensor-val">
+                                        {sensorData.temperature !== null ? `${sensorData.temperature.toFixed(1)} °C` : 'N/A'}
+                                    </span>
                                 </div>
-                                <div className="sensor-bar-bg"><div className="sensor-bar-fill" style={{width: '45%'}}></div></div>
+                                <div className="sensor-bar-bg"><div className="sensor-bar-fill" style={{width: sensorData.temperature !== null ? `${Math.min(sensorData.temperature / 60 * 100, 100).toFixed(1)}%` : '0%'}}></div></div>
                             </div>
                             <div className="sensor-item">
                                 <div className="sensor-meta">
                                     <span className="sensor-name">Humidity</span>
-                                    <span className="sensor-val">42.1 %</span>
+                                    <span className="sensor-val">
+                                        {sensorData.humidity !== null ? `${sensorData.humidity.toFixed(1)} %` : 'N/A'}
+                                    </span>
                                 </div>
-                                <div className="sensor-bar-bg"><div className="sensor-bar-fill" style={{width: '60%'}}></div></div>
+                                <div className="sensor-bar-bg"><div className="sensor-bar-fill" style={{width: sensorData.humidity !== null ? `${Math.min(sensorData.humidity, 100).toFixed(1)}%` : '0%'}}></div></div>
                             </div>
                             <div className="sensor-item">
                                 <div className="sensor-meta">
                                     <span className="sensor-name">MQ-2 Gas Sensor</span>
-                                    <span className="sensor-val text-success">112 ppm (Safe)</span>
+                                    <span className={`sensor-val ${sensorData.mq2Gas !== null && sensorData.mq2Gas < 300 ? 'text-success' : sensorData.mq2Gas !== null ? 'text-error' : ''}`}>
+                                        {sensorData.mq2Gas !== null ? `${sensorData.mq2Gas} ppm${sensorData.mq2Gas < 300 ? ' (Safe)' : ' (Alert)'}` : 'N/A'}
+                                    </span>
                                 </div>
-                                <div className="sensor-bar-bg"><div className="sensor-bar-fill safe" style={{width: '22%'}}></div></div>
+                                <div className="sensor-bar-bg"><div className="sensor-bar-fill safe" style={{width: sensorData.mq2Gas !== null ? `${Math.min(sensorData.mq2Gas / 1000 * 100, 100).toFixed(1)}%` : '0%'}}></div></div>
                             </div>
                             <div className="sensor-grid-2x2">
-                                {flameSensors.map((sensor) => (
-                                    <div key={sensor.label} className={`sensor-mini-card flame-${sensor.status.toLowerCase()}`}>
-                                        <span className="mini-lbl">{sensor.label}</span>
-                                        <span className="mini-val">{sensor.status}</span>
-                                    </div>
-                                ))}
+                                {[
+                                    { label: 'Flame Front Left', val: sensorData.flame.frontLeft },
+                                    { label: 'Flame Front Right', val: sensorData.flame.frontRight },
+                                    { label: 'Flame Left', val: sensorData.flame.left },
+                                    { label: 'Flame Right', val: sensorData.flame.right },
+                                ].map((sensor) => {
+                                    const status = sensor.val === null ? 'unknown' : sensor.val ? 'detected' : 'clear';
+                                    return (
+                                        <div key={sensor.label} className={`sensor-mini-card flame-${status}`}>
+                                            <span className="mini-lbl">{sensor.label}</span>
+                                            <span className="mini-val">{sensor.val === null ? '...' : sensor.val ? 'DETECTED' : 'CLEAR'}</span>
+                                        </div>
+                                    );
+                                })}
                             </div>
                             <div className="sensor-item font-industrial">
                                 <div className="sensor-meta">
                                     <span className="sensor-name">LiDAR Node Status</span>
-                                    <span className="status-text-badge">SCANNING</span>
+                                    <span className="status-text-badge">{sensorData.lidarStatus ?? '...'}</span>
                                 </div>
                             </div>
                         </div>
