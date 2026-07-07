@@ -3,6 +3,9 @@ import React, { useState, useEffect } from 'react';
 export default function App() {
     const [currentTime, setCurrentTime] = useState(new Date().toISOString());
     const [currentKeyCommand, setCurrentKeyCommand] = useState('STOP');
+    const CAMERA_FALLBACK = { available: false, pan: 'UNKNOWN', tilt: null };
+    const [cameraStatus, setCameraStatus] = useState({ available: null, pan: 'IDLE', tilt: null });
+    const [cameraCommandError, setCameraCommandError] = useState('');
     const robotMode = 'AUTO';
     const stateMachine = 'PATROL';
     const flameSensors = [
@@ -16,6 +19,72 @@ export default function App() {
         { label: 'Camera Detected', status: 'CLEAR', level: 'clear' },
         { label: 'Final Confirmed Fire', status: 'CLEAR', level: 'clear' },
     ];
+
+    const fetchWithTimeout = (url, options = {}, timeoutMs = 5000) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        return fetch(url, { ...options, signal: controller.signal })
+            .finally(() => clearTimeout(timer));
+    };
+
+    const readJsonResponse = (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json().catch(() => {
+            throw new Error('Malformed JSON');
+        });
+    };
+
+    const normalizeCameraStatus = (data) => {
+        if (!data || typeof data !== 'object' || typeof data.available !== 'boolean') {
+            return CAMERA_FALLBACK;
+        }
+        return {
+            available: data.available,
+            pan: typeof data.pan === 'string' ? data.pan : 'UNKNOWN',
+            tilt: data.tilt ?? null,
+        };
+    };
+
+    const fetchCameraStatus = () => (
+        fetchWithTimeout('/api/camera/status')
+            .then(readJsonResponse)
+            .then((data) => setCameraStatus(normalizeCameraStatus(data)))
+            .catch((err) => {
+                console.error('Camera status fetch failed:', err);
+                setCameraStatus(CAMERA_FALLBACK);
+            })
+    );
+
+    useEffect(() => {
+        fetchCameraStatus();
+    }, []);
+
+    const sendCameraCommand = (command) => {
+        setCameraCommandError('');
+        fetchWithTimeout('/api/camera/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command }),
+        })
+            .then(readJsonResponse)
+            .then((data) => {
+                if (!data || typeof data !== 'object' || typeof data.accepted !== 'boolean') {
+                    setCameraCommandError('INVALID_RESPONSE');
+                    return;
+                }
+                if (data.accepted === false) {
+                    console.warn('Camera command rejected:', data.reason ?? 'no reason');
+                    setCameraCommandError(data.reason ?? 'REJECTED');
+                    return;
+                }
+                setCameraCommandError('');
+                fetchCameraStatus();
+            })
+            .catch((err) => {
+                console.error('Camera command failed:', err);
+                setCameraCommandError('REQUEST_FAILED');
+            });
+    };
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -170,18 +239,23 @@ export default function App() {
                             </div>
                         </div>
                         <div className="camera-control-inline">
-                            <span className="camera-stream-label">Camera Status: IDLE</span>
+                            <span className="camera-stream-label">
+                                Available: {cameraStatus.available === null ? '...' : cameraStatus.available ? 'YES' : 'NO'}
+                                {' | '}Pan: {cameraStatus.pan ?? 'UNKNOWN'}
+                                {' | '}Tilt: {cameraStatus.tilt != null ? `${cameraStatus.tilt}°` : 'N/A'}
+                                {cameraCommandError ? ` | Command: ${cameraCommandError}` : ''}
+                            </span>
                             <div className="camera-d-pad">
                                 <div className="camera-d-pad-row">
-                                    <button className="camera-btn">Up (I)</button>
+                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_UP')}>Up (I)</button>
                                 </div>
                                 <div className="camera-d-pad-row">
-                                    <button className="camera-btn">Left (J)</button>
-                                    <button className="camera-btn">Center (O)</button>
-                                    <button className="camera-btn">Right (L)</button>
+                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_LEFT')}>Left (J)</button>
+                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_CENTER')}>Center (O)</button>
+                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_RIGHT')}>Right (L)</button>
                                 </div>
                                 <div className="camera-d-pad-row">
-                                    <button className="camera-btn">Down (K)</button>
+                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_DOWN')}>Down (K)</button>
                                 </div>
                             </div>
                             <span className="camera-shortcut-hint">Shortcuts: I / J / K / L / O</span>
