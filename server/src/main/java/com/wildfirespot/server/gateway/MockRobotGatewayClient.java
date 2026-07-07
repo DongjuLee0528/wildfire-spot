@@ -9,6 +9,7 @@ import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
 import org.springframework.stereotype.Component;
 
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -128,5 +129,15 @@ public class MockRobotGatewayClient implements RobotGatewayClient {
     @Override
     public CameraStatusResponse getCameraStatus() {
         return new CameraStatusResponse(true, "STOP", 90.0);
+    }
+
+    @Override
+    public boolean isCameraStreamAvailable() {
+        return false;
+    }
+
+    @Override
+    public StreamingResponseBody streamCamera() {
+        return null;
     }
 }
