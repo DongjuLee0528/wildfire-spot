@@ -161,8 +161,7 @@ body {
 
 /* --- 2. Live Camera Viewport --- */
 .main-camera-panel {
-    flex-grow: 1;
-    min-height: 0;
+    flex-shrink: 0;
 }
 
 .panel-header-actions {
@@ -189,7 +188,7 @@ body {
     background-color: #07090c;
     position: relative;
     aspect-ratio: 16 / 9;
-    max-height: 320px;
+    max-height: 280px;
     padding: 0;
     overflow: hidden;
 }
@@ -727,8 +726,8 @@ body {
     flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 16px;
-    padding: 8px 14px;
+    gap: 12px;
+    padding: 5px 14px;
     border-top: 1px solid var(--border-color);
     flex-shrink: 0;
 }
@@ -742,13 +741,13 @@ body {
 .camera-d-pad {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     align-items: center;
 }
 
 .camera-d-pad-row {
     display: flex;
-    gap: 4px;
+    gap: 3px;
     justify-content: center;
 }
 
@@ -758,10 +757,10 @@ body {
     color: var(--text-main);
     border-radius: 3px;
     cursor: pointer;
-    padding: 4px 8px;
-    font-size: 0.75rem;
+    padding: 3px 6px;
+    font-size: 0.72rem;
     font-family: var(--font-mono);
-    min-width: 68px;
+    min-width: 62px;
     text-align: center;
     transition: background-color 0.1s;
 }
