@@ -631,6 +631,9 @@ body {
     color: #8a9ba8;
     font-size: 0.9rem;
     transition: all 0.1s ease;
+    cursor: pointer;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 .key-cap.esc {

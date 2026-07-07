@@ -8,6 +8,7 @@ export default function App() {
     const [streamError, setStreamError] = useState(false);
     const imgRef = useRef(null);
     const [cameraCommandError, setCameraCommandError] = useState('');
+    const [controlError, setControlError] = useState('');
     const robotMode = 'AUTO';
     const stateMachine = 'PATROL';
     const flameSensors = [
@@ -61,6 +62,30 @@ export default function App() {
         fetchCameraStatus();
     }, []);
 
+    const sendControlCommand = (command) => {
+        setControlError('');
+        fetchWithTimeout('/api/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command }),
+        })
+            .then(readJsonResponse)
+            .then((data) => {
+                if (!data || typeof data !== 'object' || typeof data.accepted !== 'boolean') {
+                    setControlError('INVALID_RESPONSE');
+                    return;
+                }
+                if (data.accepted === false) {
+                    console.warn('Control command rejected:', data.command);
+                    setControlError('REJECTED');
+                }
+            })
+            .catch((err) => {
+                console.error('Control command failed:', err);
+                setControlError('REQUEST_FAILED');
+            });
+    };
+
     const sendCameraCommand = (command) => {
         setCameraCommandError('');
         fetchWithTimeout('/api/camera/control', {
@@ -96,17 +121,23 @@ export default function App() {
     }, []);
 
     useEffect(() => {
+        const KEY_COMMAND_MAP = { W: 'FORWARD', A: 'LEFT', S: 'BACKWARD', D: 'RIGHT' };
+
         const handleKeyDown = (e) => {
+            if (e.repeat) return;
             const key = e.key.toUpperCase();
-            if (key === 'W') setCurrentKeyCommand('FORWARD');
-            if (key === 'A') setCurrentKeyCommand('LEFT');
-            if (key === 'S') setCurrentKeyCommand('BACKWARD');
-            if (key === 'D') setCurrentKeyCommand('RIGHT');
-            if (e.key === 'Escape') setCurrentKeyCommand('STOP');
+            const command = e.key === 'Escape' ? 'STOP' : KEY_COMMAND_MAP[key];
+            if (!command) return;
+            setCurrentKeyCommand(command);
+            sendControlCommand(command);
         };
 
-        const handleKeyUp = () => {
-            setCurrentKeyCommand('STOP');
+        const handleKeyUp = (e) => {
+            const key = e.key.toUpperCase();
+            if (KEY_COMMAND_MAP[key]) {
+                setCurrentKeyCommand('STOP');
+                sendControlCommand('STOP');
+            }
         };
 
         window.addEventListener('keydown', handleKeyDown);
@@ -281,15 +312,15 @@ export default function App() {
                             <div className="panel-content command-layout">
                                 <div className="keyboard-map">
                                     <div className="key-row">
-                                        <div className={`key-cap ${currentKeyCommand === 'FORWARD' ? 'pressed' : ''}`}>W</div>
+                                        <button className={`key-cap ${currentKeyCommand === 'FORWARD' ? 'pressed' : ''}`} onClick={() => sendControlCommand('FORWARD')}>W</button>
                                     </div>
                                     <div className="key-row">
-                                        <div className={`key-cap ${currentKeyCommand === 'LEFT' ? 'pressed' : ''}`}>A</div>
-                                        <div className={`key-cap ${currentKeyCommand === 'BACKWARD' ? 'pressed' : ''}`}>S</div>
-                                        <div className={`key-cap ${currentKeyCommand === 'RIGHT' ? 'pressed' : ''}`}>D</div>
+                                        <button className={`key-cap ${currentKeyCommand === 'LEFT' ? 'pressed' : ''}`} onClick={() => sendControlCommand('LEFT')}>A</button>
+                                        <button className={`key-cap ${currentKeyCommand === 'BACKWARD' ? 'pressed' : ''}`} onClick={() => sendControlCommand('BACKWARD')}>S</button>
+                                        <button className={`key-cap ${currentKeyCommand === 'RIGHT' ? 'pressed' : ''}`} onClick={() => sendControlCommand('RIGHT')}>D</button>
                                     </div>
                                     <div className="key-row esc-row">
-                                        <div className={`key-cap esc ${currentKeyCommand === 'STOP' ? 'pressed' : ''}`}>ESC (STOP)</div>
+                                        <button className={`key-cap esc ${currentKeyCommand === 'STOP' ? 'pressed' : ''}`} onClick={() => sendControlCommand('STOP')}>ESC (STOP)</button>
                                     </div>
                                 </div>
                                 <div className="command-status-display">
@@ -297,6 +328,9 @@ export default function App() {
                                     <div className={`current-cmd-value ${currentKeyCommand !== 'STOP' ? 'cmd-active' : ''}`}>
                                         {currentKeyCommand}
                                     </div>
+                                    {controlError && (
+                                        <span className="camera-stream-label">ERR: {controlError}</span>
+                                    )}
                                 </div>
                             </div>
                         </div>
