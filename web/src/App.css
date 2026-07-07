@@ -732,6 +732,7 @@ body {
 
 /* Global Utility Helper Typography Classes */
 .text-success { color: var(--success); }
+.text-error { color: var(--danger, #ef5350); }
 .text-highlight { color: var(--accent-color); font-weight: bold; }
 .text-active { color: #fff; background-color: rgba(0, 188, 212, 0.2); padding: 2px 6px; border-radius: 2px; }
 .subtext { color: var(--text-muted); font-size: 0.8rem; }

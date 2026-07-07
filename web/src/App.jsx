@@ -9,8 +9,8 @@ export default function App() {
     const imgRef = useRef(null);
     const [cameraCommandError, setCameraCommandError] = useState('');
     const [controlError, setControlError] = useState('');
-    const robotMode = 'AUTO';
-    const stateMachine = 'PATROL';
+    const STATUS_FALLBACK = { state: '...', mode: '...', robotConnected: null, lastUpdate: null };
+    const [robotStatus, setRobotStatus] = useState(STATUS_FALLBACK);
     const flameSensors = [
         { label: 'Flame Front Left', status: 'CLEAR' },
         { label: 'Flame Front Right', status: 'CLEAR' },
@@ -48,6 +48,21 @@ export default function App() {
         };
     };
 
+    const fetchRobotStatus = () => (
+        fetchWithTimeout('/api/status')
+            .then(readJsonResponse)
+            .then((data) => {
+                if (!data || typeof data !== 'object') return;
+                setRobotStatus({
+                    state: typeof data.state === 'string' ? data.state : '...',
+                    mode: typeof data.mode === 'string' ? data.mode : '...',
+                    robotConnected: typeof data.robotConnected === 'boolean' ? data.robotConnected : null,
+                    lastUpdate: data.lastUpdate ?? null,
+                });
+            })
+            .catch((err) => console.error('Robot status fetch failed:', err))
+    );
+
     const fetchCameraStatus = () => (
         fetchWithTimeout('/api/camera/status')
             .then(readJsonResponse)
@@ -57,6 +72,12 @@ export default function App() {
                 setCameraStatus(CAMERA_FALLBACK);
             })
     );
+
+    useEffect(() => {
+        fetchRobotStatus();
+        const statusTimer = setInterval(fetchRobotStatus, 5000);
+        return () => clearInterval(statusTimer);
+    }, []);
 
     useEffect(() => {
         fetchCameraStatus();
@@ -188,19 +209,23 @@ export default function App() {
                         <div className="panel-content status-grid">
                             <div className="data-row">
                                 <span className="label">Mode</span>
-                                <span className="value">{robotMode}</span>
+                                <span className="value">{robotStatus.mode}</span>
                             </div>
                             <div className="data-row">
                                 <span className="label">StateMachine</span>
-                                <span className="value text-highlight">{stateMachine}</span>
+                                <span className="value text-highlight">{robotStatus.state}</span>
                             </div>
                             <div className="data-row">
                                 <span className="label">Robot Connection</span>
-                                <span className="value text-success">ONLINE</span>
+                                <span className={`value ${robotStatus.robotConnected === true ? 'text-success' : robotStatus.robotConnected === false ? 'text-error' : ''}`}>
+                                    {robotStatus.robotConnected === null ? '...' : robotStatus.robotConnected ? 'ONLINE' : 'OFFLINE'}
+                                </span>
                             </div>
                             <div className="data-row">
                                 <span className="label">Last Update</span>
-                                <span className="value subtext">Just Now</span>
+                                <span className="value subtext">
+                                    {robotStatus.lastUpdate ? new Date(robotStatus.lastUpdate).toLocaleTimeString() : '...'}
+                                </span>
                             </div>
                         </div>
                     </div>
