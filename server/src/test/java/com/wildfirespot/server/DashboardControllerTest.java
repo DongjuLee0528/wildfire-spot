@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -278,6 +279,56 @@ class DashboardControllerTest {
                 .andExpect(jsonPath("$.available").value(true))
                 .andExpect(jsonPath("$.pan").value("STOP"))
                 .andExpect(jsonPath("$.tilt").value(90.0));
+    }
+
+    @Test
+    void getCameraStream_mockMode_returns503() throws Exception {
+        mockMvc.perform(get("/api/camera/stream"))
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    @SpringBootTest
+    @AutoConfigureMockMvc
+    static class CameraStreamTest {
+
+        @Autowired
+        private MockMvc mockMvc;
+
+        @MockBean
+        private RobotGatewayClient robotGatewayClient;
+
+        @Test
+        void getCameraStream_preflightSucceeds_returns200WithMjpegContentTypeAndBytes() throws Exception {
+            byte[] fakeData = "--frame\r\nContent-Type: image/jpeg\r\n\r\nFAKE_JPEG\r\n".getBytes();
+            when(robotGatewayClient.isCameraStreamAvailable()).thenReturn(true);
+            when(robotGatewayClient.streamCamera()).thenReturn(outputStream -> outputStream.write(fakeData));
+
+            byte[] body = mockMvc.perform(get("/api/camera/stream"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Content-Type", org.hamcrest.Matchers.containsString("multipart/x-mixed-replace")))
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsByteArray();
+
+            assertThat(body).isNotEmpty();
+            assertThat(new String(body)).contains("FAKE_JPEG");
+        }
+
+        @Test
+        void getCameraStream_preflightFails_returns503() throws Exception {
+            when(robotGatewayClient.isCameraStreamAvailable()).thenReturn(false);
+
+            mockMvc.perform(get("/api/camera/stream"))
+                    .andExpect(status().isServiceUnavailable());
+        }
+
+        @Test
+        void getCameraStream_python503_preflight_returns503() throws Exception {
+            when(robotGatewayClient.isCameraStreamAvailable()).thenReturn(false);
+
+            mockMvc.perform(get("/api/camera/stream"))
+                    .andExpect(status().isServiceUnavailable());
+        }
     }
 
     @SpringBootTest
