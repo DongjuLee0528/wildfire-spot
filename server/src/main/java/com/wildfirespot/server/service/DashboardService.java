@@ -7,6 +7,8 @@ import com.wildfirespot.server.dto.*;
 import com.wildfirespot.server.gateway.RobotGatewayClient;
 import org.springframework.stereotype.Service;
 
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
 /**
  * Application-layer service for the robot dashboard.
  *
@@ -73,5 +75,13 @@ public class DashboardService {
 
     public CameraStatusResponse getCameraStatus() {
         return robotGatewayClient.getCameraStatus();
+    }
+
+    public boolean isCameraStreamAvailable() {
+        return robotGatewayClient.isCameraStreamAvailable();
+    }
+
+    public StreamingResponseBody getCameraStream() {
+        return robotGatewayClient.streamCamera();
     }
 }
