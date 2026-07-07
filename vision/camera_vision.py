@@ -117,6 +117,10 @@ class CameraVision:
         """Return True only if both camera and model are ready for inference."""
         return self._camera_available and self._model_available
 
+    def is_camera_available(self) -> bool:
+        """Return True if the camera device is open and ready to capture frames."""
+        return self._camera_available and self._cap is not None
+
     def get_latest_frame(self):
         """
         Return the most recently captured frame, or None if no frame has been captured.
