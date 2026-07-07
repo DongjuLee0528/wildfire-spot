@@ -19,11 +19,8 @@ export default function App() {
         lidarStatus: null,
     };
     const [sensorData, setSensorData] = useState(SENSOR_FALLBACK);
-    const fireStatus = [
-        { label: 'Hardware Confirmed', status: 'DETECTED', level: 'detected' },
-        { label: 'Camera Detected', status: 'CLEAR', level: 'clear' },
-        { label: 'Final Confirmed Fire', status: 'CLEAR', level: 'clear' },
-    ];
+    const FIRE_FALLBACK = { sensorDetected: null, cameraDetected: null, verified: null };
+    const [fireData, setFireData] = useState(FIRE_FALLBACK);
 
     const fetchWithTimeout = (url, options = {}, timeoutMs = 5000) => {
         const controller = new AbortController();
@@ -120,6 +117,25 @@ export default function App() {
         fetchSensors();
         const sensorTimer = setInterval(fetchSensors, 4000);
         return () => clearInterval(sensorTimer);
+    }, []);
+
+    useEffect(() => {
+        const fetchFireStatus = () => (
+            fetchWithTimeout('/api/fire/status')
+                .then(readJsonResponse)
+                .then((data) => {
+                    if (!data || typeof data !== 'object') return;
+                    setFireData({
+                        sensorDetected: typeof data.sensorDetected === 'boolean' ? data.sensorDetected : null,
+                        cameraDetected: typeof data.cameraDetected === 'boolean' ? data.cameraDetected : null,
+                        verified: typeof data.verified === 'boolean' ? data.verified : null,
+                    });
+                })
+                .catch((err) => console.error('Fire status fetch failed:', err))
+        );
+        fetchFireStatus();
+        const fireTimer = setInterval(fetchFireStatus, 4000);
+        return () => clearInterval(fireTimer);
     }, []);
 
     useEffect(() => {
@@ -406,12 +422,20 @@ export default function App() {
                         <div className="panel fire-status-panel">
                             <h2 className="panel-title">Analysis & Verification Status</h2>
                             <div className="panel-content fire-grid">
-                                {fireStatus.map((item) => (
-                                    <div key={item.label} className={`fire-card status-${item.level}`}>
-                                        <span className="fire-card-label">{item.label}</span>
-                                        <span className="fire-card-value">{item.status}</span>
-                                    </div>
-                                ))}
+                                {[
+                                    { label: 'Hardware Confirmed', val: fireData.sensorDetected },
+                                    { label: 'Camera Detected', val: fireData.cameraDetected },
+                                    { label: 'Final Confirmed Fire', val: fireData.verified },
+                                ].map((item) => {
+                                    const level = item.val === null ? 'unknown' : item.val ? 'detected' : 'clear';
+                                    const text = item.val === null ? '...' : item.val ? 'DETECTED' : 'CLEAR';
+                                    return (
+                                        <div key={item.label} className={`fire-card status-${level}`}>
+                                            <span className="fire-card-label">{item.label}</span>
+                                            <span className="fire-card-value">{text}</span>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>

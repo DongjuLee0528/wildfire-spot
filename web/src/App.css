@@ -551,6 +551,11 @@ body {
     color: var(--warning);
 }
 
+.fire-card.status-unknown {
+    border-color: rgba(138, 155, 168, 0.3);
+    background: rgba(138, 155, 168, 0.05);
+}
+
 .fire-card.status-confirmed {
     border-color: rgba(231, 76, 60, 0.5);
     background: rgba(231, 76, 60, 0.08);
