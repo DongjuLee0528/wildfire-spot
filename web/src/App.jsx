@@ -11,6 +11,8 @@ export default function App() {
     const [controlError, setControlError] = useState('');
     const STATUS_FALLBACK = { state: '...', mode: '...', robotConnected: null, lastUpdate: null };
     const [robotStatus, setRobotStatus] = useState(STATUS_FALLBACK);
+    const GPS_FALLBACK = { latitude: null, longitude: null, fix: null };
+    const [gpsData, setGpsData] = useState(GPS_FALLBACK);
     const flameSensors = [
         { label: 'Flame Front Left', status: 'CLEAR' },
         { label: 'Flame Front Right', status: 'CLEAR' },
@@ -63,6 +65,20 @@ export default function App() {
             .catch((err) => console.error('Robot status fetch failed:', err))
     );
 
+    const fetchGps = () => (
+        fetchWithTimeout('/api/gps')
+            .then(readJsonResponse)
+            .then((data) => {
+                if (!data || typeof data !== 'object') return;
+                setGpsData({
+                    latitude: typeof data.latitude === 'number' ? data.latitude : null,
+                    longitude: typeof data.longitude === 'number' ? data.longitude : null,
+                    fix: typeof data.fix === 'boolean' ? data.fix : null,
+                });
+            })
+            .catch((err) => console.error('GPS fetch failed:', err))
+    );
+
     const fetchCameraStatus = () => (
         fetchWithTimeout('/api/camera/status')
             .then(readJsonResponse)
@@ -77,6 +93,12 @@ export default function App() {
         fetchRobotStatus();
         const statusTimer = setInterval(fetchRobotStatus, 5000);
         return () => clearInterval(statusTimer);
+    }, []);
+
+    useEffect(() => {
+        fetchGps();
+        const gpsTimer = setInterval(fetchGps, 3000);
+        return () => clearInterval(gpsTimer);
     }, []);
 
     useEffect(() => {
@@ -430,11 +452,21 @@ export default function App() {
                             <div className="map-coordinates">
                                 <div className="coord">
                                     <span className="c-lbl">LAT:</span>
-                                    <span className="c-val">37.5665 °N</span>
+                                    <span className="c-val">
+                                        {gpsData.latitude !== null ? `${gpsData.latitude.toFixed(4)} °N` : 'N/A'}
+                                    </span>
                                 </div>
                                 <div className="coord">
                                     <span className="c-lbl">LON:</span>
-                                    <span className="c-val">126.9780 °E</span>
+                                    <span className="c-val">
+                                        {gpsData.longitude !== null ? `${gpsData.longitude.toFixed(4)} °E` : 'N/A'}
+                                    </span>
+                                </div>
+                                <div className="coord">
+                                    <span className="c-lbl">FIX:</span>
+                                    <span className={`c-val ${gpsData.fix === true ? 'text-success' : gpsData.fix === false ? 'text-error' : ''}`}>
+                                        {gpsData.fix === null ? '...' : gpsData.fix ? 'ACQUIRED' : 'NO FIX'}
+                                    </span>
                                 </div>
                             </div>
                         </div>
