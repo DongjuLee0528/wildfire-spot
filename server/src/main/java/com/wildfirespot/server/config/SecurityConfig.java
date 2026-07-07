@@ -55,6 +55,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/sensors/**").authenticated()
                         .requestMatchers("/api/fire/**").authenticated()
                         .requestMatchers("/api/mission/**").authenticated()
+                        .requestMatchers("/api/devices/**").authenticated()
                         // Public (read-only monitoring): status, health, logs
                         // These can be tightened later when the React login page is complete.
                         .requestMatchers(HttpMethod.GET, "/api/status", "/api/health", "/api/logs").permitAll()

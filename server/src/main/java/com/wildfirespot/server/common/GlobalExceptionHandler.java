@@ -1,6 +1,7 @@
 package com.wildfirespot.server.common;
 
 import com.wildfirespot.server.controller.AuthController;
+import com.wildfirespot.server.device.DeviceService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -43,5 +44,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleInvalidCredentials(AuthController.InvalidCredentialsException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new ErrorResponse("UNAUTHORIZED", ex.getMessage()));
+    }
+
+    @ExceptionHandler(DeviceService.DeviceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleDeviceNotFound(DeviceService.DeviceNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse("NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(DeviceService.DeviceConflictException.class)
+    public ResponseEntity<ErrorResponse> handleDeviceConflict(DeviceService.DeviceConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("CONFLICT", ex.getMessage()));
     }
 }
