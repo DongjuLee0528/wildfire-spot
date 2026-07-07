@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 export default function App() {
     const [currentTime, setCurrentTime] = useState(new Date().toISOString());
     const [currentKeyCommand, setCurrentKeyCommand] = useState('STOP');
     const CAMERA_FALLBACK = { available: false, pan: 'UNKNOWN', tilt: null };
     const [cameraStatus, setCameraStatus] = useState({ available: null, pan: 'IDLE', tilt: null });
+    const [streamError, setStreamError] = useState(false);
+    const imgRef = useRef(null);
     const [cameraCommandError, setCameraCommandError] = useState('');
     const robotMode = 'AUTO';
     const stateMachine = 'PATROL';
@@ -231,11 +233,22 @@ export default function App() {
                                 <div className="corner tr"></div>
                                 <div className="corner bl"></div>
                                 <div className="corner br"></div>
-                                <div className="error-message-container">
-                                    <span className="warning-icon">⚠</span>
-                                    <p className="main-msg">CAMERA FEED UNAVAILABLE</p>
-                                    <p className="sub-msg">Hardware pipeline active. Awaiting visual stream data sync...</p>
-                                </div>
+                                {streamError ? (
+                                    <div className="error-message-container">
+                                        <span className="warning-icon">⚠</span>
+                                        <p className="main-msg">CAMERA FEED UNAVAILABLE</p>
+                                        <p className="sub-msg">Hardware pipeline active. Awaiting visual stream data sync...</p>
+                                    </div>
+                                ) : (
+                                    <img
+                                        ref={imgRef}
+                                        src="/api/camera/stream"
+                                        alt="Camera Stream"
+                                        className="camera-stream-img"
+                                        onError={() => setStreamError(true)}
+                                        onLoad={() => setStreamError(false)}
+                                    />
+                                )}
                             </div>
                         </div>
                         <div className="camera-control-inline">
