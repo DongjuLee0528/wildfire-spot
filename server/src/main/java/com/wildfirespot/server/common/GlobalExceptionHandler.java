@@ -46,6 +46,12 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("UNAUTHORIZED", ex.getMessage()));
     }
 
+    @ExceptionHandler(AuthController.SignupConflictException.class)
+    public ResponseEntity<ErrorResponse> handleSignupConflict(AuthController.SignupConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("CONFLICT", ex.getMessage()));
+    }
+
     @ExceptionHandler(DeviceService.DeviceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleDeviceNotFound(DeviceService.DeviceNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)

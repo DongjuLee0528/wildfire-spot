@@ -40,8 +40,9 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Public: login only
+                        // Public: login and signup
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/signup").permitAll()
                         // Protected: current user info
                         .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
                         // Protected: robot control APIs
