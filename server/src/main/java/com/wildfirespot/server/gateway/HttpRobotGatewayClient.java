@@ -12,6 +12,9 @@ import org.springframework.web.client.RestClientException;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
+import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -286,6 +289,62 @@ public class HttpRobotGatewayClient implements RobotGatewayClient {
 
     private CameraStatusResponse fallbackCameraStatus() {
         return new CameraStatusResponse(false, "STOP", null);
+    }
+
+    @Override
+    public boolean isCameraStreamAvailable() {
+        try {
+            return Boolean.TRUE.equals(
+                    restClient.get()
+                            .uri("/robot/camera/stream")
+                            .exchange((request, response) -> {
+                                boolean ok = response.getStatusCode().is2xxSuccessful();
+                                response.getBody().close();
+                                return ok;
+                            })
+            );
+        } catch (RestClientException e) {
+            log.warn("GET /robot/camera/stream preflight failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public StreamingResponseBody streamCamera() {
+        return outputStream -> {
+            try {
+                restClient.get()
+                        .uri("/robot/camera/stream")
+                        .exchange((request, response) -> {
+                            if (!response.getStatusCode().is2xxSuccessful()) {
+                                throw new CameraStreamUnavailableException(response.getStatusCode().value());
+                            }
+                            try (InputStream in = response.getBody()) {
+                                byte[] buffer = new byte[4096];
+                                int read;
+                                while ((read = in.read(buffer)) != -1) {
+                                    outputStream.write(buffer, 0, read);
+                                    outputStream.flush();
+                                }
+                            }
+                            return null;
+                        });
+            } catch (CameraStreamUnavailableException e) {
+                log.warn("GET /robot/camera/stream upstream returned {}", e.statusCode);
+                throw new java.io.IOException("upstream status " + e.statusCode, e);
+            } catch (RestClientException e) {
+                log.error("GET /robot/camera/stream failed: {}", e.getMessage());
+                throw new java.io.IOException("upstream unavailable", e);
+            }
+        };
+    }
+
+    static final class CameraStreamUnavailableException extends RuntimeException {
+        final int statusCode;
+        CameraStreamUnavailableException(int statusCode) {
+            super("upstream status " + statusCode);
+            this.statusCode = statusCode;
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

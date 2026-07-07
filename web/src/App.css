@@ -33,9 +33,9 @@ body {
 .dashboard-container {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
-    padding: 16px;
-    gap: 16px;
+    height: 100vh;
+    padding: 12px;
+    gap: 10px;
     width: 100%;
     max-width: 100%;
 }
@@ -44,13 +44,14 @@ body {
 .dashboard-header {
     background-color: var(--bg-panel);
     border: 1px solid var(--border-color);
-    padding: 14px 20px;
+    padding: 8px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     border-radius: 4px;
     gap: 16px;
     min-width: 0;
+    flex-shrink: 0;
 }
 
 .header-brand {
@@ -113,17 +114,23 @@ body {
 /* --- Responsive Layout Grid (Desktop First) --- */
 .dashboard-grid {
     display: grid;
-    grid-template-columns: 320px minmax(0, 1fr) 340px;
-    gap: 16px;
+    grid-template-columns: 300px minmax(0, 1fr) 320px;
+    gap: 10px;
     flex-grow: 1;
+    min-height: 0;
     min-width: 0;
 }
 
 .grid-column {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
     min-width: 0;
+}
+
+.col-center {
+    height: 100%;
+    min-height: 0;
 }
 
 /* --- Standard Panel System Component --- */
@@ -148,7 +155,7 @@ body {
 }
 
 .panel-content {
-    padding: 14px;
+    padding: 10px 14px;
     flex-grow: 1;
 }
 
@@ -159,7 +166,8 @@ body {
 
 /* --- 2. Live Camera Viewport --- */
 .main-camera-panel {
-    flex-grow: 2;
+    flex-grow: 1;
+    min-height: 0;
 }
 
 .panel-header-actions {
@@ -185,9 +193,10 @@ body {
 .camera-viewport {
     background-color: #07090c;
     position: relative;
-    aspect-ratio: 16 / 9;
-    min-height: 380px;
+    flex-grow: 1;
+    min-height: 0;
     padding: 0;
+    overflow: hidden;
 }
 
 /* Future AI Box Layout Placement Simulation */
@@ -213,6 +222,13 @@ body {
 .ai-overlay-placeholder .tr { top: 15px; right: 15px; border-left: 0; border-bottom: 0; }
 .ai-overlay-placeholder .bl { bottom: 15px; left: 15px; border-right: 0; border-top: 0; }
 .ai-overlay-placeholder .br { bottom: 15px; right: 15px; border-left: 0; border-top: 0; }
+
+.camera-stream-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
 
 .error-message-container {
     text-align: center;
@@ -243,21 +259,22 @@ body {
 .center-bottom-split {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
+    gap: 10px;
+    flex-shrink: 0;
 }
 
 /* --- 3. Robot Status Sub-Layout --- */
 .status-grid {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
 }
 
 .data-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: 8px;
+    padding-bottom: 5px;
     border-bottom: 1px solid rgba(38, 50, 63, 0.4);
 }
 
@@ -328,7 +345,7 @@ body {
 }
 
 .mock-map-canvas {
-    height: 140px;
+    height: 110px;
     background-color: #11161d;
     border: 1px solid var(--border-color);
     position: relative;
@@ -405,13 +422,13 @@ body {
 .sensor-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
 }
 
 .sensor-item {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
 }
 
 .sensor-meta {
@@ -473,6 +490,11 @@ body {
     color: var(--warning);
 }
 
+.sensor-mini-card.flame-unknown {
+    border-color: rgba(138, 155, 168, 0.3);
+    background: rgba(138, 155, 168, 0.05);
+}
+
 .font-industrial {
     border-top: 1px solid var(--border-color);
     padding-top: 10px;
@@ -496,7 +518,7 @@ body {
 .fire-grid {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
     height: 100%;
     justify-content: center;
 }
@@ -504,7 +526,7 @@ body {
 .fire-card {
     background: rgba(255,255,255,0.01);
     border: 1px solid var(--border-color);
-    padding: 10px;
+    padding: 7px 10px;
     border-radius: 4px;
     display: flex;
     justify-content: space-between;
@@ -527,6 +549,11 @@ body {
 
 .fire-card.status-detected .fire-card-value {
     color: var(--warning);
+}
+
+.fire-card.status-unknown {
+    border-color: rgba(138, 155, 168, 0.3);
+    background: rgba(138, 155, 168, 0.05);
 }
 
 .fire-card.status-confirmed {
@@ -552,7 +579,7 @@ body {
 .health-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 7px;
 }
 
 .health-item {
@@ -614,6 +641,9 @@ body {
     color: #8a9ba8;
     font-size: 0.9rem;
     transition: all 0.1s ease;
+    cursor: pointer;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 .key-cap.esc {
@@ -671,15 +701,15 @@ body {
     border: 1px solid var(--border-color);
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    padding: 10px;
+    padding: 8px 10px;
     border-radius: 3px;
-    height: 130px;
-    max-height: 130px;
+    height: 100px;
+    max-height: 100px;
     overflow-y: auto;
     overflow-x: hidden;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
 }
 
 .log-line {
@@ -712,12 +742,83 @@ body {
 
 /* Global Utility Helper Typography Classes */
 .text-success { color: var(--success); }
+.text-error { color: var(--danger, #ef5350); }
 .text-highlight { color: var(--accent-color); font-weight: bold; }
 .text-active { color: #fff; background-color: rgba(0, 188, 212, 0.2); padding: 2px 6px; border-radius: 2px; }
 .subtext { color: var(--text-muted); font-size: 0.8rem; }
 
+/* --- Camera Control Inline (inside Camera Panel) --- */
+.camera-control-inline {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 5px 14px;
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.camera-stream-label {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.camera-d-pad {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: center;
+}
+
+.camera-d-pad-row {
+    display: flex;
+    gap: 3px;
+    justify-content: center;
+}
+
+.camera-btn {
+    border: 1px solid var(--border-color);
+    background-color: #192028;
+    color: var(--text-main);
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 3px 6px;
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    min-width: 62px;
+    text-align: center;
+    transition: background-color 0.1s;
+}
+
+.camera-btn:hover {
+    background-color: #26323f;
+}
+
+.camera-btn:active {
+    background-color: var(--accent-color);
+    color: #000;
+}
+
+.camera-shortcut-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    font-family: var(--font-mono);
+}
+
 /* --- Tablet / Mobile Optimization Viewport Query (Responsive Breakdowns) --- */
 @media (max-width: 1199px) {
+    .dashboard-container {
+        height: auto;
+        min-height: 100vh;
+    }
+
+    .col-center {
+        height: auto;
+    }
+
     .dashboard-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         align-items: start;
@@ -769,7 +870,7 @@ body {
     }
 
     .camera-viewport {
-        min-height: 280px;
+        max-height: 260px;
     }
 
     .log-terminal {
@@ -786,6 +887,8 @@ body {
 
 @media (max-width: 767px) {
     .dashboard-container {
+        height: auto;
+        min-height: 100vh;
         padding: 12px;
         gap: 12px;
     }
@@ -848,15 +951,15 @@ body {
         order: 6;
     }
 
-    .col-left > .panel:nth-child(3) {
+    .col-right > .panel:nth-child(3) {
         order: 7;
     }
 
-    .command-panel {
+    .col-left > .panel:nth-child(3) {
         order: 8;
     }
 
-    .col-right > .panel:nth-child(3) {
+    .command-panel {
         order: 9;
     }
 
@@ -875,7 +978,7 @@ body {
     }
 
     .camera-viewport {
-        min-height: 180px;
+        max-height: 200px;
     }
 
     .command-layout {

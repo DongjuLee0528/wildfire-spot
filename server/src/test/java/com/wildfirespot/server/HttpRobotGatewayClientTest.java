@@ -20,6 +20,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.io.ByteArrayOutputStream;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -669,5 +670,94 @@ class HttpRobotGatewayClientTest {
         assertThat(result.available()).isFalse();
         assertThat(result.pan()).isEqualTo("STOP");
         assertThat(result.tilt()).isNull();
+    }
+
+    @Test
+    void isCameraStreamAvailable_python2xx_returnsTrue() {
+        mockServer.expect(requestTo("/robot/camera/stream"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "--frame\r\nContent-Type: image/jpeg\r\n\r\nDATA\r\n",
+                        MediaType.parseMediaType("multipart/x-mixed-replace; boundary=frame")
+                ));
+
+        assertThat(client.isCameraStreamAvailable()).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    void isCameraStreamAvailable_python503_returnsFalse() {
+        mockServer.expect(requestTo("/robot/camera/stream"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE)
+                        .body("{\"error\":\"stream_unavailable\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        assertThat(client.isCameraStreamAvailable()).isFalse();
+        mockServer.verify();
+    }
+
+    @Test
+    void isCameraStreamAvailable_pythonUnavailable_returnsFalse() {
+        mockServer.expect(requestTo("/robot/camera/stream"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withServerError());
+
+        assertThat(client.isCameraStreamAvailable()).isFalse();
+        mockServer.verify();
+    }
+
+    @Test
+    void streamCamera_pythonAvailable_bytesActuallyReadable() throws Exception {
+        String mjpegData = "--frame\r\nContent-Type: image/jpeg\r\n\r\nFAKE_JPEG_DATA\r\n";
+        mockServer.expect(requestTo("/robot/camera/stream"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        mjpegData,
+                        MediaType.parseMediaType("multipart/x-mixed-replace; boundary=frame")
+                ));
+
+        org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody body = client.streamCamera();
+        assertThat(body).isNotNull();
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        body.writeTo(out);
+
+        assertThat(out.toByteArray()).isNotEmpty();
+        assertThat(out.toString()).contains("FAKE_JPEG_DATA");
+        mockServer.verify();
+    }
+
+    @Test
+    void streamCamera_pythonUnavailable_bodyThrowsIOException() {
+        mockServer.expect(requestTo("/robot/camera/stream"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withServerError());
+
+        org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody body = client.streamCamera();
+        assertThat(body).isNotNull();
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable call = () -> body.writeTo(out);
+        org.assertj.core.api.Assertions.assertThatThrownBy(call)
+                .isInstanceOf(java.io.IOException.class);
+    }
+
+    @Test
+    void streamCamera_python503_bodyThrowsIOException() throws Exception {
+        mockServer.expect(requestTo("/robot/camera/stream"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE)
+                        .body("{\"error\":\"stream_unavailable\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody body = client.streamCamera();
+        assertThat(body).isNotNull();
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable call = () -> body.writeTo(out);
+        org.assertj.core.api.Assertions.assertThatThrownBy(call)
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("503");
     }
 }

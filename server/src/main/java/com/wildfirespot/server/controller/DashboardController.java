@@ -4,8 +4,12 @@ import com.wildfirespot.server.common.CameraCommand;
 import com.wildfirespot.server.dto.*;
 import com.wildfirespot.server.service.DashboardService;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
 
 /**
  * REST controller that exposes robot dashboard endpoints to the web frontend.
@@ -88,5 +92,15 @@ public class DashboardController {
     @GetMapping("/camera/status")
     public ResponseEntity<CameraStatusResponse> getCameraStatus() {
         return ResponseEntity.ok(dashboardService.getCameraStatus());
+    }
+
+    @GetMapping("/camera/stream")
+    public ResponseEntity<StreamingResponseBody> getCameraStream() {
+        if (!dashboardService.isCameraStreamAvailable()) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("multipart/x-mixed-replace; boundary=frame"))
+                .body(dashboardService.getCameraStream());
     }
 }

@@ -8,6 +8,7 @@ Run with:
     uvicorn robot.robot_api:app --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import dataclasses
 import logging
 from contextlib import asynccontextmanager
@@ -16,7 +17,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ _manual_control_manager = None
 _mode_control_manager = None
 _patrol_zone_manager = None
 _camera_control_manager = None
+_camera_vision = None
 
 _CAMERA_COMMANDS = {
     "CAMERA_LEFT",
@@ -44,22 +46,34 @@ _PAN_STATE_MAP = {
 }
 
 
+_UNSET = object()
+
+
 def configure(
-    state_machine=None,
-    collector=None,
-    manual_control_manager=None,
-    mode_control_manager=None,
-    patrol_zone_manager=None,
-    camera_control_manager=None,
+    state_machine=_UNSET,
+    collector=_UNSET,
+    manual_control_manager=_UNSET,
+    mode_control_manager=_UNSET,
+    patrol_zone_manager=_UNSET,
+    camera_control_manager=_UNSET,
+    camera_vision=_UNSET,
 ):
     global _state_machine, _collector, _manual_control_manager
-    global _mode_control_manager, _patrol_zone_manager, _camera_control_manager
-    _state_machine = state_machine
-    _collector = collector
-    _manual_control_manager = manual_control_manager
-    _mode_control_manager = mode_control_manager
-    _patrol_zone_manager = patrol_zone_manager
-    _camera_control_manager = camera_control_manager
+    global _mode_control_manager, _patrol_zone_manager, _camera_control_manager, _camera_vision
+    if state_machine is not _UNSET:
+        _state_machine = state_machine
+    if collector is not _UNSET:
+        _collector = collector
+    if manual_control_manager is not _UNSET:
+        _manual_control_manager = manual_control_manager
+    if mode_control_manager is not _UNSET:
+        _mode_control_manager = mode_control_manager
+    if patrol_zone_manager is not _UNSET:
+        _patrol_zone_manager = patrol_zone_manager
+    if camera_control_manager is not _UNSET:
+        _camera_control_manager = camera_control_manager
+    if camera_vision is not _UNSET:
+        _camera_vision = camera_vision
 
 
 @asynccontextmanager
@@ -379,3 +393,49 @@ def get_camera_status():
     except Exception as e:
         logger.error("GET /robot/camera/status failed: %s", e)
         return {"available": False, "pan": "STOP", "tilt": None}
+
+
+@app.get("/robot/camera/stream")
+async def get_camera_stream():
+    try:
+        import cv2 as _cv2
+    except ImportError:
+        return JSONResponse(status_code=503, content={"error": "cv2_unavailable"})
+
+    if _camera_vision is None or not _camera_vision.is_camera_available():
+        return JSONResponse(status_code=503, content={"error": "stream_unavailable"})
+
+    async def _generate():
+        consecutive_failures = 0
+        _MAX_FAILURES = 30
+        while True:
+            try:
+                frame = _camera_vision.read_frame()
+            except Exception as e:
+                logger.warning("camera stream read_frame failed: %s", e)
+                break
+            if frame is not None:
+                consecutive_failures = 0
+                try:
+                    ok, buf = _cv2.imencode(".jpg", frame)
+                    if ok:
+                        data = buf.tobytes()
+                        yield (
+                            b"--frame\r\n"
+                            b"Content-Type: image/jpeg\r\n\r\n"
+                            + data
+                            + b"\r\n"
+                        )
+                except Exception as e:
+                    logger.warning("camera stream encode failed: %s", e)
+            else:
+                consecutive_failures += 1
+                if consecutive_failures >= _MAX_FAILURES:
+                    logger.warning("camera stream stopping: %d consecutive None frames", consecutive_failures)
+                    break
+            await asyncio.sleep(0.033)
+
+    return StreamingResponse(
+        _generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )

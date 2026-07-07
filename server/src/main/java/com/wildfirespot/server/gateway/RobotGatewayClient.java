@@ -5,6 +5,8 @@ import com.wildfirespot.server.common.ControlCommand;
 import com.wildfirespot.server.common.RobotMode;
 import com.wildfirespot.server.dto.*;
 
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
 /**
  * Gateway interface for all robot data and command operations.
  *
@@ -53,4 +55,10 @@ public interface RobotGatewayClient {
 
     /** Fetch the current camera pan/tilt status. */
     CameraStatusResponse getCameraStatus();
+
+    /** Check whether the robot camera MJPEG stream endpoint is reachable and returns 2xx. */
+    boolean isCameraStreamAvailable();
+
+    /** Open an MJPEG stream from the robot camera. Returns null if unavailable. */
+    StreamingResponseBody streamCamera();
 }
