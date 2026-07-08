@@ -16,8 +16,7 @@ import re
 import json
 from pathlib import Path
 from hardware.camera_control_manager import CameraControlManager
-from hardware.gps_manager import GPSManager
-from utils.config import PATROL_ZONE_MIN_POINTS
+from utils.config import PATROL_ZONE_MIN_POINTS, SPRING_TELEMETRY_ENABLED, SPRING_API_BASE_URL, DEVICE_SERIAL_NUMBER, DEVICE_KEY
 from utils.logger import WildfireLogger
 import robot.robot_api as robot_api
 
@@ -86,14 +85,15 @@ class PatrolZoneCalibrator:
     recording GPS waypoints to define the patrol zone polygon.
     """
 
-    def __init__(self, logger):
+    def __init__(self, logger, gps_manager):
         """
-        Initialize calibrator with GPS manager.
+        Initialize calibrator with a shared GPSManager from RobotRuntimeContext.
 
         Args:
             logger: WildfireLogger instance for logging calibration events
+            gps_manager: GPSManager instance owned by RobotRuntimeContext
         """
-        self._gps = GPSManager()
+        self._gps = gps_manager
         self._calibration_mode = False
         self._collected_points = []
         self.logger = logger
@@ -212,10 +212,13 @@ class PatrolZoneCalibrator:
         """Check if currently in calibration mode."""
         return self._calibration_mode
 
+    def get_gps_manager(self):
+        """Return the shared GPSManager instance."""
+        return self._gps
+
     def cleanup(self):
-        """Release GPS resources."""
-        if hasattr(self, '_gps') and self._gps is not None:
-            self._gps.close()
+        """GPS resources are owned by RobotRuntimeContext; nothing to release here."""
+        pass
 
 def main():
     """
@@ -228,9 +231,11 @@ def main():
     - 'q': Quit program
     """
     logger = None
+    runtime = None
     calibrator = None
     keyboard_input = None
     camera_control_manager = None
+    spring_telemetry = None
 
     # Initialize logger first
     try:
@@ -242,7 +247,11 @@ def main():
     # Initialize subsystems
     try:
         logger.log_system_state("STARTING")
-        calibrator = PatrolZoneCalibrator(logger)
+
+        from robot.robot_runtime_context import RobotRuntimeContext
+        runtime = RobotRuntimeContext()
+
+        calibrator = PatrolZoneCalibrator(logger, gps_manager=runtime.gps_manager)
         keyboard_input = KeyboardInput(logger)
 
         try:
@@ -252,6 +261,36 @@ def main():
         except Exception as e:
             logger.log_error("Main.camera_init", str(e))
             print(f"Camera control manager unavailable: {e}")
+
+        if SPRING_TELEMETRY_ENABLED:
+            try:
+                from robot.spring_api_client import SpringApiClient
+                from robot.spring_telemetry import SpringTelemetry
+
+                if not DEVICE_SERIAL_NUMBER or not DEVICE_KEY:
+                    print("SpringTelemetry: DEVICE_SERIAL_NUMBER or DEVICE_KEY not set — telemetry disabled")
+                    logger.log_error("Main.spring_telemetry", "Missing DEVICE_SERIAL_NUMBER or DEVICE_KEY")
+                else:
+                    from robot.robot_core_data_collector import RobotCoreDataCollector
+                    _collector = RobotCoreDataCollector.from_runtime_context(runtime)
+                    _spring_client = SpringApiClient(
+                        serial_number=DEVICE_SERIAL_NUMBER,
+                        device_key=DEVICE_KEY,
+                        base_url=SPRING_API_BASE_URL,
+                    )
+                    if _spring_client.login():
+                        spring_telemetry = SpringTelemetry(_spring_client, data_collector=_collector)
+                        spring_telemetry.start()
+                        print(f"SpringTelemetry: started (url={SPRING_API_BASE_URL})")
+                        logger.log_system_state("SPRING_TELEMETRY_STARTED")
+                    else:
+                        print(f"SpringTelemetry: device login failed — telemetry disabled")
+                        logger.log_error("Main.spring_telemetry", "Device login failed")
+            except Exception as e:
+                print(f"SpringTelemetry: failed to start — {e}")
+                logger.log_error("Main.spring_telemetry", str(e))
+        else:
+            print("SpringTelemetry: disabled (set SPRING_TELEMETRY_ENABLED=true to enable)")
 
         # Display control instructions
         print("Robot Control Interface")
@@ -292,12 +331,20 @@ def main():
         print(f"Failed to initialize: {e}")
     finally:
         # Clean up resources in reverse initialization order
+        if spring_telemetry is not None:
+            try:
+                spring_telemetry.stop()
+            except Exception:
+                pass
         if keyboard_input is not None:
             keyboard_input.restore()
-        if calibrator is not None:
-            calibrator.cleanup()
         if camera_control_manager is not None:
             camera_control_manager.close()
+        if runtime is not None:
+            try:
+                runtime.close()
+            except Exception:
+                pass
         if logger is not None:
             logger.log_system_state("STOPPED")
             logger.close()

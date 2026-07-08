@@ -14,3 +14,4 @@ keyboard>=0.13.5
 adafruit-circuitpython-dht
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
+requests>=2.31.0

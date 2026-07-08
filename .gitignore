@@ -11,6 +11,11 @@ __pycache__/
 
 # Environment
 .env
+server/.env
+.env.local
+.env.development.local
+.env.production.local
+.env.robot
 
 # Logs
 *.log
@@ -61,5 +66,3 @@ server/build/
 # Local Files
 config.txt
 sensor_manager.txt
-
-.env

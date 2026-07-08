@@ -75,8 +75,38 @@ class RobotCoreDataCollector(RobotDataCollector):
         self._fire_detector = fire_detector
         self._log_reader = log_reader
 
+    @classmethod
+    def from_runtime_context(cls, context, log_reader=None):
+        """
+        Construct a RobotCoreDataCollector from a RobotRuntimeContext.
+
+        This is the canonical factory used by main.py and SpringTelemetry so
+        that exactly one set of manager instances is ever referenced.
+
+        Args:
+            context: RobotRuntimeContext instance.
+            log_reader: Optional zero-argument callable returning list[dict].
+                        Defaults to returning an empty list.
+        """
+        return cls(
+            state_machine=context.state_machine,
+            gps_manager=context.gps_manager,
+            sensor_manager=context.sensor_manager,
+            lidar_manager=context.lidar_manager,
+            fire_detector=context.fire_detector,
+            log_reader=log_reader if log_reader is not None else (lambda: []),
+        )
+
     def get_status(self) -> RobotStatusData:
         """Read current state from StateMachine and return as RobotStatusData."""
+        if self._state_machine is None:
+            return RobotStatusData(
+                state="UNKNOWN",
+                mode=_FALLBACK_MODE,
+                robot_connected=True,
+                last_update=datetime.now(),
+            )
+
         try:
             state = self._state_machine.get_state().value
         except Exception as e:
@@ -96,49 +126,74 @@ class RobotCoreDataCollector(RobotDataCollector):
             last_update=datetime.now(),
         )
 
-    def get_gps(self) -> RobotGpsData:
-        """Read one GPS fix from GPSManager; fix=False when no valid NMEA sentence is available."""
-        latitude = 0.0
-        longitude = 0.0
-        fix = False
+    def get_gps(self):
+        """Read one GPS fix from GPSManager; returns None when manager is absent or no fix available."""
+        if self._gps_manager is None:
+            logger.debug("get_gps: GPS manager unavailable, skipping")
+            return None
 
         try:
             coordinates = self._gps_manager.get_location()
-            if coordinates is not None:
-                latitude, longitude = float(coordinates[0]), float(coordinates[1])
-                fix = True
         except Exception as e:
             logger.error("get_gps: gps_manager error: %s", e)
+            return None
+
+        if coordinates is None:
+            return None
+
+        try:
+            latitude = float(coordinates[0])
+            longitude = float(coordinates[1])
+        except (TypeError, ValueError, IndexError) as e:
+            logger.error("get_gps: invalid coordinates %r: %s", coordinates, e)
+            return None
 
         return RobotGpsData(
             latitude=latitude,
             longitude=longitude,
-            fix=fix,
+            fix=True,
             updated_at=datetime.now(),
         )
 
-    def get_sensors(self) -> RobotSensorData:
+    def get_sensors(self):
         """
         Read all environmental sensors and report LIDAR availability.
 
+        Returns None when sensor manager is absent or read fails entirely.
         Calls SensorManager.read_all() and maps the result into RobotSensorData.
         FlameStatus is populated from either a dict or an ordered iterable.
         lidar_status is set to 'SCANNING' if LidarManager is available, else 'UNAVAILABLE'.
         """
-        temperature = 0.0
-        humidity = 0.0
-        mq2_gas = 0
-        flame = FlameStatus(front_left=False, front_right=False, left=False, right=False)
-        lidar_status = _DEFAULT_LIDAR_STATUS
+        if self._sensor_manager is None:
+            logger.debug("get_sensors: sensor manager unavailable, skipping")
+            return None
 
         try:
             sensor_data = self._sensor_manager.read_all()
-            temperature = float(sensor_data.get("temperature", 0.0))
-            humidity = float(sensor_data.get("humidity", 0.0))
-            mq2_gas = int(sensor_data.get("smoke", 0))
+        except Exception as e:
+            logger.error("get_sensors: sensor_manager.read_all() error: %s", e)
+            return None
+        if not sensor_data:
+            return None
 
-            raw_flame = sensor_data.get("flame", {})
+        try:
+            raw_temperature = sensor_data.get("temperature")
+            raw_humidity = sensor_data.get("humidity")
+            raw_mq2_gas = sensor_data.get("smoke")
+            raw_flame = sensor_data.get("flame")
+
+            if raw_temperature is None or raw_humidity is None or raw_mq2_gas is None or raw_flame is None:
+                logger.debug("get_sensors: required sensor data unavailable, skipping")
+                return None
+
+            temperature = float(raw_temperature)
+            humidity = float(raw_humidity)
+            mq2_gas = int(raw_mq2_gas)
+
             if isinstance(raw_flame, dict):
+                if any(value is None for value in raw_flame.values()):
+                    logger.debug("get_sensors: flame sensor data partially unavailable, skipping")
+                    return None
                 flame = FlameStatus(
                     front_left=bool(raw_flame.get("front_left", False)),
                     front_right=bool(raw_flame.get("front_right", False)),
@@ -147,17 +202,26 @@ class RobotCoreDataCollector(RobotDataCollector):
                 )
             elif hasattr(raw_flame, "__iter__"):
                 values = list(raw_flame)
+                if len(values) < 4 or any(value is None for value in values[:4]):
+                    logger.debug("get_sensors: flame sensor data unavailable, skipping")
+                    return None
                 flame = FlameStatus(
                     front_left=bool(values[0]) if len(values) > 0 else False,
                     front_right=bool(values[1]) if len(values) > 1 else False,
                     left=bool(values[2]) if len(values) > 2 else False,
                     right=bool(values[3]) if len(values) > 3 else False,
                 )
+            else:
+                logger.debug("get_sensors: flame sensor data unavailable, skipping")
+                return None
         except Exception as e:
-            logger.error("get_sensors: sensor_manager error: %s", e)
+            logger.error("get_sensors: sensor data mapping error: %s", e)
+            return None
 
+        lidar_status = _DEFAULT_LIDAR_STATUS
         try:
-            lidar_status = "SCANNING" if self._lidar_manager.is_available() else "UNAVAILABLE"
+            if self._lidar_manager is not None:
+                lidar_status = "SCANNING" if self._lidar_manager.is_available() else "UNAVAILABLE"
         except Exception as e:
             logger.error("get_sensors: lidar_manager error: %s", e)
 
@@ -184,17 +248,20 @@ class RobotCoreDataCollector(RobotDataCollector):
         sensors = False
 
         try:
-            gps = self._gps_manager.is_available()
+            if self._gps_manager is not None:
+                gps = self._gps_manager.is_available()
         except Exception as e:
             logger.error("get_health: gps check error: %s", e)
 
         try:
-            lidar = self._lidar_manager.is_available()
+            if self._lidar_manager is not None:
+                lidar = self._lidar_manager.is_available()
         except Exception as e:
             logger.error("get_health: lidar check error: %s", e)
 
         try:
-            sensors = self._sensor_manager.is_available()
+            if self._sensor_manager is not None:
+                sensors = self._sensor_manager.is_available()
         except Exception as e:
             logger.error("get_health: sensor check error: %s", e)
 
@@ -206,21 +273,18 @@ class RobotCoreDataCollector(RobotDataCollector):
             sensors=sensors,
         )
 
-    def get_fire_status(self) -> RobotFireStatusData:
+    def get_fire_status(self):
         """
         Read the latest staged fire detection result from FireDetector.
 
+        Returns None when fire detector is absent.
         Uses public FireDetector methods: get_current_fire_state(),
         get_latest_alert_event(), get_latest_report_event().
         No sensor I/O is performed.
         """
-        state_str = "NORMAL"
-        suspected = False
-        verified = False
-        camera_detected = False
-        sensor_detected = False
-        latest_alert_event = None
-        latest_report_event = None
+        if self._fire_detector is None:
+            logger.debug("get_fire_status: fire detector unavailable, skipping")
+            return None
 
         try:
             from detection.fire_events import DetectionState
@@ -238,6 +302,7 @@ class RobotCoreDataCollector(RobotDataCollector):
             latest_report_event = self._fire_detector.get_latest_report_event()
         except Exception as e:
             logger.error("get_fire_status: fire_detector error: %s", e)
+            return None
 
         return RobotFireStatusData(
             state=state_str,

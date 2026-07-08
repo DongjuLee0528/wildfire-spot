@@ -148,10 +148,10 @@ class SensorManager:
 
         Returns:
             Average reading from available MQ2 sensors (0-65535 range)
-            Returns 0 if sensors unavailable or read fails
+            Returns None if sensors are unavailable or read fails
         """
         if not self._ads_available or not self._mq2_channels:
-            return 0
+            return None
         values = []
         for channel in self._mq2_channels:
             try:
@@ -159,7 +159,7 @@ class SensorManager:
             except (ValueError, RuntimeError, OSError, AttributeError) as e:
                 self.logger.log_error("SensorManager.read_mq2", str(e))
         if not values:
-            return 0
+            return None
         return int(sum(values) / len(values))
 
     def _init_mq2_adc(self, address, ads_attr, channel_attr):
@@ -192,10 +192,10 @@ class SensorManager:
 
         Returns:
             Tuple of (temperature in Celsius, relative humidity percentage)
-            Returns the previous valid reading or (0.0, 0.0) if unavailable or all reads fail
+            Returns the previous valid reading or None if unavailable or all reads fail
         """
         if not self._dht11_available or not hasattr(self, '_dht11'):
-            return self._last_dht11_reading or (0.0, 0.0)
+            return self._last_dht11_reading
 
         last_error = None
         for attempt in range(3):
@@ -212,22 +212,21 @@ class SensorManager:
                 time.sleep(1.0)
 
         self.logger.warning(f"SensorManager.read_dht11 failed after retries: {last_error}")
-        return self._last_dht11_reading or (0.0, 0.0)
+        return self._last_dht11_reading
 
     def read_ky026(self):
         """
         Read flame detection from KY-026 IR sensors.
 
         Returns:
-            List of 4 boolean values indicating flame detection for each sensor
+            Mapping of 4 boolean values indicating flame detection for each sensor
             True means flame detected in that direction
+            Returns None if GPIO is unavailable
             Note: KY-026 outputs LOW when flame detected, so we invert the reading
         """
         flame_detected = FlameReadings()
         if not self._gpio_available:
-            for position in self._ky026_pins:
-                flame_detected[position] = False
-            return flame_detected
+            return None
 
         for position, pin in self._ky026_pins.items():
             if pin is not None:
@@ -236,18 +235,19 @@ class SensorManager:
                     flame_detected[position] = not GPIO.input(pin)
                 except (ValueError, RuntimeError, AttributeError) as e:
                     self.logger.log_error("SensorManager.read_ky026", str(e))
-                    flame_detected[position] = False
+                    flame_detected[position] = None
             else:
-                flame_detected[position] = False
+                flame_detected[position] = None
         return flame_detected
 
     def _check_hardware_confirmation(self, smoke, temperature, humidity, flame):
-        flame_detected = any(flame.values()) if isinstance(flame, dict) else any(flame)
+        flame_values = [v for v in flame.values() if v is not None] if isinstance(flame, dict) else []
+        flame_detected = any(flame_values) if flame_values else None
         sensor_conditions = {
-            "flame": flame_detected,
-            "gas": smoke > MQ2_SMOKE_THRESHOLD,
-            "temperature": temperature > TEMP_THRESHOLD,
-            "humidity": humidity < HUMIDITY_THRESHOLD
+            "flame": flame_detected is True,
+            "gas": smoke is not None and smoke > MQ2_SMOKE_THRESHOLD,
+            "temperature": temperature is not None and temperature > TEMP_THRESHOLD,
+            "humidity": humidity is not None and humidity < HUMIDITY_THRESHOLD
         }
         fire_detected = any(sensor_conditions.values())
         confirmed_fire = flame_detected and any(
@@ -261,12 +261,12 @@ class SensorManager:
 
         Returns:
             Distance in centimeters (rounded to 2 decimal places)
-            Returns 0.0 if sensor unavailable, timeout, or read fails
+            Returns None if sensor unavailable, timeout, or read fails
 
         Uses timeout protection to prevent infinite loops if sensor fails.
         """
         if not self._gpio_available or HCSR04_TRIGGER_PIN is None or HCSR04_ECHO_PIN is None:
-            return 0.0
+            return None
 
         try:
             # Send 10μs trigger pulse
@@ -282,7 +282,7 @@ class SensorManager:
             while GPIO.input(HCSR04_ECHO_PIN) == 0:
                 pulse_start = time.time()
                 if time.time() - timeout_start > SENSOR_READ_TIMEOUT:
-                    return 0.0
+                    return None
                 time.sleep(0.0001)
 
             # Wait for echo to end with timeout protection
@@ -291,7 +291,7 @@ class SensorManager:
             while GPIO.input(HCSR04_ECHO_PIN) == 1:
                 pulse_end = time.time()
                 if time.time() - timeout_start > SENSOR_READ_TIMEOUT:
-                    return 0.0
+                    return None
                 time.sleep(0.0001)
 
             # Calculate distance from pulse duration
@@ -301,7 +301,7 @@ class SensorManager:
             return round(distance, 2)
         except (ValueError, RuntimeError, AttributeError) as e:
             self.logger.log_error("SensorManager.read_hcsr04", str(e))
-            return 0.0
+            return None
 
     def read_all(self):
         """
@@ -309,16 +309,17 @@ class SensorManager:
 
         Returns:
             Dictionary containing all sensor readings:
-            - smoke: MQ2 smoke level
-            - temperature: Temperature in Celsius
-            - humidity: Relative humidity percentage
-            - flame: List of 4 boolean flame detection values
-            - distance: Ultrasonic distance in cm
+            - smoke: MQ2 smoke level, or None when unavailable
+            - temperature: Temperature in Celsius, or None when unavailable
+            - humidity: Relative humidity percentage, or None when unavailable
+            - flame: Mapping of flame readings, or None when unavailable
+            - distance: Ultrasonic distance in cm, or None when unavailable
 
         Logs the readings for monitoring and debugging.
         """
         smoke = self.read_mq2()
-        temperature, humidity = self.read_dht11()
+        dht = self.read_dht11()
+        temperature, humidity = dht if dht is not None else (None, None)
         flame = self.read_ky026()
         distance = self.read_hcsr04()
         fire_detected, confirmed_fire = self._check_hardware_confirmation(smoke, temperature, humidity, flame)
@@ -328,7 +329,7 @@ class SensorManager:
             "temperature": temperature,
             "humidity": humidity,
             "flame": flame,
-            "flame_list": list(flame.values()),
+            "flame_list": list(flame.values()) if flame is not None else None,
             "gas": smoke,
             "fire_detected": fire_detected,
             "confirmed_fire": confirmed_fire,
