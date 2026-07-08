@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-export default function App() {
+const JWT_KEY = 'jwt_token';
+const getToken = () => localStorage.getItem(JWT_KEY);
+
+export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevice }) {
     const [currentTime, setCurrentTime] = useState(new Date().toISOString());
     const [currentKeyCommand, setCurrentKeyCommand] = useState('STOP');
     const CAMERA_FALLBACK = { available: false, pan: 'UNKNOWN', tilt: null };
@@ -9,27 +12,129 @@ export default function App() {
     const imgRef = useRef(null);
     const [cameraCommandError, setCameraCommandError] = useState('');
     const [controlError, setControlError] = useState('');
-    const STATUS_FALLBACK = { state: '...', mode: '...', robotConnected: null, lastUpdate: null };
+    const STATUS_FALLBACK = { online: null, mode: null, robotState: null, batteryLevel: null, lastSeenAt: null };
     const [robotStatus, setRobotStatus] = useState(STATUS_FALLBACK);
     const GPS_FALLBACK = { latitude: null, longitude: null, fix: null };
     const [gpsData, setGpsData] = useState(GPS_FALLBACK);
     const SENSOR_FALLBACK = {
-        temperature: null, humidity: null, mq2Gas: null,
-        flame: { frontLeft: null, frontRight: null, left: null, right: null },
-        lidarStatus: null,
+        temperature: null, humidity: null, smokeLevel: null, gasLevel: null, flameDetected: null,
     };
     const [sensorData, setSensorData] = useState(SENSOR_FALLBACK);
-    const FIRE_FALLBACK = { sensorDetected: null, cameraDetected: null, verified: null };
+    const FIRE_FALLBACK = { fireDetected: null, confidence: null, severity: null, source: null };
     const [fireData, setFireData] = useState(FIRE_FALLBACK);
+
+    const [activeMission, setActiveMission] = useState(null);
+    const [missionHistory, setMissionHistory] = useState([]);
+    const [missionLoading, setMissionLoading] = useState(false);
+    const [missionError, setMissionError] = useState('');
+    const [missionNameInput, setMissionNameInput] = useState('');
+    const [missionTypeInput, setMissionTypeInput] = useState('PATROL');
+
+    const fetchMissionData = () => {
+        const token = getToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        Promise.all([
+            fetch('/api/missions/active', { headers }).then((r) => {
+                if (r.status === 401 || r.status === 403) { onLogout && onLogout(); throw new Error('Unauthorized'); }
+                if (r.status === 404) return null;
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json().catch(() => null);
+            }),
+            fetch('/api/missions', { headers }).then((r) => {
+                if (r.status === 401 || r.status === 403) { onLogout && onLogout(); throw new Error('Unauthorized'); }
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json().catch(() => []);
+            }),
+        ])
+            .then(([active, history]) => {
+                setActiveMission(active ?? null);
+                setMissionHistory(Array.isArray(history) ? history : []);
+                setMissionError('');
+            })
+            .catch((err) => {
+                if (err.message !== 'Unauthorized') setMissionError(err.message || 'Failed to load missions');
+            });
+    };
+
+    const startMission = () => {
+        if (!activeDevice) return;
+        const token = getToken();
+        const headers = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+        const body = JSON.stringify({
+            deviceId: activeDevice.id,
+            missionName: missionNameInput.trim() || 'Patrol Mission',
+            missionType: missionTypeInput.trim() || 'PATROL',
+        });
+        setMissionLoading(true);
+        setMissionError('');
+        fetch('/api/missions/start', { method: 'POST', headers, body })
+            .then((r) => {
+                if (r.status === 401 || r.status === 403) { onLogout && onLogout(); throw new Error('Unauthorized'); }
+                if (!r.ok) return r.json().then((b) => { throw new Error(b?.message || `HTTP ${r.status}`); }).catch((e) => { throw e instanceof SyntaxError ? new Error(`HTTP ${r.status}`) : e; });
+                return r.json();
+            })
+            .then(() => { setMissionNameInput(''); fetchMissionData(); })
+            .catch((err) => { if (err.message !== 'Unauthorized') setMissionError(err.message || 'Failed to start mission'); })
+            .finally(() => setMissionLoading(false));
+    };
+
+    const finishMission = () => {
+        if (!activeMission) return;
+        const token = getToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        setMissionLoading(true);
+        setMissionError('');
+        fetch(`/api/missions/${activeMission.id}/finish`, { method: 'POST', headers })
+            .then((r) => {
+                if (r.status === 401 || r.status === 403) { onLogout && onLogout(); throw new Error('Unauthorized'); }
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(() => fetchMissionData())
+            .catch((err) => { if (err.message !== 'Unauthorized') setMissionError(err.message || 'Failed to finish mission'); })
+            .finally(() => setMissionLoading(false));
+    };
+
+    const cancelMission = () => {
+        if (!activeMission) return;
+        if (!window.confirm(`Cancel mission "${activeMission.missionName}"?`)) return;
+        const token = getToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        setMissionLoading(true);
+        setMissionError('');
+        fetch(`/api/missions/${activeMission.id}/cancel`, { method: 'POST', headers })
+            .then((r) => {
+                if (r.status === 401 || r.status === 403) { onLogout && onLogout(); throw new Error('Unauthorized'); }
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(() => fetchMissionData())
+            .catch((err) => { if (err.message !== 'Unauthorized') setMissionError(err.message || 'Failed to cancel mission'); })
+            .finally(() => setMissionLoading(false));
+    };
 
     const fetchWithTimeout = (url, options = {}, timeoutMs = 5000) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
-        return fetch(url, { ...options, signal: controller.signal })
+        const token = getToken();
+        const headers = {
+            ...(options.headers || {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
+        return fetch(url, { ...options, headers, signal: controller.signal })
             .finally(() => clearTimeout(timer));
     };
 
+    const handleUnauthorized = (res) => {
+        if (res.status === 401 || res.status === 403) {
+            onLogout && onLogout();
+            throw new Error('Unauthorized');
+        }
+        return res;
+    };
+
     const readJsonResponse = (res) => {
+        handleUnauthorized(res);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json().catch(() => {
             throw new Error('Malformed JSON');
@@ -47,34 +152,47 @@ export default function App() {
         };
     };
 
-    const fetchRobotStatus = () => (
-        fetchWithTimeout('/api/status')
-            .then(readJsonResponse)
+    const fetchRobotStatus = () => {
+        if (!activeDevice) return;
+        fetchWithTimeout(`/api/devices/${activeDevice.id}`)
+            .then((res) => {
+                handleUnauthorized(res);
+                if (res.status === 404) { setRobotStatus(STATUS_FALLBACK); return null; }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json().catch(() => null);
+            })
             .then((data) => {
                 if (!data || typeof data !== 'object') return;
                 setRobotStatus({
-                    state: typeof data.state === 'string' ? data.state : '...',
-                    mode: typeof data.mode === 'string' ? data.mode : '...',
-                    robotConnected: typeof data.robotConnected === 'boolean' ? data.robotConnected : null,
-                    lastUpdate: data.lastUpdate ?? null,
+                    online: typeof data.online === 'boolean' ? data.online : null,
+                    mode: typeof data.mode === 'string' ? data.mode : null,
+                    robotState: typeof data.robotState === 'string' ? data.robotState : null,
+                    batteryLevel: typeof data.batteryLevel === 'number' ? data.batteryLevel : null,
+                    lastSeenAt: data.lastSeenAt ?? null,
                 });
             })
-            .catch((err) => console.error('Robot status fetch failed:', err))
-    );
+            .catch((err) => console.error('Robot status fetch failed:', err));
+    };
 
-    const fetchGps = () => (
-        fetchWithTimeout('/api/gps')
-            .then(readJsonResponse)
+    const fetchGps = () => {
+        if (!activeDevice) return;
+        fetchWithTimeout(`/api/devices/${activeDevice.id}/gps/latest`)
+            .then((res) => {
+                handleUnauthorized(res);
+                if (res.status === 404) { setGpsData(GPS_FALLBACK); return null; }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json().catch(() => null);
+            })
             .then((data) => {
                 if (!data || typeof data !== 'object') return;
                 setGpsData({
                     latitude: typeof data.latitude === 'number' ? data.latitude : null,
                     longitude: typeof data.longitude === 'number' ? data.longitude : null,
-                    fix: typeof data.fix === 'boolean' ? data.fix : null,
+                    fix: data.latitude != null && data.longitude != null,
                 });
             })
-            .catch((err) => console.error('GPS fetch failed:', err))
-    );
+            .catch((err) => console.error('GPS fetch failed:', err));
+    };
 
     const fetchCameraStatus = () => (
         fetchWithTimeout('/api/camera/status')
@@ -87,56 +205,75 @@ export default function App() {
     );
 
     useEffect(() => {
+        fetchMissionData();
+    }, []);
+
+    useEffect(() => {
+        setRobotStatus(STATUS_FALLBACK);
         fetchRobotStatus();
         const statusTimer = setInterval(fetchRobotStatus, 5000);
         return () => clearInterval(statusTimer);
-    }, []);
+    }, [activeDevice?.id]);
 
     useEffect(() => {
+        setGpsData(GPS_FALLBACK);
         fetchGps();
-        const gpsTimer = setInterval(fetchGps, 3000);
+        const gpsTimer = setInterval(fetchGps, 5000);
         return () => clearInterval(gpsTimer);
-    }, []);
+    }, [activeDevice?.id]);
 
     useEffect(() => {
-        const fetchSensors = () => (
-            fetchWithTimeout('/api/sensors')
-                .then(readJsonResponse)
+        setSensorData(SENSOR_FALLBACK);
+        if (!activeDevice) return;
+        const fetchSensors = () =>
+            fetchWithTimeout(`/api/devices/${activeDevice.id}/sensors/latest`)
+                .then((res) => {
+                    handleUnauthorized(res);
+                    if (res.status === 404) { setSensorData(SENSOR_FALLBACK); return null; }
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json().catch(() => null);
+                })
                 .then((data) => {
                     if (!data || typeof data !== 'object') return;
                     setSensorData({
                         temperature: typeof data.temperature === 'number' ? data.temperature : null,
                         humidity: typeof data.humidity === 'number' ? data.humidity : null,
-                        mq2Gas: typeof data.mq2Gas === 'number' ? data.mq2Gas : null,
-                        flame: data.flame && typeof data.flame === 'object' ? data.flame : SENSOR_FALLBACK.flame,
-                        lidarStatus: typeof data.lidarStatus === 'string' ? data.lidarStatus : null,
+                        smokeLevel: typeof data.smokeLevel === 'number' ? data.smokeLevel : null,
+                        gasLevel: typeof data.gasLevel === 'number' ? data.gasLevel : null,
+                        flameDetected: typeof data.flameDetected === 'boolean' ? data.flameDetected : null,
                     });
                 })
-                .catch((err) => console.error('Sensor fetch failed:', err))
-        );
+                .catch((err) => console.error('Sensor fetch failed:', err));
         fetchSensors();
-        const sensorTimer = setInterval(fetchSensors, 4000);
+        const sensorTimer = setInterval(fetchSensors, 5000);
         return () => clearInterval(sensorTimer);
-    }, []);
+    }, [activeDevice?.id]);
 
     useEffect(() => {
-        const fetchFireStatus = () => (
-            fetchWithTimeout('/api/fire/status')
-                .then(readJsonResponse)
+        setFireData(FIRE_FALLBACK);
+        if (!activeDevice) return;
+        const fetchFireStatus = () =>
+            fetchWithTimeout(`/api/devices/${activeDevice.id}/fire-events/latest`)
+                .then((res) => {
+                    handleUnauthorized(res);
+                    if (res.status === 404) { setFireData(FIRE_FALLBACK); return null; }
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json().catch(() => null);
+                })
                 .then((data) => {
                     if (!data || typeof data !== 'object') return;
                     setFireData({
-                        sensorDetected: typeof data.sensorDetected === 'boolean' ? data.sensorDetected : null,
-                        cameraDetected: typeof data.cameraDetected === 'boolean' ? data.cameraDetected : null,
-                        verified: typeof data.verified === 'boolean' ? data.verified : null,
+                        fireDetected: typeof data.fireDetected === 'boolean' ? data.fireDetected : null,
+                        confidence: typeof data.confidence === 'number' ? data.confidence : null,
+                        severity: typeof data.severity === 'string' ? data.severity : null,
+                        source: typeof data.source === 'string' ? data.source : null,
                     });
                 })
-                .catch((err) => console.error('Fire status fetch failed:', err))
-        );
+                .catch((err) => console.error('Fire status fetch failed:', err));
         fetchFireStatus();
-        const fireTimer = setInterval(fetchFireStatus, 4000);
+        const fireTimer = setInterval(fetchFireStatus, 5000);
         return () => clearInterval(fireTimer);
-    }, []);
+    }, [activeDevice?.id]);
 
     useEffect(() => {
         fetchCameraStatus();
@@ -257,35 +394,174 @@ export default function App() {
                     <div className="status-item timestamp">
                         {currentTime}
                     </div>
+                    <div className="active-device-indicator">
+                        <span className="status-label">DEVICE:</span>
+                        {activeDevice ? (
+                            <span className="status-value text-highlight active-device-name">{activeDevice.name}</span>
+                        ) : (
+                            <button className="active-device-none" onClick={onNavigateDevice}>No device selected</button>
+                        )}
+                    </div>
+                    <button className="nav-btn" onClick={() => onNavigate && onNavigate('/device')}>Devices</button>
+                    <button className="logout-btn" onClick={onLogout}>LOGOUT</button>
                 </div>
             </header>
 
             <main className="dashboard-grid">
 
                 <section className="grid-column col-left">
+                    <div className="panel">
+                        <h2 className="panel-title">Mission Control</h2>
+                        <div className="panel-content mission-panel-content">
+                            <div className="mission-device-row">
+                                <span className="label">Device</span>
+                                {activeDevice ? (
+                                    <span className="value text-highlight">{activeDevice.name}</span>
+                                ) : (
+                                    <button className="active-device-none" onClick={onNavigateDevice}>No device selected</button>
+                                )}
+                            </div>
+
+                            {missionError && <div className="mission-error">{missionError}</div>}
+
+                            {activeMission ? (
+                                <div className="mission-active-card">
+                                    <div className="mission-active-header">
+                                        <span className="mission-active-label">ACTIVE</span>
+                                        <span className={`mission-status-badge mission-status-${activeMission.status.toLowerCase()}`}>{activeMission.status}</span>
+                                    </div>
+                                    <div className="data-row">
+                                        <span className="label">Name</span>
+                                        <span className="value">{activeMission.missionName}</span>
+                                    </div>
+                                    <div className="data-row">
+                                        <span className="label">Type</span>
+                                        <span className="value text-highlight">{activeMission.missionType}</span>
+                                    </div>
+                                    <div className="data-row">
+                                        <span className="label">Started</span>
+                                        <span className="value subtext">{new Date(activeMission.startedAt).toLocaleTimeString()}</span>
+                                    </div>
+                                    {activeMission.durationSeconds != null && (
+                                        <div className="data-row">
+                                            <span className="label">Duration</span>
+                                            <span className="value subtext">{activeMission.durationSeconds}s</span>
+                                        </div>
+                                    )}
+                                    <div className="mission-action-row">
+                                        <button
+                                            className="mission-btn mission-btn-finish"
+                                            onClick={finishMission}
+                                            disabled={missionLoading}
+                                        >
+                                            {missionLoading ? '...' : 'Finish'}
+                                        </button>
+                                        <button
+                                            className="mission-btn mission-btn-cancel"
+                                            onClick={cancelMission}
+                                            disabled={missionLoading}
+                                        >
+                                            {missionLoading ? '...' : 'Cancel'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="mission-start-form">
+                                    <div className="auth-field">
+                                        <label className="auth-label">Mission Name</label>
+                                        <input
+                                            className="auth-input mission-input"
+                                            type="text"
+                                            placeholder="Patrol Mission"
+                                            value={missionNameInput}
+                                            onChange={(e) => setMissionNameInput(e.target.value)}
+                                            disabled={!activeDevice || missionLoading}
+                                        />
+                                    </div>
+                                    <div className="auth-field">
+                                        <label className="auth-label">Mission Type</label>
+                                        <select
+                                            className="auth-input mission-input"
+                                            value={missionTypeInput}
+                                            onChange={(e) => setMissionTypeInput(e.target.value)}
+                                            disabled={!activeDevice || missionLoading}
+                                        >
+                                            <option value="PATROL">PATROL</option>
+                                            <option value="SURVEY">SURVEY</option>
+                                            <option value="INSPECTION">INSPECTION</option>
+                                            <option value="EMERGENCY">EMERGENCY</option>
+                                        </select>
+                                    </div>
+                                    <button
+                                        className="mission-btn mission-btn-start"
+                                        onClick={startMission}
+                                        disabled={!activeDevice || missionLoading}
+                                    >
+                                        {missionLoading ? 'Starting...' : 'Start Mission'}
+                                    </button>
+                                </div>
+                            )}
+
+                            <div className="mission-history-section">
+                                <span className="mission-history-title">Recent Missions</span>
+                                {missionHistory.length === 0 ? (
+                                    <div className="mission-empty">No missions recorded.</div>
+                                ) : (
+                                    <div className="mission-history-list">
+                                        {missionHistory.slice(0, 5).map((m) => (
+                                            <div key={m.id} className="mission-history-item">
+                                                <div className="mission-history-top">
+                                                    <span className="mission-history-name">{m.missionName}</span>
+                                                    <span className={`mission-status-badge mission-status-${m.status.toLowerCase()}`}>{m.status}</span>
+                                                </div>
+                                                <div className="mission-history-meta">
+                                                    <span className="subtext">{m.missionType}</span>
+                                                    {m.durationSeconds != null && (
+                                                        <span className="subtext">{m.durationSeconds}s</span>
+                                                    )}
+                                                    <span className="subtext">{new Date(m.startedAt).toLocaleString()}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="panel animate-border">
                         <h2 className="panel-title">Robot Status</h2>
                         <div className="panel-content status-grid">
-                            <div className="data-row">
-                                <span className="label">Mode</span>
-                                <span className="value">{robotStatus.mode}</span>
-                            </div>
-                            <div className="data-row">
-                                <span className="label">StateMachine</span>
-                                <span className="value text-highlight">{robotStatus.state}</span>
-                            </div>
-                            <div className="data-row">
-                                <span className="label">Robot Connection</span>
-                                <span className={`value ${robotStatus.robotConnected === true ? 'text-success' : robotStatus.robotConnected === false ? 'text-error' : ''}`}>
-                                    {robotStatus.robotConnected === null ? '...' : robotStatus.robotConnected ? 'ONLINE' : 'OFFLINE'}
-                                </span>
-                            </div>
-                            <div className="data-row">
-                                <span className="label">Last Update</span>
-                                <span className="value subtext">
-                                    {robotStatus.lastUpdate ? new Date(robotStatus.lastUpdate).toLocaleTimeString() : '...'}
-                                </span>
-                            </div>
+                            {!activeDevice ? (
+                                <div className="data-row"><span className="label subtext">No device selected</span></div>
+                            ) : (
+                                <>
+                                    <div className="data-row">
+                                        <span className="label">Connection</span>
+                                        <span className={`value ${robotStatus.online === true ? 'text-success' : robotStatus.online === false ? 'text-error' : ''}`}>
+                                            {robotStatus.online === null ? '...' : robotStatus.online ? 'ONLINE' : 'OFFLINE'}
+                                        </span>
+                                    </div>
+                                    <div className="data-row">
+                                        <span className="label">Mode</span>
+                                        <span className="value">{robotStatus.mode ?? '...'}</span>
+                                    </div>
+                                    <div className="data-row">
+                                        <span className="label">State</span>
+                                        <span className="value text-highlight">{robotStatus.robotState ?? '...'}</span>
+                                    </div>
+                                    <div className="data-row">
+                                        <span className="label">Battery</span>
+                                        <span className="value">{robotStatus.batteryLevel !== null ? `${robotStatus.batteryLevel.toFixed(1)} %` : '...'}</span>
+                                    </div>
+                                    <div className="data-row">
+                                        <span className="label">Last Seen</span>
+                                        <span className="value subtext">
+                                            {robotStatus.lastSeenAt ? new Date(robotStatus.lastSeenAt).toLocaleTimeString() : '...'}
+                                        </span>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
 
@@ -422,20 +698,27 @@ export default function App() {
                         <div className="panel fire-status-panel">
                             <h2 className="panel-title">Analysis & Verification Status</h2>
                             <div className="panel-content fire-grid">
-                                {[
-                                    { label: 'Hardware Confirmed', val: fireData.sensorDetected },
-                                    { label: 'Camera Detected', val: fireData.cameraDetected },
-                                    { label: 'Final Confirmed Fire', val: fireData.verified },
-                                ].map((item) => {
-                                    const level = item.val === null ? 'unknown' : item.val ? 'detected' : 'clear';
-                                    const text = item.val === null ? '...' : item.val ? 'DETECTED' : 'CLEAR';
-                                    return (
-                                        <div key={item.label} className={`fire-card status-${level}`}>
-                                            <span className="fire-card-label">{item.label}</span>
-                                            <span className="fire-card-value">{text}</span>
+                                {!activeDevice ? (
+                                    <div className="fire-card status-unknown">
+                                        <span className="fire-card-label">No device selected</span>
+                                        <span className="fire-card-value">—</span>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className={`fire-card status-${fireData.fireDetected === null ? 'unknown' : fireData.fireDetected ? 'detected' : 'clear'}`}>
+                                            <span className="fire-card-label">Fire Detected</span>
+                                            <span className="fire-card-value">{fireData.fireDetected === null ? '...' : fireData.fireDetected ? 'DETECTED' : 'CLEAR'}</span>
                                         </div>
-                                    );
-                                })}
+                                        <div className="fire-card status-unknown">
+                                            <span className="fire-card-label">Confidence</span>
+                                            <span className="fire-card-value">{fireData.confidence !== null ? `${(fireData.confidence * 100).toFixed(0)}%` : '...'}</span>
+                                        </div>
+                                        <div className="fire-card status-unknown">
+                                            <span className="fire-card-label">Severity</span>
+                                            <span className="fire-card-value">{fireData.severity ?? '...'}</span>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -465,33 +748,21 @@ export default function App() {
                             </div>
                             <div className="sensor-item">
                                 <div className="sensor-meta">
-                                    <span className="sensor-name">MQ-2 Gas Sensor</span>
-                                    <span className={`sensor-val ${sensorData.mq2Gas !== null && sensorData.mq2Gas < 300 ? 'text-success' : sensorData.mq2Gas !== null ? 'text-error' : ''}`}>
-                                        {sensorData.mq2Gas !== null ? `${sensorData.mq2Gas} ppm${sensorData.mq2Gas < 300 ? ' (Safe)' : ' (Alert)'}` : 'N/A'}
+                                    <span className="sensor-name">Smoke / Gas (MQ-2)</span>
+                                    <span className={`sensor-val ${sensorData.smokeLevel !== null && sensorData.smokeLevel < 300 ? 'text-success' : sensorData.smokeLevel !== null ? 'text-error' : ''}`}>
+                                        {sensorData.smokeLevel !== null ? `${sensorData.smokeLevel.toFixed(0)} ppm${sensorData.smokeLevel < 300 ? ' (Safe)' : ' (Alert)'}` : 'N/A'}
                                     </span>
                                 </div>
-                                <div className="sensor-bar-bg"><div className="sensor-bar-fill safe" style={{width: sensorData.mq2Gas !== null ? `${Math.min(sensorData.mq2Gas / 1000 * 100, 100).toFixed(1)}%` : '0%'}}></div></div>
+                                <div className="sensor-bar-bg"><div className="sensor-bar-fill safe" style={{width: sensorData.smokeLevel !== null ? `${Math.min(sensorData.smokeLevel / 1000 * 100, 100).toFixed(1)}%` : '0%'}}></div></div>
                             </div>
                             <div className="sensor-grid-2x2">
-                                {[
-                                    { label: 'Flame Front Left', val: sensorData.flame.frontLeft },
-                                    { label: 'Flame Front Right', val: sensorData.flame.frontRight },
-                                    { label: 'Flame Left', val: sensorData.flame.left },
-                                    { label: 'Flame Right', val: sensorData.flame.right },
-                                ].map((sensor) => {
-                                    const status = sensor.val === null ? 'unknown' : sensor.val ? 'detected' : 'clear';
-                                    return (
-                                        <div key={sensor.label} className={`sensor-mini-card flame-${status}`}>
-                                            <span className="mini-lbl">{sensor.label}</span>
-                                            <span className="mini-val">{sensor.val === null ? '...' : sensor.val ? 'DETECTED' : 'CLEAR'}</span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                            <div className="sensor-item font-industrial">
-                                <div className="sensor-meta">
-                                    <span className="sensor-name">LiDAR Node Status</span>
-                                    <span className="status-text-badge">{sensorData.lidarStatus ?? '...'}</span>
+                                <div className={`sensor-mini-card flame-${sensorData.flameDetected === null ? 'unknown' : sensorData.flameDetected ? 'detected' : 'clear'}`}>
+                                    <span className="mini-lbl">Flame Sensor</span>
+                                    <span className="mini-val">{sensorData.flameDetected === null ? '...' : sensorData.flameDetected ? 'DETECTED' : 'CLEAR'}</span>
+                                </div>
+                                <div className="sensor-mini-card flame-unknown">
+                                    <span className="mini-lbl">Gas Level</span>
+                                    <span className="mini-val">{sensorData.gasLevel !== null ? sensorData.gasLevel.toFixed(0) : '...'}</span>
                                 </div>
                             </div>
                         </div>
