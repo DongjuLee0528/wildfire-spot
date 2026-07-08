@@ -53,6 +53,15 @@ public class JwtProvider {
         }
     }
 
+    public boolean isUserToken(String token) {
+        try {
+            Object tokenType = parse(token).get("tokenType");
+            return tokenType == null || !tokenType.equals("DEVICE");
+        } catch (JwtException | IllegalArgumentException e) {
+            return false;
+        }
+    }
+
     private io.jsonwebtoken.Claims parse(String token) {
         return Jwts.parser()
                 .verifyWith(key)
