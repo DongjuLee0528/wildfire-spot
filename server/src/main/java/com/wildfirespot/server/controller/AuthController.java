@@ -37,9 +37,9 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
-        User user = userRepository.findByUsername(request.username())
+        User user = userRepository.findByEmail(request.email())
                 .filter(u -> passwordEncoder.matches(request.password(), u.encodedPassword()))
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid username or password"));
+                .orElseThrow(() -> new InvalidCredentialsException("Invalid email or password"));
 
         String token = jwtProvider.generate(user.username(), user.role());
         return ResponseEntity.ok(new LoginResponse(token));
