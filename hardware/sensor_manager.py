@@ -96,8 +96,10 @@ class SensorManager:
         if self._i2c is not None:
             if ADS is None or AnalogIn is None:
                 self.logger.log_error("SensorManager.ADS1115_init", "ADS1115 modules are not available")
-            elif not hasattr(ADS, 'P0'):
-                self.logger.log_error("SensorManager.ADS1115_init", "adafruit_ads1x15.ads1115 has no attribute 'P0' - library version incompatible")
+            elif Pin is None:
+                self.logger.log_error("SensorManager.ADS1115_init", "ADS1115 Pin API is not available")
+            elif not hasattr(Pin, 'A0'):
+                self.logger.log_error("SensorManager.ADS1115_init", "ADS1115 Pin API has no A0 channel")
             else:
                 self._init_mq2_adc(ADS1115_MQ2_1, "_ads1_1", "_mq2_chan1")
                 self._init_mq2_adc(ADS1115_MQ2_2, "_ads1_2", "_mq2_chan2")
