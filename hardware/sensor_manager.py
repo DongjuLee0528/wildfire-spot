@@ -18,9 +18,11 @@ import time
 
 try:
     import adafruit_ads1x15.ads1115 as ADS
+    from adafruit_ads1x15.ads1x15 import Pin
     from adafruit_ads1x15.analog_in import AnalogIn
 except ImportError:
     ADS = None
+    Pin = None
     AnalogIn = None
 
 try:
@@ -169,7 +171,7 @@ class SensorManager:
             return
         try:
             ads = ADS.ADS1115(self._i2c, address=address)
-            channel = AnalogIn(ads, ADS.P0)
+            channel = AnalogIn(ads, Pin.A0)
             setattr(self, ads_attr, ads)
             setattr(self, channel_attr, channel)
             self._mq2_channels.append(channel)
