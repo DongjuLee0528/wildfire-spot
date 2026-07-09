@@ -7,6 +7,7 @@ Provides keyboard-based control for:
 - Manual robot control
 """
 
+import os
 import sys
 import termios
 import tty
@@ -14,11 +15,34 @@ import select
 import time
 import re
 import json
+import threading
 from pathlib import Path
 from hardware.camera_control_manager import CameraControlManager
 from utils.config import PATROL_ZONE_MIN_POINTS, SPRING_TELEMETRY_ENABLED, SPRING_API_BASE_URL, DEVICE_SERIAL_NUMBER, DEVICE_KEY
 from utils.logger import WildfireLogger
 import robot.robot_api as robot_api
+
+
+def _start_robot_api_server(logger):
+    host = os.environ.get("ROBOT_API_HOST", "0.0.0.0")
+    port = int(os.environ.get("ROBOT_API_PORT", "8000"))
+    try:
+        import uvicorn
+        config = uvicorn.Config(
+            app=robot_api.app,
+            host=host,
+            port=port,
+            log_level="warning",
+        )
+        server = uvicorn.Server(config)
+        thread = threading.Thread(target=server.run, daemon=True, name="robot-api")
+        thread.start()
+        logger.log_system_state(f"ROBOT_API_STARTED host={host} port={port}")
+        print(f"Robot API server started on {host}:{port}")
+    except Exception as e:
+        logger.log_error("Main.robot_api_start", str(e))
+        print(f"Robot API server failed to start: {e}")
+
 
 class KeyboardInput:
     """
@@ -235,6 +259,7 @@ def main():
     calibrator = None
     keyboard_input = None
     camera_control_manager = None
+    camera_vision = None
     spring_telemetry = None
 
     # Initialize logger first
@@ -256,11 +281,30 @@ def main():
 
         try:
             camera_control_manager = CameraControlManager()
-            robot_api.configure(camera_control_manager=camera_control_manager)
             logger.log_system_state(f"CAMERA_INIT available={camera_control_manager.is_available()}")
         except Exception as e:
             logger.log_error("Main.camera_init", str(e))
             print(f"Camera control manager unavailable: {e}")
+
+        try:
+            from vision.camera_vision import CameraVision
+            camera_vision = CameraVision()
+            logger.log_system_state(f"CAMERA_VISION available={camera_vision.is_camera_available()}")
+        except Exception as e:
+            logger.log_error("Main.camera_vision_init", str(e))
+            print(f"CameraVision unavailable: {e}")
+
+        from robot.robot_core_data_collector import RobotCoreDataCollector
+        _collector = RobotCoreDataCollector.from_runtime_context(runtime)
+
+        robot_api.configure(
+            state_machine=runtime.state_machine,
+            collector=_collector,
+            camera_control_manager=camera_control_manager,
+            camera_vision=camera_vision,
+        )
+
+        _start_robot_api_server(logger)
 
         if SPRING_TELEMETRY_ENABLED:
             try:
@@ -271,8 +315,6 @@ def main():
                     print("SpringTelemetry: DEVICE_SERIAL_NUMBER or DEVICE_KEY not set — telemetry disabled")
                     logger.log_error("Main.spring_telemetry", "Missing DEVICE_SERIAL_NUMBER or DEVICE_KEY")
                 else:
-                    from robot.robot_core_data_collector import RobotCoreDataCollector
-                    _collector = RobotCoreDataCollector.from_runtime_context(runtime)
                     _spring_client = SpringApiClient(
                         serial_number=DEVICE_SERIAL_NUMBER,
                         device_key=DEVICE_KEY,
@@ -338,6 +380,11 @@ def main():
                 pass
         if keyboard_input is not None:
             keyboard_input.restore()
+        if camera_vision is not None:
+            try:
+                camera_vision.release()
+            except Exception:
+                pass
         if camera_control_manager is not None:
             camera_control_manager.close()
         if runtime is not None:
