@@ -12,6 +12,8 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     const imgRef = useRef(null);
     const [cameraCommandError, setCameraCommandError] = useState('');
     const [controlError, setControlError] = useState('');
+    const [modeCommandError, setModeCommandError] = useState('');
+    const [modeLoading, setModeLoading] = useState(false);
     const STATUS_FALLBACK = { online: null, mode: null, robotState: null, batteryLevel: null, lastSeenAt: null };
     const [robotStatus, setRobotStatus] = useState(STATUS_FALLBACK);
     const GPS_FALLBACK = { latitude: null, longitude: null, fix: null };
@@ -303,6 +305,36 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
             });
     };
 
+    const sendModeCommand = (mode) => {
+        const nextMode = String(mode || '').toUpperCase();
+        if (nextMode !== 'AUTO' && nextMode !== 'MANUAL') return;
+        setModeCommandError('');
+        setModeLoading(true);
+        fetchWithTimeout('/api/mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: nextMode }),
+        })
+            .then(readJsonResponse)
+            .then((data) => {
+                if (!data || typeof data !== 'object' || typeof data.accepted !== 'boolean') {
+                    setModeCommandError('INVALID_RESPONSE');
+                    return;
+                }
+                if (data.accepted === false) {
+                    setModeCommandError('REJECTED');
+                    return;
+                }
+                const acceptedMode = typeof data.mode === 'string' ? data.mode.toUpperCase() : nextMode;
+                setRobotStatus((prev) => ({ ...prev, mode: acceptedMode }));
+            })
+            .catch((err) => {
+                console.error('Mode command failed:', err);
+                setModeCommandError('REQUEST_FAILED');
+            })
+            .finally(() => setModeLoading(false));
+    };
+
     const sendCameraCommand = (command) => {
         setCameraCommandError('');
         fetchWithTimeout('/api/camera/control', {
@@ -374,6 +406,10 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
         { time: '12:45:15', text: 'CAMERA STREAM WAITING (FEED_UNAVAILABLE)' },
     ];
 
+    const currentMode = robotStatus.mode === 'MANUAL' || robotStatus.mode === 'AUTO'
+        ? robotStatus.mode
+        : null;
+
     return (
         <div className="dashboard-container">
             <header className="dashboard-header">
@@ -389,7 +425,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                     </div>
                     <div className="status-item">
                         <span className="status-label">MODE:</span>
-                        <span className="status-value text-active">AUTO</span>
+                        <span className="status-value text-active">{currentMode ?? '...'}</span>
                     </div>
                     <div className="status-item timestamp">
                         {currentTime}
@@ -568,20 +604,31 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                     <div className="panel">
                         <h2 className="panel-title">Current Mode Selection</h2>
                         <div className="panel-content mode-container">
-                            <div className="mode-btn active">
-                                <div className="radio-indicator checked"></div>
+                            <button
+                                type="button"
+                                className={`mode-btn ${currentMode === 'AUTO' ? 'active' : ''}`}
+                                onClick={() => sendModeCommand('AUTO')}
+                                disabled={modeLoading}
+                            >
+                                <div className={`radio-indicator ${currentMode === 'AUTO' ? 'checked' : ''}`}></div>
                                 <div className="mode-info">
                                     <span className="mode-name">AUTO</span>
                                     <span className="mode-desc">Autonomous Navigation</span>
                                 </div>
-                            </div>
-                            <div className="mode-btn disabled">
-                                <div className="radio-indicator"></div>
+                            </button>
+                            <button
+                                type="button"
+                                className={`mode-btn ${currentMode === 'MANUAL' ? 'active' : ''}`}
+                                onClick={() => sendModeCommand('MANUAL')}
+                                disabled={modeLoading}
+                            >
+                                <div className={`radio-indicator ${currentMode === 'MANUAL' ? 'checked' : ''}`}></div>
                                 <div className="mode-info">
                                     <span className="mode-name">MANUAL</span>
                                     <span className="mode-desc">Keyboard Override</span>
                                 </div>
-                            </div>
+                            </button>
+                            {modeCommandError && <span className="camera-stream-label">Mode: {modeCommandError}</span>}
                         </div>
                     </div>
 
