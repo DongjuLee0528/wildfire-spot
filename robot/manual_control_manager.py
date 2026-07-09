@@ -51,7 +51,12 @@ class ManualControlManager:
 
         Args:
             command_queue: multiprocessing.Queue holding KB_CONTROL_OFFSET
-                dicts. If None, commands are validated but not dispatched.
+                dicts — specifically RobotKeyboardController.robot_commands,
+                which is consumed by monitor_commands() running in a daemon
+                thread. Pass None only when no movement loop is running;
+                commands will be rejected with reason
+                'movement_loop_unavailable' instead of silently pretending
+                to succeed.
             mode_manager: Optional ModeControlManager instance. When provided,
                 non-safe commands are blocked unless the mode is MANUAL.
                 STOP and RESET are always forwarded regardless of mode.
@@ -72,7 +77,8 @@ class ManualControlManager:
             dict with keys:
             - accepted (bool)
             - command (str): the submitted command
-            - reason (str): 'ok', 'invalid_command', 'wrong_mode', or 'queue_unavailable'
+            - reason (str): 'ok', 'invalid_command', 'wrong_mode',
+                            or 'movement_loop_unavailable'
         """
         command_upper = str(command).upper() if command is not None else ""
 
@@ -92,12 +98,11 @@ class ManualControlManager:
                 return {"accepted": False, "command": command_upper, "reason": "wrong_mode"}
 
         if self._command_queue is None:
-            if command_upper == "STOP":
-                self.logger.log_error(
-                    "ManualControlManager.send_command",
-                    "STOP requested but no command queue attached",
-                )
-            return {"accepted": False, "command": command_upper, "reason": "queue_unavailable"}
+            self.logger.log_error(
+                "ManualControlManager.send_command",
+                f"Command {command_upper} rejected: no movement loop attached to this runtime",
+            )
+            return {"accepted": False, "command": command_upper, "reason": "movement_loop_unavailable"}
 
         payload = dict(_COMMAND_MAP[command_upper])
 
@@ -112,7 +117,7 @@ class ManualControlManager:
             return {"accepted": True, "command": command_upper, "reason": "ok"}
         except Exception as e:
             self.logger.log_error("ManualControlManager.send_command", str(e))
-            return {"accepted": False, "command": command_upper, "reason": "queue_unavailable"}
+            return {"accepted": False, "command": command_upper, "reason": "movement_loop_unavailable"}
 
     def move_forward(self):
         """Send FORWARD command."""
