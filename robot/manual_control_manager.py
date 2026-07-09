@@ -45,25 +45,30 @@ class ManualControlManager:
     monitor_commands() picks it up on its next read.
     """
 
-    def __init__(self, command_queue=None, mode_manager=None):
+    def __init__(self, command_queue=None, mode_manager=None, movement_available=False):
         """
         Initialise the manual control manager.
 
         Args:
             command_queue: multiprocessing.Queue holding KB_CONTROL_OFFSET
                 dicts — specifically RobotKeyboardController.robot_commands,
-                which is consumed by monitor_commands() running in a daemon
-                thread. Pass None only when no movement loop is running;
+                which is consumed by the gait execution loop running in a
+                daemon thread. Pass None only when no movement loop is running;
                 commands will be rejected with reason
                 'movement_loop_unavailable' instead of silently pretending
                 to succeed.
             mode_manager: Optional ModeControlManager instance. When provided,
                 non-safe commands are blocked unless the mode is MANUAL.
                 STOP and RESET are always forwarded regardless of mode.
+            movement_available: Set True only after the gait execution loop
+                (QuadrupedGaitPattern → DHParameterSolver → QuadrupedServoManager)
+                has started successfully. Non-safe movement commands are rejected
+                with reason 'movement_loop_unavailable' when False.
         """
         self.logger = WildfireLogger("ManualControlManager")
         self._command_queue = command_queue
         self._mode_manager = mode_manager
+        self._movement_available = movement_available
         self._current_command = "STOP"
 
     def send_command(self, command):
@@ -96,6 +101,13 @@ class ManualControlManager:
                     f"Command {command_upper} blocked: mode is {self._mode_manager.get_current_mode()}",
                 )
                 return {"accepted": False, "command": command_upper, "reason": "wrong_mode"}
+
+        if command_upper not in _SAFE_COMMANDS and not self._movement_available:
+            self.logger.log_error(
+                "ManualControlManager.send_command",
+                f"Command {command_upper} rejected: gait/servo loop is not running",
+            )
+            return {"accepted": False, "command": command_upper, "reason": "movement_loop_unavailable"}
 
         if self._command_queue is None:
             self.logger.log_error(
@@ -142,6 +154,17 @@ class ManualControlManager:
     def reset(self):
         """Send RESET command."""
         return self.send_command("RESET")
+
+    def set_movement_available(self, available):
+        """
+        Update the gait loop availability flag at runtime.
+
+        Args:
+            available: True if the gait execution loop started successfully
+                and servo hardware is ready; False otherwise.
+        """
+        self._movement_available = bool(available)
+        self.logger.info(f"MANUAL_CTRL | movement_available={self._movement_available}")
 
     def get_current_command(self):
         """
