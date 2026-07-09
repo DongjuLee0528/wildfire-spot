@@ -49,6 +49,80 @@ def _start_keyboard_controller(logger):
         return None
 
 
+def _start_gait_loop(logger, kb_controller, mode_control_manager):
+    """
+    Start the gait execution daemon thread.
+
+    Reads KB_CONTROL_OFFSET dicts from kb_controller.robot_commands, runs
+    QuadrupedGaitPattern → DHParameterSolver → QuadrupedServoManager, then
+    re-puts the command back so it remains available for the next iteration.
+
+    Args:
+        logger: WildfireLogger instance
+        kb_controller: RobotKeyboardController whose robot_commands queue to consume
+        mode_control_manager: ModeControlManager used to gate stepping on MANUAL mode
+
+    Returns:
+        QuadrupedServoManager instance if hardware is available, else None
+    """
+    try:
+        from kinematicMotion import QuadrupedGaitPattern
+        from Kinematics.kinematics import DHParameterSolver
+        from hardware.servo_controller import QuadrupedServoManager
+        from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT
+
+        gait = QuadrupedGaitPattern()
+        kinematics = DHParameterSolver()
+        servo_manager = QuadrupedServoManager()
+    except Exception as e:
+        logger.log_error("Main.gait_loop_start", str(e))
+        print(f"Gait loop unavailable: {e}")
+        return None
+
+    command_queue = kb_controller.robot_commands
+
+    def _loop():
+        from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT
+        while True:
+            command_data = None
+            try:
+                command_data = command_queue.get(timeout=0.1)
+            except Exception:
+                continue
+
+            try:
+                if not command_data.get("StartStepping", False):
+                    command_queue.put(command_data)
+                    time.sleep(0.02)
+                    continue
+
+                if mode_control_manager is not None and not mode_control_manager.is_manual():
+                    command_queue.put(command_data)
+                    time.sleep(0.02)
+                    continue
+
+                foot_positions = gait.calculate_leg_positions(time.time(), command_data)
+                joint_angles = kinematics.solve_complete_inverse_kinematics(
+                    foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT
+                )
+                servo_manager.execute_servo_motion(joint_angles)
+                command_queue.put(command_data)
+            except Exception as e:
+                logger.log_error("GaitLoop", str(e))
+                if command_data is not None:
+                    try:
+                        command_queue.put(command_data)
+                    except Exception:
+                        pass
+            time.sleep(0.02)
+
+    thread = threading.Thread(target=_loop, daemon=True, name="gait-loop")
+    thread.start()
+    logger.log_system_state("GAIT_LOOP_STARTED")
+    print("Gait loop started (servo motion active)")
+    return servo_manager
+
+
 def _start_robot_api_server(logger):
     host = os.environ.get("ROBOT_API_HOST", "0.0.0.0")
     port = int(os.environ.get("ROBOT_API_PORT", "8000"))
@@ -291,6 +365,7 @@ def main():
     mode_control_manager = None
     patrol_zone_manager = None
     _kb_controller = None
+    _servo_manager = None
 
     # Initialize logger first
     try:
@@ -350,6 +425,15 @@ def main():
         except Exception as e:
             logger.log_error("Main.patrol_zone_manager_init", str(e))
             print(f"PatrolZoneManager unavailable: {e}")
+
+        if _kb_controller is not None:
+            _servo_manager = _start_gait_loop(logger, _kb_controller, mode_control_manager)
+
+        gait_available = _servo_manager is not None
+        if manual_control_manager is not None:
+            manual_control_manager.set_movement_available(gait_available)
+        logger.log_system_state(f"GAIT_LOOP_AVAILABLE={gait_available}")
+        print(f"Gait loop available: {gait_available}")
 
         robot_api.configure(
             state_machine=runtime.state_machine,
@@ -431,6 +515,11 @@ def main():
         print(f"Failed to initialize: {e}")
     finally:
         # Clean up resources in reverse initialization order
+        if _servo_manager is not None:
+            try:
+                _servo_manager.shutdown_servos()
+            except Exception:
+                pass
         if _kb_controller is not None:
             try:
                 _kb_controller.stop()
