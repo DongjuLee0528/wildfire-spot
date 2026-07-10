@@ -49,35 +49,54 @@ def _start_keyboard_controller(logger):
         return None
 
 
-def _start_gait_loop(logger, kb_controller, mode_control_manager):
+def _init_servo_hardware(logger):
+    """
+    Initialise QuadrupedServoManager (I2C bus + both PCA9685 boards).
+
+    Must be called before CameraControlManager so the front PCA9685 driver
+    at 0x41 can be shared via get_front_driver() instead of opening a second
+    I2C connection to the same bus.
+
+    Returns:
+        QuadrupedServoManager instance on success, else None.
+    """
+    try:
+        from hardware.servo_controller import QuadrupedServoManager
+        servo_manager = QuadrupedServoManager()
+        logger.log_system_state("SERVO_HARDWARE_INIT ok")
+        print("Servo hardware initialised (front=0x41 rear=0x42)")
+        return servo_manager
+    except Exception as e:
+        logger.log_error("Main.servo_hardware_init", str(e))
+        print(f"Servo hardware unavailable: {e}")
+        return None
+
+
+def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager):
     """
     Start the gait execution daemon thread.
 
     Reads KB_CONTROL_OFFSET dicts from kb_controller.robot_commands, runs
-    QuadrupedGaitPattern → DHParameterSolver → QuadrupedServoManager, then
-    re-puts the command back so it remains available for the next iteration.
+    QuadrupedGaitPattern → DHParameterSolver → servo_manager, then re-puts
+    the command back so it remains available for the next iteration.
 
     Args:
         logger: WildfireLogger instance
+        servo_manager: Already-initialised QuadrupedServoManager
         kb_controller: RobotKeyboardController whose robot_commands queue to consume
         mode_control_manager: ModeControlManager used to gate stepping on MANUAL mode
-
-    Returns:
-        QuadrupedServoManager instance if hardware is available, else None
     """
     try:
         from kinematicMotion import QuadrupedGaitPattern
         from Kinematics.kinematics import DHParameterSolver
-        from hardware.servo_controller import QuadrupedServoManager
         from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT
 
         gait = QuadrupedGaitPattern()
         kinematics = DHParameterSolver()
-        servo_manager = QuadrupedServoManager()
     except Exception as e:
         logger.log_error("Main.gait_loop_start", str(e))
         print(f"Gait loop unavailable: {e}")
-        return None
+        return
 
     command_queue = kb_controller.robot_commands
 
@@ -120,7 +139,6 @@ def _start_gait_loop(logger, kb_controller, mode_control_manager):
     thread.start()
     logger.log_system_state("GAIT_LOOP_STARTED")
     print("Gait loop started (servo motion active)")
-    return servo_manager
 
 
 def _start_robot_api_server(logger):
@@ -384,9 +402,12 @@ def main():
         calibrator = PatrolZoneCalibrator(logger, gps_manager=runtime.gps_manager)
         keyboard_input = KeyboardInput(logger)
 
+        _servo_manager = _init_servo_hardware(logger)
+
         try:
-            camera_control_manager = CameraControlManager()
-            logger.log_system_state(f"CAMERA_INIT available={camera_control_manager.is_available()}")
+            front_driver = _servo_manager.get_front_driver() if _servo_manager is not None else None
+            camera_control_manager = CameraControlManager(front_driver=front_driver)
+            logger.log_system_state(f"CAMERA_INIT available={camera_control_manager.is_available()} shared_driver={front_driver is not None}")
         except Exception as e:
             logger.log_error("Main.camera_init", str(e))
             print(f"Camera control manager unavailable: {e}")
@@ -426,8 +447,8 @@ def main():
             logger.log_error("Main.patrol_zone_manager_init", str(e))
             print(f"PatrolZoneManager unavailable: {e}")
 
-        if _kb_controller is not None:
-            _servo_manager = _start_gait_loop(logger, _kb_controller, mode_control_manager)
+        if _kb_controller is not None and _servo_manager is not None:
+            _start_gait_loop(logger, _servo_manager, _kb_controller, mode_control_manager)
 
         gait_available = _servo_manager is not None
         if manual_control_manager is not None:
@@ -514,7 +535,11 @@ def main():
         logger.log_error("Main.init", str(e))
         print(f"Failed to initialize: {e}")
     finally:
-        # Clean up resources in reverse initialization order
+        # Clean up resources in reverse initialization order.
+        # camera_control_manager.close() must precede _servo_manager.shutdown_servos()
+        # because the camera uses the shared front PCA9685 driver owned by servo_manager.
+        if camera_control_manager is not None:
+            camera_control_manager.close()
         if _servo_manager is not None:
             try:
                 _servo_manager.shutdown_servos()
@@ -538,8 +563,6 @@ def main():
                 camera_vision.release()
             except Exception:
                 pass
-        if camera_control_manager is not None:
-            camera_control_manager.close()
         if runtime is not None:
             try:
                 runtime.close()
