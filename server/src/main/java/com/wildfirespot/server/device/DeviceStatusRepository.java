@@ -7,4 +7,6 @@ import java.util.Optional;
 public interface DeviceStatusRepository extends JpaRepository<DeviceStatus, String> {
 
     Optional<DeviceStatus> findByDevice(Device device);
+
+    Optional<DeviceStatus> findTopByDeviceOrderByUpdatedAtDesc(Device device);
 }

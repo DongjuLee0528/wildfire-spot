@@ -292,16 +292,30 @@ body {
 .mode-btn {
     border: 1px solid var(--border-color);
     background: rgba(255, 255, 255, 0.02);
+    color: inherit;
     padding: 10px 14px;
     border-radius: 4px;
     display: flex;
     align-items: center;
     gap: 12px;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
 }
 
 .mode-btn.active {
     border-color: var(--accent-color);
     background: var(--accent-glow);
+}
+
+.mode-btn:hover:not(:disabled) {
+    border-color: var(--accent-color);
+}
+
+.mode-btn:disabled {
+    opacity: 0.65;
+    cursor: wait;
 }
 
 .mode-btn.disabled {

@@ -7,6 +7,7 @@ Provides keyboard-based control for:
 - Manual robot control
 """
 
+import os
 import sys
 import termios
 import tty
@@ -14,11 +15,165 @@ import select
 import time
 import re
 import json
+import threading
 from pathlib import Path
 from hardware.camera_control_manager import CameraControlManager
 from utils.config import PATROL_ZONE_MIN_POINTS, SPRING_TELEMETRY_ENABLED, SPRING_API_BASE_URL, DEVICE_SERIAL_NUMBER, DEVICE_KEY
 from utils.logger import WildfireLogger
 import robot.robot_api as robot_api
+
+
+def _start_keyboard_controller(logger):
+    """
+    Create RobotKeyboardController and start monitor_commands in a daemon thread.
+
+    Returns the controller instance so robot_commands queue can be shared
+    with ManualControlManager, or None if startup fails.
+    """
+    try:
+        from Common.multiprocess_kb import RobotKeyboardController, monitor_commands
+        controller = RobotKeyboardController()
+        # Run monitor_commands as a daemon so it exits automatically when main exits
+        thread = threading.Thread(
+            target=monitor_commands,
+            args=(1, controller.robot_commands, controller._running),
+            daemon=True,
+            name="robot-command-monitor",
+        )
+        thread.start()
+        logger.log_system_state("ROBOT_COMMAND_MONITOR_STARTED")
+        print("Robot command monitor started (keyboard movement queue active)")
+        return controller
+    except Exception as e:
+        logger.log_error("Main.keyboard_controller_start", str(e))
+        print(f"RobotKeyboardController unavailable: {e}")
+        return None
+
+
+def _init_servo_hardware(logger):
+    """
+    Initialise QuadrupedServoManager (I2C bus + both PCA9685 boards).
+
+    Must be called before CameraControlManager so the front PCA9685 driver
+    at 0x41 can be shared via get_front_driver() instead of opening a second
+    I2C connection to the same bus.
+
+    Returns:
+        QuadrupedServoManager instance on success, else None.
+    """
+    try:
+        from hardware.servo_controller import QuadrupedServoManager
+        servo_manager = QuadrupedServoManager()
+        logger.log_system_state("SERVO_HARDWARE_INIT ok")
+        print("Servo hardware initialised (front=0x41 rear=0x42)")
+        return servo_manager
+    except Exception as e:
+        logger.log_error("Main.servo_hardware_init", str(e))
+        print(f"Servo hardware unavailable: {e}")
+        return None
+
+
+def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager):
+    """
+    Start the gait execution daemon thread.
+
+    Reads KB_CONTROL_OFFSET dicts from kb_controller.robot_commands, runs
+    QuadrupedGaitPattern → DHParameterSolver → servo_manager, then re-puts
+    the command back so it remains available for the next iteration.
+
+    Args:
+        logger: WildfireLogger instance
+        servo_manager: Already-initialised QuadrupedServoManager
+        kb_controller: RobotKeyboardController whose robot_commands queue to consume
+        mode_control_manager: ModeControlManager used to gate stepping on MANUAL mode
+    """
+    try:
+        from kinematicMotion import QuadrupedGaitPattern
+        from Kinematics.kinematics import DHParameterSolver
+        from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT
+
+        gait = QuadrupedGaitPattern()
+        kinematics = DHParameterSolver()
+    except Exception as e:
+        logger.log_error("Main.gait_loop_start", str(e))
+        print(f"Gait loop unavailable: {e}")
+        return
+
+    command_queue = kb_controller.robot_commands
+
+    def _loop():
+        # Import config inside thread to ensure values are read at runtime
+        from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT
+        while True:
+            command_data = None
+            try:
+                # Block until a command is available (up to 0.1 s timeout)
+                command_data = command_queue.get(timeout=0.1)
+            except Exception:
+                # Timeout or queue error — just retry
+                continue
+
+            try:
+                # Skip movement if StartStepping is False (STOP / RESET command)
+                if not command_data.get("StartStepping", False):
+                    command_queue.put(command_data)
+                    time.sleep(0.02)
+                    continue
+
+                # Only execute physical movement when the robot is in MANUAL mode
+                if mode_control_manager is not None and not mode_control_manager.is_manual():
+                    command_queue.put(command_data)
+                    time.sleep(0.02)
+                    continue
+
+                # Full pipeline: gait trajectory → inverse kinematics → servo output
+                foot_positions = gait.calculate_leg_positions(time.time(), command_data)
+                joint_angles = kinematics.solve_complete_inverse_kinematics(
+                    foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT
+                )
+                servo_manager.execute_servo_motion(joint_angles)
+
+                # Re-insert command so the next loop iteration can read it
+                command_queue.put(command_data)
+            except Exception as e:
+                logger.log_error("GaitLoop", str(e))
+                # Always restore the command to avoid starving the queue
+                if command_data is not None:
+                    try:
+                        command_queue.put(command_data)
+                    except Exception:
+                        pass
+            # ~50 Hz max update rate
+            time.sleep(0.02)
+
+    thread = threading.Thread(target=_loop, daemon=True, name="gait-loop")
+    thread.start()
+    logger.log_system_state("GAIT_LOOP_STARTED")
+    print("Gait loop started (servo motion active)")
+
+
+def _start_robot_api_server(logger):
+    # Read host/port from environment so they can be overridden without code changes
+    host = os.environ.get("ROBOT_API_HOST", "0.0.0.0")
+    port = int(os.environ.get("ROBOT_API_PORT", "8000"))
+    try:
+        import uvicorn
+        config = uvicorn.Config(
+            app=robot_api.app,
+            host=host,
+            port=port,
+            log_level="warning",
+        )
+        server = uvicorn.Server(config)
+        # Daemon thread: server stops automatically when the main process exits
+        thread = threading.Thread(target=server.run, daemon=True, name="robot-api")
+        thread.start()
+        logger.log_system_state(f"ROBOT_API_STARTED host={host} port={port}")
+        print(f"Robot API server started on {host}:{port}")
+    except Exception as e:
+        logger.log_error("Main.robot_api_start", str(e))
+        print(f"Robot API server failed to start: {e}")
+
 
 class KeyboardInput:
     """
@@ -230,12 +385,19 @@ def main():
     - 'f': Finish calibration (during calibration)
     - 'q': Quit program
     """
+    # Pre-declare all subsystem handles so the finally block can safely check them
     logger = None
     runtime = None
     calibrator = None
     keyboard_input = None
     camera_control_manager = None
+    camera_vision = None
     spring_telemetry = None
+    manual_control_manager = None
+    mode_control_manager = None
+    patrol_zone_manager = None
+    _kb_controller = None
+    _servo_manager = None
 
     # Initialize logger first
     try:
@@ -254,25 +416,93 @@ def main():
         calibrator = PatrolZoneCalibrator(logger, gps_manager=runtime.gps_manager)
         keyboard_input = KeyboardInput(logger)
 
+        # Servo hardware must be initialised first so the front PCA9685 driver
+        # (0x41) can be shared with CameraControlManager without opening a
+        # second I2C handle on the same bus.
+        _servo_manager = _init_servo_hardware(logger)
+
         try:
-            camera_control_manager = CameraControlManager()
-            robot_api.configure(camera_control_manager=camera_control_manager)
-            logger.log_system_state(f"CAMERA_INIT available={camera_control_manager.is_available()}")
+            # Pass the already-open front driver so CameraControlManager does
+            # not create its own I2C connection to 0x41.
+            front_driver = _servo_manager.get_front_driver() if _servo_manager is not None else None
+            camera_control_manager = CameraControlManager(front_driver=front_driver)
+            logger.log_system_state(f"CAMERA_INIT available={camera_control_manager.is_available()} shared_driver={front_driver is not None}")
         except Exception as e:
             logger.log_error("Main.camera_init", str(e))
             print(f"Camera control manager unavailable: {e}")
 
+        try:
+            from vision.camera_vision import CameraVision
+            camera_vision = CameraVision()
+            logger.log_system_state(f"CAMERA_VISION available={camera_vision.is_camera_available()}")
+        except Exception as e:
+            logger.log_error("Main.camera_vision_init", str(e))
+            print(f"CameraVision unavailable: {e}")
+
+        from robot.robot_core_data_collector import RobotCoreDataCollector
+        _collector = RobotCoreDataCollector.from_runtime_context(runtime)
+
+        # Start the keyboard controller; its robot_commands queue is shared
+        # with ManualControlManager and the gait loop.
+        _kb_controller = _start_keyboard_controller(logger)
+
+        try:
+            from robot.manual_control_manager import ManualControlManager
+            from robot.mode_control_manager import ModeControlManager
+            mode_control_manager = ModeControlManager(state_machine=runtime.state_machine)
+            manual_control_manager = ManualControlManager(
+                command_queue=_kb_controller.robot_commands if _kb_controller is not None else None,
+                mode_manager=mode_control_manager,
+            )
+            queue_status = "connected to robot_commands" if _kb_controller is not None else "no movement loop"
+            logger.log_system_state(f"MANUAL_CONTROL_INIT ok ({queue_status})")
+        except Exception as e:
+            logger.log_error("Main.manual_control_init", str(e))
+            print(f"ManualControlManager unavailable: {e}")
+
+        try:
+            from navigation.patrol_zone_manager import PatrolZoneManager
+            patrol_zone_manager = PatrolZoneManager()
+            logger.log_system_state("PATROL_ZONE_MANAGER_INIT ok")
+        except Exception as e:
+            logger.log_error("Main.patrol_zone_manager_init", str(e))
+            print(f"PatrolZoneManager unavailable: {e}")
+
+        # Start the gait execution loop only when both the keyboard queue and
+        # servo hardware are available; otherwise movement commands are rejected.
+        if _kb_controller is not None and _servo_manager is not None:
+            _start_gait_loop(logger, _servo_manager, _kb_controller, mode_control_manager)
+
+        # Propagate gait availability to ManualControlManager so movement
+        # commands return accepted=false when hardware is unavailable.
+        gait_available = _servo_manager is not None
+        if manual_control_manager is not None:
+            manual_control_manager.set_movement_available(gait_available)
+        logger.log_system_state(f"GAIT_LOOP_AVAILABLE={gait_available}")
+        print(f"Gait loop available: {gait_available}")
+
+        robot_api.configure(
+            state_machine=runtime.state_machine,
+            collector=_collector,
+            manual_control_manager=manual_control_manager,
+            mode_control_manager=mode_control_manager,
+            patrol_zone_manager=patrol_zone_manager,
+            camera_control_manager=camera_control_manager,
+            camera_vision=camera_vision,
+        )
+
+        _start_robot_api_server(logger)
+
         if SPRING_TELEMETRY_ENABLED:
+            print("SpringTelemetry: enabled")
             try:
                 from robot.spring_api_client import SpringApiClient
                 from robot.spring_telemetry import SpringTelemetry
 
                 if not DEVICE_SERIAL_NUMBER or not DEVICE_KEY:
-                    print("SpringTelemetry: DEVICE_SERIAL_NUMBER or DEVICE_KEY not set — telemetry disabled")
+                    print("SpringTelemetry: DEVICE_SERIAL_NUMBER or DEVICE_KEY not set — skipping")
                     logger.log_error("Main.spring_telemetry", "Missing DEVICE_SERIAL_NUMBER or DEVICE_KEY")
                 else:
-                    from robot.robot_core_data_collector import RobotCoreDataCollector
-                    _collector = RobotCoreDataCollector.from_runtime_context(runtime)
                     _spring_client = SpringApiClient(
                         serial_number=DEVICE_SERIAL_NUMBER,
                         device_key=DEVICE_KEY,
@@ -284,7 +514,7 @@ def main():
                         print(f"SpringTelemetry: started (url={SPRING_API_BASE_URL})")
                         logger.log_system_state("SPRING_TELEMETRY_STARTED")
                     else:
-                        print(f"SpringTelemetry: device login failed — telemetry disabled")
+                        print("SpringTelemetry: device login failed — telemetry disabled")
                         logger.log_error("Main.spring_telemetry", "Device login failed")
             except Exception as e:
                 print(f"SpringTelemetry: failed to start — {e}")
@@ -298,7 +528,7 @@ def main():
         print("Press 'f' to finish calibration (during calibration)")
         print("Press 'q' to quit")
 
-        # Main control loop
+        # Main control loop — runs at ~20 Hz, handles keyboard input only
         while True:
             try:
                 key = keyboard_input.get_key()
@@ -330,7 +560,22 @@ def main():
         logger.log_error("Main.init", str(e))
         print(f"Failed to initialize: {e}")
     finally:
-        # Clean up resources in reverse initialization order
+        # Clean up resources in reverse initialization order.
+        # camera_control_manager.close() must precede _servo_manager.shutdown_servos()
+        # because the camera uses the shared front PCA9685 driver owned by servo_manager.
+        if camera_control_manager is not None:
+            camera_control_manager.close()
+        if _servo_manager is not None:
+            try:
+                _servo_manager.shutdown_servos()
+            except Exception:
+                pass
+        if _kb_controller is not None:
+            try:
+                _kb_controller.stop()
+                _kb_controller.cleanup()
+            except Exception:
+                pass
         if spring_telemetry is not None:
             try:
                 spring_telemetry.stop()
@@ -338,8 +583,11 @@ def main():
                 pass
         if keyboard_input is not None:
             keyboard_input.restore()
-        if camera_control_manager is not None:
-            camera_control_manager.close()
+        if camera_vision is not None:
+            try:
+                camera_vision.release()
+            except Exception:
+                pass
         if runtime is not None:
             try:
                 runtime.close()

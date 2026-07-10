@@ -18,9 +18,11 @@ import time
 
 try:
     import adafruit_ads1x15.ads1115 as ADS
+    from adafruit_ads1x15.ads1x15 import Pin
     from adafruit_ads1x15.analog_in import AnalogIn
 except ImportError:
     ADS = None
+    Pin = None
     AnalogIn = None
 
 try:
@@ -94,6 +96,10 @@ class SensorManager:
         if self._i2c is not None:
             if ADS is None or AnalogIn is None:
                 self.logger.log_error("SensorManager.ADS1115_init", "ADS1115 modules are not available")
+            elif Pin is None:
+                self.logger.log_error("SensorManager.ADS1115_init", "ADS1115 Pin API is not available")
+            elif not hasattr(Pin, 'A0'):
+                self.logger.log_error("SensorManager.ADS1115_init", "ADS1115 Pin API has no A0 channel")
             else:
                 self._init_mq2_adc(ADS1115_MQ2_1, "_ads1_1", "_mq2_chan1")
                 self._init_mq2_adc(ADS1115_MQ2_2, "_ads1_2", "_mq2_chan2")
@@ -167,7 +173,7 @@ class SensorManager:
             return
         try:
             ads = ADS.ADS1115(self._i2c, address=address)
-            channel = AnalogIn(ads, ADS.P0)
+            channel = AnalogIn(ads, Pin.A0)
             setattr(self, ads_attr, ads)
             setattr(self, channel_attr, channel)
             self._mq2_channels.append(channel)
