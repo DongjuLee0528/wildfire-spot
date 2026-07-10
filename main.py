@@ -101,6 +101,10 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
     def _loop():
         # Import config inside thread to ensure values are read at runtime
         from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT
+        import numpy as np
+        _diag_last_log = [0.0]  # mutable cell so inner scope can update it
+        _DIAG_INTERVAL = 1.0    # emit GAIT_DEBUG at most once per second
+
         while True:
             command_data = None
             try:
@@ -129,6 +133,28 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                     foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT
                 )
                 servo_manager.execute_servo_motion(joint_angles)
+
+                # Diagnostic log — emitted at most once per second while stepping
+                try:
+                    _now = time.time()
+                    if _now - _diag_last_log[0] >= _DIAG_INTERVAL:
+                        _diag_last_log[0] = _now
+                        _deg = np.round(joint_angles * 180.0 / np.pi, 1).tolist()
+                        _fp_shape = tuple(np.array(foot_positions).shape)
+                        _ja_shape = tuple(np.array(joint_angles).shape)
+                        logger.info(
+                            f"GAIT_DEBUG | "
+                            f"command_data={command_data} "
+                            f"foot_shape={_fp_shape} "
+                            f"joint_shape={_ja_shape} "
+                            f"joint_deg=["
+                            f"FL:{_deg[0]}, "
+                            f"FR:{_deg[1]}, "
+                            f"BL:{_deg[2]}, "
+                            f"BR:{_deg[3]}]"
+                        )
+                except Exception:
+                    pass
 
                 # Re-insert command so the next loop iteration can read it
                 command_queue.put(command_data)

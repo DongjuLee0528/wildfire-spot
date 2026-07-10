@@ -20,6 +20,7 @@ from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEG
                          SERVO_MAX_ANGLE, SERVO_MIN_ANGLE, SERVO_ANGLE_ADJUSTMENT)
 
 import numpy as np
+import time as _time
 
 def _load_servo_hardware():
     """Import and return PCA9685, servo, and busio modules; raises RuntimeError if unavailable."""
@@ -90,6 +91,10 @@ class QuadrupedServoManager:
         # Working buffer for computed servo angles before they are written
         self._angle_array = [servo_index for servo_index in range(SERVO_CHANNELS)]
         self._joint_angles = []
+
+        # Diagnostic rate-limit: last time SERVO_DEBUG was emitted
+        self._diag_last_log = 0.0
+        self._DIAG_INTERVAL = 1.0
 
     def convert_to_degrees(self, angle_radians):
         """
@@ -173,6 +178,10 @@ class QuadrupedServoManager:
         """
         self.process_angle_mapping(joint_angles)
 
+        # Snapshot angles before clamp for diagnostic comparison
+        _before_clamp = list(self._angle_array)
+
+        write_count = 0
         for servo_index in range(len(self._angle_array)):
             # Clamp to safe hardware limits before writing
             if (self._angle_array[servo_index] > SERVO_MAX_ANGLE):
@@ -182,6 +191,24 @@ class QuadrupedServoManager:
                 print("Angle below minimum limit")
                 self._angle_array[servo_index] = SERVO_MIN_ANGLE + SERVO_ANGLE_ADJUSTMENT
             self._servo_array[servo_index].angle = float(self._angle_array[servo_index])
+            write_count += 1
+
+        # Diagnostic log — emitted at most once per second
+        try:
+            _now = _time.time()
+            if _now - self._diag_last_log >= self._DIAG_INTERVAL:
+                self._diag_last_log = _now
+                _after_clamp = list(self._angle_array)
+                _clamped_ch = [i for i in range(len(_before_clamp)) if _before_clamp[i] != _after_clamp[i]]
+                print(
+                    f"SERVO_DEBUG | "
+                    f"mapped_before_clamp={[round(v, 1) for v in _before_clamp]} "
+                    f"final_after_clamp={_after_clamp} "
+                    f"clamped_channels={_clamped_ch} "
+                    f"write_complete={write_count}"
+                )
+        except Exception:
+            pass
 
     def shutdown_servos(self):
         """
