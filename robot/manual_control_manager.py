@@ -17,13 +17,21 @@ from utils.config import (
 )
 from utils.logger import WildfireLogger
 
+# All command strings accepted by send_command()
 VALID_COMMANDS = {"FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP", "RESET"}
+
+# Safe commands are always forwarded regardless of mode or gait availability.
+# They clear StartStepping and do not require servo hardware to be running.
 _SAFE_COMMANDS = {"STOP", "RESET"}
 
+# Pre-compute step sizes from config constants to avoid repeated division
 _FORWARD_STEP = FORWARD_DISTANCE / KB_X_STEP_DIVISOR
 _LATERAL_STEP = KB_Y_STEP
 _ROTATION_STEP = KB_YAW_STEP
 
+# Mapping from command name to the KB_CONTROL_OFFSET payload sent to the gait loop.
+# StartStepping=True  → gait loop executes servo motion
+# StartStepping=False → gait loop skips execution (robot stands still)
 _COMMAND_MAP = {
     "FORWARD":  {"IDstepLength": -_FORWARD_STEP,  "IDstepWidth": 0.0,            "IDstepAlpha": 0.0,            "StartStepping": True},
     "BACKWARD": {"IDstepLength":  _FORWARD_STEP,  "IDstepWidth": 0.0,            "IDstepAlpha": 0.0,            "StartStepping": True},
@@ -87,6 +95,7 @@ class ManualControlManager:
         """
         command_upper = str(command).upper() if command is not None else ""
 
+        # Reject unrecognised command strings immediately
         if command_upper not in VALID_COMMANDS:
             self.logger.log_error(
                 "ManualControlManager.send_command",
@@ -94,6 +103,7 @@ class ManualControlManager:
             )
             return {"accepted": False, "command": str(command), "reason": "invalid_command"}
 
+        # Non-safe movement commands require MANUAL mode
         if self._mode_manager is not None and command_upper not in _SAFE_COMMANDS:
             if not self._mode_manager.is_manual():
                 self.logger.log_error(
@@ -102,6 +112,7 @@ class ManualControlManager:
                 )
                 return {"accepted": False, "command": command_upper, "reason": "wrong_mode"}
 
+        # Non-safe commands also require the gait/servo loop to be running
         if command_upper not in _SAFE_COMMANDS and not self._movement_available:
             self.logger.log_error(
                 "ManualControlManager.send_command",
@@ -109,6 +120,7 @@ class ManualControlManager:
             )
             return {"accepted": False, "command": command_upper, "reason": "movement_loop_unavailable"}
 
+        # Reject if no queue was provided at construction time
         if self._command_queue is None:
             self.logger.log_error(
                 "ManualControlManager.send_command",
@@ -119,6 +131,7 @@ class ManualControlManager:
         payload = dict(_COMMAND_MAP[command_upper])
 
         try:
+            # Drain the existing command so the queue never grows beyond one entry
             try:
                 self._command_queue.get_nowait()
             except Empty:
