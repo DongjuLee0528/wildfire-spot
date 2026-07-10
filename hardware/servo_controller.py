@@ -53,11 +53,17 @@ class QuadrupedServoManager:
         try:
             PCA9685, servo, busio = _load_servo_hardware()
             print("Initializing servo hardware")
+
+            # One shared I2C bus for both PCA9685 boards.
+            # SCL_1/SDA_1 maps to Jetson Orin Nano Super header pins 27/28.
             self._i2c_interface = busio.I2C(I2C_SCL, I2C_SDA)
             print("Setting up servo drivers")
 
+            # Front board (0x41): channels 0-5 for FL/FR legs, channels 6-7 shared with camera
             self._front_driver = PCA9685(self._i2c_interface, address=PCA9685_FRONT_LEGS)
             self._front_driver.frequency = PWM_FREQUENCY
+
+            # Rear board (0x42): channels 0-5 for BL/BR legs
             self._rear_driver = PCA9685(self._i2c_interface, address=PCA9685_BACK_LEGS)
             self._rear_driver.frequency = PWM_FREQUENCY
         except (ValueError, RuntimeError, OSError) as e:
@@ -65,17 +71,23 @@ class QuadrupedServoManager:
             self.shutdown_servos()
             raise
 
+        # Build a flat list of 12 Servo objects indexed 0-11.
+        # Indices 0-5  → front board channels 0-5  (FL then FR)
+        # Indices 6-11 → rear  board channels 0-5  (BL then BR)
         self._servo_array = list()
         for servo_index in range(0, SERVO_CHANNELS):
             if servo_index < FRONT_LEG_CHANNELS:
                 self._servo_array.append(servo.Servo(self._front_driver.channels[servo_index], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
             else:
+                # Rear board channel = global index minus the front channel count
                 self._servo_array.append(servo.Servo(self._rear_driver.channels[servo_index-FRONT_LEG_CHANNELS], min_pulse=PWM_MIN_PULSE, max_pulse=PWM_MAX_PULSE))
 
         print("Servo initialization complete")
 
+        # Per-channel mechanical offsets applied during angle mapping
         self._offset_values = SERVO_OFFSETS
 
+        # Working buffer for computed servo angles before they are written
         self._angle_array = [servo_index for servo_index in range(SERVO_CHANNELS)]
         self._joint_angles = []
 
@@ -89,7 +101,6 @@ class QuadrupedServoManager:
 
         Stores the result in self._joint_angles as a list of lists of ints.
         """
-
         angle_degrees = angle_radians * 180/np.pi
         angle_degrees_int = [[int(value) for value in row] for row in angle_degrees]
         self._joint_angles = angle_degrees_int
@@ -109,28 +120,32 @@ class QuadrupedServoManager:
         Args:
             angle_radians: numpy array of shape (4, 3) in radians.
         """
-
         self.convert_to_degrees(angle_radians)
 
         if len(self._joint_angles) < 4 or any(len(leg) < 3 for leg in self._joint_angles):
             print("Invalid joint angles array size")
             return
 
-        self._angle_array[0] = self._offset_values[0] - self._joint_angles[0][2]
-        self._angle_array[1] = self._offset_values[1] - self._joint_angles[0][1]
-        self._angle_array[2] = self._offset_values[2] + self._joint_angles[0][0]
+        # Front-left leg (IK leg index 0) — servos on CH0-2 of front board
+        self._angle_array[0] = self._offset_values[0] - self._joint_angles[0][2]  # tibia
+        self._angle_array[1] = self._offset_values[1] - self._joint_angles[0][1]  # femur
+        self._angle_array[2] = self._offset_values[2] + self._joint_angles[0][0]  # shoulder
 
-        self._angle_array[3] = self._offset_values[3] + self._joint_angles[1][2]
-        self._angle_array[4] = self._offset_values[4] + self._joint_angles[1][1]
-        self._angle_array[5] = self._offset_values[5] - self._joint_angles[1][0]
+        # Front-right leg (IK leg index 1) — servos on CH3-5 of front board
+        # Right side joints are mirrored, so signs are inverted relative to FL
+        self._angle_array[3] = self._offset_values[3] + self._joint_angles[1][2]  # tibia
+        self._angle_array[4] = self._offset_values[4] + self._joint_angles[1][1]  # femur
+        self._angle_array[5] = self._offset_values[5] - self._joint_angles[1][0]  # shoulder
 
-        self._angle_array[6] = self._offset_values[6] - self._joint_angles[2][2]
-        self._angle_array[7] = self._offset_values[7] - self._joint_angles[2][1]
-        self._angle_array[8] = self._offset_values[8] - self._joint_angles[2][0]
+        # Back-left leg (IK leg index 2) — servos on CH0-2 of rear board (global CH6-8)
+        self._angle_array[6] = self._offset_values[6] - self._joint_angles[2][2]  # tibia
+        self._angle_array[7] = self._offset_values[7] - self._joint_angles[2][1]  # femur
+        self._angle_array[8] = self._offset_values[8] - self._joint_angles[2][0]  # shoulder
 
-        self._angle_array[9] = self._offset_values[9] + self._joint_angles[3][2]
-        self._angle_array[10] = self._offset_values[10] + self._joint_angles[3][1]
-        self._angle_array[11] = self._offset_values[11] + self._joint_angles[3][0]
+        # Back-right leg (IK leg index 3) — servos on CH3-5 of rear board (global CH9-11)
+        self._angle_array[9]  = self._offset_values[9]  + self._joint_angles[3][2]  # tibia
+        self._angle_array[10] = self._offset_values[10] + self._joint_angles[3][1]  # femur
+        self._angle_array[11] = self._offset_values[11] + self._joint_angles[3][0]  # shoulder
 
     def get_front_driver(self):
         """
@@ -144,7 +159,6 @@ class QuadrupedServoManager:
 
     def get_current_angles(self):
         """Return the most recently computed per-channel servo angles (degrees)."""
-
         return self._angle_array
 
     def execute_servo_motion(self, joint_angles):
@@ -157,10 +171,10 @@ class QuadrupedServoManager:
         Args:
             joint_angles: numpy array of shape (4, 3) in radians.
         """
-
         self.process_angle_mapping(joint_angles)
 
         for servo_index in range(len(self._angle_array)):
+            # Clamp to safe hardware limits before writing
             if (self._angle_array[servo_index] > SERVO_MAX_ANGLE):
                 print("Angle exceeds maximum limit")
                 self._angle_array[servo_index] = SERVO_MAX_ANGLE - SERVO_ANGLE_ADJUSTMENT
@@ -176,7 +190,6 @@ class QuadrupedServoManager:
         Safe to call even if initialisation partially failed.
         Should be invoked during system shutdown.
         """
-
         try:
             if self._front_driver is not None:
                 self._front_driver.deinit()
