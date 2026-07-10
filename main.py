@@ -33,6 +33,7 @@ def _start_keyboard_controller(logger):
     try:
         from Common.multiprocess_kb import RobotKeyboardController, monitor_commands
         controller = RobotKeyboardController()
+        # Run monitor_commands as a daemon so it exits automatically when main exits
         thread = threading.Thread(
             target=monitor_commands,
             args=(1, controller.robot_commands, controller._running),
@@ -101,38 +102,48 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
     command_queue = kb_controller.robot_commands
 
     def _loop():
+        # Import config inside thread to ensure values are read at runtime
         from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT
         while True:
             command_data = None
             try:
+                # Block until a command is available (up to 0.1 s timeout)
                 command_data = command_queue.get(timeout=0.1)
             except Exception:
+                # Timeout or queue error — just retry
                 continue
 
             try:
+                # Skip movement if StartStepping is False (STOP / RESET command)
                 if not command_data.get("StartStepping", False):
                     command_queue.put(command_data)
                     time.sleep(0.02)
                     continue
 
+                # Only execute physical movement when the robot is in MANUAL mode
                 if mode_control_manager is not None and not mode_control_manager.is_manual():
                     command_queue.put(command_data)
                     time.sleep(0.02)
                     continue
 
+                # Full pipeline: gait trajectory → inverse kinematics → servo output
                 foot_positions = gait.calculate_leg_positions(time.time(), command_data)
                 joint_angles = kinematics.solve_complete_inverse_kinematics(
                     foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT
                 )
                 servo_manager.execute_servo_motion(joint_angles)
+
+                # Re-insert command so the next loop iteration can read it
                 command_queue.put(command_data)
             except Exception as e:
                 logger.log_error("GaitLoop", str(e))
+                # Always restore the command to avoid starving the queue
                 if command_data is not None:
                     try:
                         command_queue.put(command_data)
                     except Exception:
                         pass
+            # ~50 Hz max update rate
             time.sleep(0.02)
 
     thread = threading.Thread(target=_loop, daemon=True, name="gait-loop")
@@ -142,6 +153,7 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
 
 
 def _start_robot_api_server(logger):
+    # Read host/port from environment so they can be overridden without code changes
     host = os.environ.get("ROBOT_API_HOST", "0.0.0.0")
     port = int(os.environ.get("ROBOT_API_PORT", "8000"))
     try:
@@ -153,6 +165,7 @@ def _start_robot_api_server(logger):
             log_level="warning",
         )
         server = uvicorn.Server(config)
+        # Daemon thread: server stops automatically when the main process exits
         thread = threading.Thread(target=server.run, daemon=True, name="robot-api")
         thread.start()
         logger.log_system_state(f"ROBOT_API_STARTED host={host} port={port}")
@@ -372,6 +385,7 @@ def main():
     - 'f': Finish calibration (during calibration)
     - 'q': Quit program
     """
+    # Pre-declare all subsystem handles so the finally block can safely check them
     logger = None
     runtime = None
     calibrator = None
@@ -402,9 +416,14 @@ def main():
         calibrator = PatrolZoneCalibrator(logger, gps_manager=runtime.gps_manager)
         keyboard_input = KeyboardInput(logger)
 
+        # Servo hardware must be initialised first so the front PCA9685 driver
+        # (0x41) can be shared with CameraControlManager without opening a
+        # second I2C handle on the same bus.
         _servo_manager = _init_servo_hardware(logger)
 
         try:
+            # Pass the already-open front driver so CameraControlManager does
+            # not create its own I2C connection to 0x41.
             front_driver = _servo_manager.get_front_driver() if _servo_manager is not None else None
             camera_control_manager = CameraControlManager(front_driver=front_driver)
             logger.log_system_state(f"CAMERA_INIT available={camera_control_manager.is_available()} shared_driver={front_driver is not None}")
@@ -423,6 +442,8 @@ def main():
         from robot.robot_core_data_collector import RobotCoreDataCollector
         _collector = RobotCoreDataCollector.from_runtime_context(runtime)
 
+        # Start the keyboard controller; its robot_commands queue is shared
+        # with ManualControlManager and the gait loop.
         _kb_controller = _start_keyboard_controller(logger)
 
         try:
@@ -447,9 +468,13 @@ def main():
             logger.log_error("Main.patrol_zone_manager_init", str(e))
             print(f"PatrolZoneManager unavailable: {e}")
 
+        # Start the gait execution loop only when both the keyboard queue and
+        # servo hardware are available; otherwise movement commands are rejected.
         if _kb_controller is not None and _servo_manager is not None:
             _start_gait_loop(logger, _servo_manager, _kb_controller, mode_control_manager)
 
+        # Propagate gait availability to ManualControlManager so movement
+        # commands return accepted=false when hardware is unavailable.
         gait_available = _servo_manager is not None
         if manual_control_manager is not None:
             manual_control_manager.set_movement_available(gait_available)
@@ -503,7 +528,7 @@ def main():
         print("Press 'f' to finish calibration (during calibration)")
         print("Press 'q' to quit")
 
-        # Main control loop
+        # Main control loop — runs at ~20 Hz, handles keyboard input only
         while True:
             try:
                 key = keyboard_input.get_key()
