@@ -25,24 +25,21 @@ import robot.robot_api as robot_api
 
 def _start_keyboard_controller(logger):
     """
-    Create RobotKeyboardController and start monitor_commands in a daemon thread.
+    Create RobotKeyboardController and return it.
+
+    Only creates the controller and its robot_commands queue.
+    monitor_commands is intentionally NOT started here — gait-loop is the
+    sole consumer of robot_commands, and a competing monitor_commands thread
+    would race against it and hold the queue for KB_TEST_SLEEP_TIME per cycle.
 
     Returns the controller instance so robot_commands queue can be shared
-    with ManualControlManager, or None if startup fails.
+    with ManualControlManager and the gait-loop, or None if startup fails.
     """
     try:
-        from Common.multiprocess_kb import RobotKeyboardController, monitor_commands
+        from Common.multiprocess_kb import RobotKeyboardController
         controller = RobotKeyboardController()
-        # Run monitor_commands as a daemon so it exits automatically when main exits
-        thread = threading.Thread(
-            target=monitor_commands,
-            args=(1, controller.robot_commands, controller._running),
-            daemon=True,
-            name="robot-command-monitor",
-        )
-        thread.start()
-        logger.log_system_state("ROBOT_COMMAND_MONITOR_STARTED")
-        print("Robot command monitor started (keyboard movement queue active)")
+        logger.log_system_state("ROBOT_KEYBOARD_CONTROLLER_INIT ok")
+        print("RobotKeyboardController initialised (robot_commands queue ready)")
         return controller
     except Exception as e:
         logger.log_error("Main.keyboard_controller_start", str(e))
