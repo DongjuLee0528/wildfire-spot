@@ -46,6 +46,8 @@ _PAN_STATE_MAP = {
 }
 
 
+# Sentinel that distinguishes "caller did not pass this argument" from None,
+# so configure() can be called multiple times with a partial set of subsystems.
 _UNSET = object()
 
 
@@ -58,6 +60,22 @@ def configure(
     camera_control_manager=_UNSET,
     camera_vision=_UNSET,
 ):
+    """
+    Inject runtime dependencies into the API module.
+
+    Called once from main.py after all subsystems are initialised.
+    Only keyword arguments explicitly passed by the caller are updated;
+    omitted arguments leave the corresponding global unchanged.
+
+    Args:
+        state_machine: StateMachine instance for robot state queries.
+        collector: RobotCoreDataCollector for reading sensor/GPS/fire data.
+        manual_control_manager: ManualControlManager for movement commands.
+        mode_control_manager: ModeControlManager for AUTO/MANUAL switching.
+        patrol_zone_manager: PatrolZoneManager for GPS waypoint management.
+        camera_control_manager: CameraControlManager for pan-tilt control.
+        camera_vision: CameraVision instance for live video streaming.
+    """
     global _state_machine, _collector, _manual_control_manager
     global _mode_control_manager, _patrol_zone_manager, _camera_control_manager, _camera_vision
     if state_machine is not _UNSET:
@@ -101,6 +119,7 @@ class ZonePointRequest(BaseModel):
 
 @app.get("/robot/status")
 def get_status():
+    """Return current robot state, operating mode, and connection status."""
     try:
         if _collector is None:
             return JSONResponse(
@@ -121,6 +140,7 @@ def get_status():
 
 @app.get("/robot/gps")
 def get_gps():
+    """Return the latest GPS fix data; latitude/longitude are None when no fix."""
     try:
         if _collector is None:
             return {"latitude": None, "longitude": None, "fix": False, "updatedAt": datetime.now().isoformat()}
@@ -138,6 +158,7 @@ def get_gps():
 
 @app.get("/robot/sensors")
 def get_sensors():
+    """Return latest readings from all onboard sensors (DHT11, MQ2, KY026)."""
     try:
         if _collector is None:
             return {
@@ -167,6 +188,7 @@ def get_sensors():
 
 @app.get("/robot/health")
 def get_health():
+    """Return availability flags for each hardware subsystem."""
     try:
         if _collector is None:
             return {"robot": False, "camera": False, "gps": False, "lidar": False, "sensor": False}
@@ -185,6 +207,7 @@ def get_health():
 
 @app.get("/robot/fire/status")
 def get_fire_status():
+    """Return the latest fire detection state, confidence level, and raw events."""
     try:
         if _collector is None:
             return {
@@ -227,6 +250,7 @@ def get_fire_status():
 
 @app.get("/robot/logs")
 def get_logs():
+    """Return in-memory log entries from WildfireLogger (level, message, timestamp)."""
     try:
         if _collector is None:
             return {"logs": []}
@@ -248,6 +272,7 @@ def get_logs():
 
 @app.get("/robot/mission/zone")
 def get_mission_zone():
+    """Return current patrol zone waypoint list and whether it has enough points."""
     try:
         if _patrol_zone_manager is None:
             return {"points": [], "ready": False}
@@ -262,6 +287,7 @@ def get_mission_zone():
 
 @app.post("/robot/control")
 def post_control(body: ControlRequest):
+    """Send a directional movement command (FORWARD/BACKWARD/LEFT/RIGHT/STOP/RESET)."""
     try:
         if _manual_control_manager is None:
             return JSONResponse(
@@ -278,6 +304,7 @@ def post_control(body: ControlRequest):
 
 @app.post("/robot/mode")
 def post_mode(body: ModeRequest):
+    """Switch the operating mode between AUTO and MANUAL."""
     try:
         if _mode_control_manager is None:
             return JSONResponse(
@@ -294,6 +321,7 @@ def post_mode(body: ModeRequest):
 
 @app.post("/robot/mission/zone/points")
 def post_zone_point(body: ZonePointRequest):
+    """Append a GPS waypoint to the patrol zone; rejects out-of-range coordinates."""
     try:
         if _patrol_zone_manager is None:
             return JSONResponse(
@@ -314,6 +342,7 @@ def post_zone_point(body: ZonePointRequest):
 
 @app.delete("/robot/mission/zone")
 def delete_mission_zone():
+    """Clear all patrol zone waypoints and reset the zone to empty."""
     try:
         if _patrol_zone_manager is None:
             return JSONResponse(
@@ -329,6 +358,12 @@ def delete_mission_zone():
 
 @app.post("/robot/camera/control")
 async def post_camera_control(request: Request):
+    """
+    Send a pan-tilt camera command.
+
+    Accepted commands: CAMERA_LEFT, CAMERA_RIGHT, CAMERA_STOP,
+    CAMERA_UP, CAMERA_DOWN, CAMERA_CENTER.
+    """
     try:
         try:
             payload = await request.json()
@@ -380,6 +415,7 @@ async def post_camera_control(request: Request):
 
 @app.get("/robot/camera/status")
 def get_camera_status():
+    """Return current camera availability and pan-tilt position."""
     try:
         if _camera_control_manager is None or not _camera_control_manager.is_available():
             return {"available": False, "pan": "STOP", "tilt": None}
@@ -397,6 +433,12 @@ def get_camera_status():
 
 @app.get("/robot/camera/stream")
 async def get_camera_stream():
+    """
+    Stream MJPEG video from the onboard camera.
+
+    Returns a multipart/x-mixed-replace response at ~30 fps.
+    Stops automatically after 30 consecutive frame-read failures.
+    """
     try:
         import cv2 as _cv2
     except ImportError:
@@ -406,6 +448,7 @@ async def get_camera_stream():
         return JSONResponse(status_code=503, content={"error": "stream_unavailable"})
 
     async def _generate():
+        """Async generator that yields MJPEG boundary-delimited JPEG frames."""
         consecutive_failures = 0
         _MAX_FAILURES = 30
         while True:
@@ -433,7 +476,7 @@ async def get_camera_stream():
                 if consecutive_failures >= _MAX_FAILURES:
                     logger.warning("camera stream stopping: %d consecutive None frames", consecutive_failures)
                     break
-            await asyncio.sleep(0.033)
+            await asyncio.sleep(0.033)  # ~30 fps target frame rate
 
     return StreamingResponse(
         _generate(),
