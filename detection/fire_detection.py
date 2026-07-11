@@ -65,13 +65,13 @@ class FireDetector:
         self.gps_manager = gps_manager
         self.pan_tilt_controller = pan_tilt_controller
         self.camera_vision = camera_vision
-        self.camera_detected = False
-        self.sensor_detected = False
-        self.detection_log = []  # History of fire detections
-        self._last_detection_result = False
-        self._current_fire_state = DetectionState.NORMAL
-        self._latest_alert_event = None
-        self._latest_report_event = None
+        self.camera_detected = False          # True when camera AI reports fire/smoke
+        self.sensor_detected = False           # True when hardware sensors exceed thresholds
+        self.detection_log = []               # History of fire detections for direction analysis
+        self._last_detection_result = False   # Result of the most recent is_fire_detected() call
+        self._current_fire_state = DetectionState.NORMAL  # State from the most recent evaluate()
+        self._latest_alert_event = None       # AlertEvent from the most recent SUSPECTED_FIRE
+        self._latest_report_event = None      # ReportEvent from the most recent VERIFIED_FIRE
         self.logger = WildfireLogger("FireDetector")
 
     def _check_sensor_thresholds(self, sensor_data):
@@ -261,13 +261,15 @@ class FireDetector:
         try:
             sensor_data = self.sensor_manager.read_all()
 
-            # Check both detection methods
+            # Run camera detection for logging/evidence even though it is not
+            # authoritative — only hardware sensor thresholds determine fire_detected.
             self.detect_by_camera()
             sensor_detection = self._check_sensor_thresholds(sensor_data)
 
+            # Camera result is stored but does not override sensor-based decision
             fire_detected = sensor_detection
 
-            # On detection, log full context and track fire direction
+            # On sensor-confirmed detection, record full context and aim camera
             if fire_detected:
                 location = self.gps_manager.get_coordinates()
                 direction = self.track_fire_direction(sensor_data)
@@ -348,17 +350,22 @@ class FireDetector:
             lat = None
             lon = None
 
+        # Hard sensor triggers: MQ2 smoke above threshold OR any KY026 flame sensor active.
+        # DHT11 temperature/humidity readings alone never produce a hard trigger.
         sensor_hard_triggered = mq2_triggered or ky026_triggered
+        # Suspected if either the camera AI or any hard sensor triggered
         suspected = camera_fire or sensor_hard_triggered
 
         self.sensor_detected = sensor_hard_triggered
 
         if not suspected:
+            # Clear any stale event state when conditions return to normal
             self._current_fire_state = DetectionState.NORMAL
             self._latest_alert_event = None
             self._latest_report_event = None
             return DetectionState.NORMAL, None, None
 
+        # VERIFIED_FIRE requires both camera confirmation AND at least one hard sensor
         if camera_fire and sensor_hard_triggered:
             state = DetectionState.VERIFIED_FIRE
             reasons = []
@@ -368,10 +375,11 @@ class FireDetector:
                 reasons.append("ky026")
             if camera_fire:
                 reasons.append("camera")
-            reason_str = "+".join(reasons)
+            reason_str = "+".join(reasons)  # e.g. "mq2+ky026+camera"
             image_path = None
             if self.camera_vision is not None:
                 try:
+                    # Save a JPEG frame as forensic evidence for the report
                     image_path = self.camera_vision.save_evidence_image("verified_fire", EVIDENCE_DIR)
                 except Exception as e:
                     self.logger.log_error("FireDetector.evaluate", f"evidence save failed: {e}")
@@ -396,6 +404,7 @@ class FireDetector:
             self.logger.info(f"FIRE_EVAL | VERIFIED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
             return state, None, event
 
+        # SUSPECTED_FIRE: camera OR hard sensor, but not both simultaneously
         reasons = []
         if camera_fire:
             reasons.append("camera")
@@ -403,11 +412,12 @@ class FireDetector:
             reasons.append("mq2")
         if ky026_triggered:
             reasons.append("ky026")
-        reason_str = "+".join(reasons)
+        reason_str = "+".join(reasons)  # e.g. "camera" or "mq2+ky026"
         state = DetectionState.SUSPECTED_FIRE
         image_path = None
         if self.camera_vision is not None:
             try:
+                # Save preliminary evidence image for the alert
                 image_path = self.camera_vision.save_evidence_image("suspected_fire", EVIDENCE_DIR)
             except Exception as e:
                 self.logger.log_error("FireDetector.evaluate", f"evidence save failed: {e}")
