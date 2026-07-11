@@ -36,9 +36,19 @@ class RobotRuntimeContext:
     """
 
     def __init__(self):
+        """
+        Initialise all hardware managers in dependency order.
+
+        Managers that fail to initialise are left as None; callers must
+        handle None values. Initialisation order matters:
+        1. StateMachine — no hardware dependency
+        2. GPSManager   — UART/USB GPS device
+        3. SensorManager — I2C/GPIO sensors (DHT11, MQ2, KY026)
+        4. FireDetector — requires sensor_manager and gps_manager
+        """
         self.gps_manager = None
         self.sensor_manager = None
-        self.lidar_manager = None
+        self.lidar_manager = None    # Not initialised here; see module docstring
         self.state_machine = None
         self.fire_detector = None
 
@@ -48,6 +58,7 @@ class RobotRuntimeContext:
         self._init_fire_detector()
 
     def _init_state_machine(self):
+        """Instantiate StateMachine; sets self.state_machine or logs and leaves it None."""
         try:
             from utils.state_machine import StateMachine
             self.state_machine = StateMachine()
@@ -56,6 +67,7 @@ class RobotRuntimeContext:
             logger.error("RobotRuntimeContext: StateMachine init failed: %s", e)
 
     def _init_gps(self):
+        """Open the GPS serial device; sets self.gps_manager or logs and leaves it None."""
         try:
             from hardware.gps_manager import GPSManager
             self.gps_manager = GPSManager()
@@ -64,6 +76,7 @@ class RobotRuntimeContext:
             logger.error("RobotRuntimeContext: GPSManager init failed: %s", e)
 
     def _init_sensors(self):
+        """Initialise I2C/GPIO sensors; sets self.sensor_manager or logs and leaves it None."""
         try:
             from hardware.sensor_manager import SensorManager
             self.sensor_manager = SensorManager()
@@ -72,6 +85,13 @@ class RobotRuntimeContext:
             logger.error("RobotRuntimeContext: SensorManager init failed: %s", e)
 
     def _init_fire_detector(self):
+        """
+        Instantiate FireDetector if both sensor_manager and gps_manager are available.
+
+        pan_tilt_controller is passed as None because CameraControlManager is
+        initialised separately (after servo hardware) and wired into robot_api;
+        FireDetector can operate without it and will skip camera-based detection.
+        """
         if self.sensor_manager is None or self.gps_manager is None:
             logger.warning(
                 "RobotRuntimeContext: FireDetector skipped "
