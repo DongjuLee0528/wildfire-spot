@@ -10,6 +10,7 @@ from math import isfinite
 from utils.config import PATROL_ZONE_MIN_POINTS
 from utils.logger import WildfireLogger
 
+# WGS-84 coordinate bounds used for input validation
 _LAT_MIN = -90.0
 _LAT_MAX = 90.0
 _LON_MIN = -180.0
@@ -17,7 +18,12 @@ _LON_MAX = 180.0
 
 
 def _is_valid_point(point):
-    """Return True if point is a dict with finite lat/lon values within valid ranges."""
+    """
+    Return True if point is a dict with finite lat/lon values within WGS-84 bounds.
+
+    Used internally by validate_patrol_zone() to verify stored point integrity.
+    Accepts only dicts with 'latitude' and 'longitude' float-convertible keys.
+    """
     if not isinstance(point, dict):
         return False
     try:
@@ -42,7 +48,7 @@ class PatrolZoneManager:
     def __init__(self):
         """Initialise with an empty patrol zone."""
         self.logger = WildfireLogger("PatrolZoneManager")
-        self._points = []
+        self._points = []  # Ordered list of {latitude, longitude} dicts
 
     def add_patrol_point(self, latitude, longitude):
         """
@@ -92,7 +98,7 @@ class PatrolZoneManager:
         Return a defensive copy of the current patrol zone point list.
 
         Each dict is independently copied so external mutation cannot affect
-        internal state.
+        internal state. Callers may modify the returned list freely.
 
         Returns:
             List of dicts, each with keys 'latitude' and 'longitude'.
@@ -100,7 +106,12 @@ class PatrolZoneManager:
         return [point.copy() for point in self._points]
 
     def reset_patrol_zone(self):
-        """Clear all patrol zone points and log the reset event."""
+        """
+        Clear all patrol zone points and log the reset event.
+
+        After a reset the zone is no longer ready (is_patrol_zone_ready() → False)
+        until new points are added via add_patrol_point().
+        """
         count = len(self._points)
         self._points = []
         self.logger.info(f"PATROL_ZONE | Zone reset. {count} point(s) cleared.")
