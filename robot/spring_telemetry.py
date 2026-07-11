@@ -42,13 +42,22 @@ class SpringTelemetry:
         data_collector=None,
         interval: float = DEVICE_TELEMETRY_INTERVAL_SECONDS,
     ):
+        """
+        Initialise the telemetry uploader.
+
+        Args:
+            client: Authenticated SpringApiClient used for all uploads.
+            data_collector: RobotCoreDataCollector providing live sensor/GPS/fire data.
+                            When None only heartbeats with default values are sent.
+            interval: Upload cycle period in seconds (minimum 1.0).
+        """
         self._client = client
         self._collector = data_collector
-        self._interval = max(1.0, interval)
+        self._interval = max(1.0, interval)  # Enforce a minimum interval to avoid flooding
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._last_fire_detected: Optional[bool] = None
-        self._last_fire_upload_time: float = 0.0
+        self._last_fire_detected: Optional[bool] = None   # Tracks last uploaded fire state
+        self._last_fire_upload_time: float = 0.0          # monotonic timestamp of last fire upload
 
     def start(self) -> None:
         """Start the background telemetry thread (non-blocking)."""
@@ -72,20 +81,29 @@ class SpringTelemetry:
             logger.info("SpringTelemetry: stopped")
 
     def _loop(self) -> None:
+        """Background thread body: repeatedly run an upload cycle until stop is requested."""
         while not self._stop_event.is_set():
             try:
                 self._upload_cycle()
             except Exception as e:
                 logger.error("SpringTelemetry: unexpected error in upload cycle: %s", e)
+            # Use Event.wait() instead of sleep so stop() can wake the thread immediately
             self._stop_event.wait(self._interval)
 
     def _upload_cycle(self) -> None:
+        """Execute one full telemetry upload cycle (heartbeat → GPS → sensors → fire event)."""
         self._upload_heartbeat()
         self._upload_gps()
         self._upload_sensors()
         self._upload_fire_event()
 
     def _upload_heartbeat(self) -> None:
+        """
+        Upload a heartbeat to keep the device marked as online.
+
+        Reads mode and robot_state from the data collector when available.
+        battery_level is always None for now (no battery sensor implemented).
+        """
         try:
             mode = None
             robot_state = None
@@ -104,6 +122,11 @@ class SpringTelemetry:
             logger.error("SpringTelemetry: heartbeat upload error: %s", e)
 
     def _upload_gps(self) -> None:
+        """
+        Upload the latest GPS fix to the Spring backend.
+
+        Skipped if collector is None, GPS is unavailable, or no satellite fix.
+        """
         if self._collector is None:
             return
         try:
@@ -127,6 +150,12 @@ class SpringTelemetry:
             logger.error("SpringTelemetry: GPS upload error: %s", e)
 
     def _upload_sensors(self) -> None:
+        """
+        Upload the latest sensor snapshot (temperature, humidity, smoke, flame).
+
+        Skipped if collector is None or sensor data is unavailable.
+        KY026 flame sensors are OR-reduced to a single boolean flag before upload.
+        """
         if self._collector is None:
             return
         try:
@@ -159,6 +188,16 @@ class SpringTelemetry:
             logger.error("SpringTelemetry: sensor upload error: %s", e)
 
     def _upload_fire_event(self) -> None:
+        """
+        Upload a fire event to the Spring backend when state changes or periodically.
+
+        Upload is suppressed when:
+        - fire_detected is False and no prior state has been recorded (initial NORMAL).
+        - State has not changed since the last upload AND the force interval has not elapsed.
+
+        Confidence values: 0.9 for VERIFIED_FIRE, 0.5 for SUSPECTED_FIRE.
+        GPS coordinates are attached when a fix is available.
+        """
         if self._collector is None:
             return
         try:
@@ -180,12 +219,15 @@ class SpringTelemetry:
             now = time.monotonic()
             state_changed = fire_detected != self._last_fire_detected
 
+            # First cycle: skip upload if fire is not detected to avoid sending
+            # a "no fire" event on every fresh startup before any detection occurs.
             if self._last_fire_detected is None:
                 if not fire_detected:
                     self._last_fire_detected = False
                     return
                 state_changed = True
 
+            # Periodically re-upload to confirm current state even without a change
             force_due = (now - self._last_fire_upload_time) >= _FIRE_EVENT_FORCE_INTERVAL_SECONDS
 
             if not state_changed and not force_due:
