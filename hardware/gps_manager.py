@@ -37,24 +37,25 @@ class GPSManager:
 
     def get_location(self):
         """
-        Get current GPS location from GPRMC sentence.
+        Read one NMEA sentence and return coordinates if a valid GPRMC fix is found.
+
+        Reads exactly one line from the serial port. If the line is not a GPRMC
+        sentence or the fix status is 'V' (void), returns None without retrying.
+        Callers that need a guaranteed reading should use get_current_coordinates().
 
         Returns:
             Tuple of (latitude, longitude) if valid fix available
-            None if GPS unavailable or no valid fix
-
-        Only returns when GPS status is 'A' (active/valid fix).
-        Logs successful coordinate retrieval.
+            None if GPS unavailable, line is not GPRMC, or status != 'A'
         """
         if not self._available or self._serial is None:
             return None
 
         try:
             line = self._serial.readline().decode('ascii', errors='replace')
-            # GPRMC contains recommended minimum GPS data
+            # GPRMC = Recommended Minimum Specific GPS/Transit Data
             if line.startswith('$GPRMC'):
                 msg = pynmea2.parse(line)
-                # Status 'A' means active/valid, 'V' means void/invalid
+                # Status 'A' = active/valid fix; 'V' = void/invalid
                 if msg.status == 'A' and msg.latitude is not None and msg.longitude is not None:
                     location = (float(msg.latitude), float(msg.longitude))
                     self.logger.log_gps_location(location)
@@ -66,13 +67,14 @@ class GPSManager:
 
     def get_location_string(self):
         """
-        Get current GPS location as a formatted string.
+        Return the current GPS location as a comma-separated string for logging.
+
+        Reads one NMEA line; returns "N/A" when the GPS is unavailable,
+        the line is not GPRMC, or the fix is void. No retry logic.
 
         Returns:
             String in format "latitude,longitude" (e.g., "37.123456,-122.654321")
             "N/A" if GPS unavailable or no valid fix
-
-        Useful for logging or display purposes.
         """
         if not self._available or self._serial is None:
             return "N/A"
@@ -91,16 +93,23 @@ class GPSManager:
         return "N/A"
 
     def is_available(self):
-        """Check if GPS module is available and connected."""
+        """
+        Return True if the serial port was successfully opened at construction time.
+
+        Does not verify satellite lock; use get_location() to confirm an active fix.
+        """
         return self._available
 
     def get_coordinates(self):
         """
-        Get current GPS coordinates (alias for get_location).
+        Single-read alias for get_location() used by FireDetector.
 
         Returns:
             Tuple of (latitude, longitude) if valid fix available
             None if GPS unavailable or no valid fix
+
+        Equivalent to get_location() but does not call log_gps_location,
+        so it avoids duplicate log entries when called inside a detection loop.
         """
         if not self._available or self._serial is None:
             return None
@@ -131,7 +140,6 @@ class GPSManager:
             return None
 
         try:
-            # Retry multiple times to ensure we get a valid reading
             for attempt in range(GPS_READ_MAX_ATTEMPTS):
                 if self._serial.in_waiting > 0:
                     line = self._serial.readline().decode('ascii', errors='replace')
@@ -142,7 +150,7 @@ class GPSManager:
                             self.logger.log_gps_location(location)
                             return location
                 else:
-                    # Wait briefly for new data to arrive
+                    # No bytes waiting yet — sleep briefly before the next attempt
                     time.sleep(0.01)
         except (serial.SerialException, UnicodeDecodeError, pynmea2.ParseError, ValueError) as e:
             self.logger.log_error("GPSManager.get_current_coordinates", str(e))
