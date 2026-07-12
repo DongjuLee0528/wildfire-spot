@@ -10,7 +10,12 @@ from utils.logger import WildfireLogger
 
 
 class RobotMode(Enum):
-    """Operating mode that controls which input sources may issue movement commands."""
+    """
+    Operating mode that controls which input sources may issue movement commands.
+
+    AUTO   — Autonomous patrol and detection; manual movement commands are blocked.
+    MANUAL — Operator-driven control via web dashboard or keyboard; patrol logic pauses.
+    """
 
     AUTO = "AUTO"
     MANUAL = "MANUAL"
@@ -18,14 +23,14 @@ class RobotMode(Enum):
 
 class RobotState(Enum):
     """All possible states the wildfire robot can be in."""
-    CALIBRATING = "CALIBRATING"      # Setting up patrol zone boundaries
-    IDLE = "IDLE"                    # Waiting for commands
-    PATROLLING = "PATROLLING"        # Actively monitoring patrol zone
-    DETECTING = "DETECTING"          # Analyzing potential fire signals
-    FIRE_DETECTED = "FIRE_DETECTED"  # Confirmed fire detection
-    REPORTING = "REPORTING"          # Transmitting fire alert data
-    RETURNING = "RETURNING"          # Returning to base/start position
-    ERROR = "ERROR"                  # System error state
+    CALIBRATING = "CALIBRATING"      # Setting up patrol zone boundaries via GPS waypoints
+    IDLE = "IDLE"                    # Waiting for commands; no active patrol
+    PATROLLING = "PATROLLING"        # Actively traversing and monitoring the patrol zone
+    DETECTING = "DETECTING"          # Analysing potential fire signals from sensors/camera
+    FIRE_DETECTED = "FIRE_DETECTED"  # Confirmed fire — awaiting report transmission
+    REPORTING = "REPORTING"          # Transmitting fire alert data to the Spring backend
+    RETURNING = "RETURNING"          # Returning to base/start position after a mission
+    ERROR = "ERROR"                  # Unrecoverable subsystem failure; only IDLE transition allowed
 
 class StateMachine:
     """
@@ -46,7 +51,18 @@ class StateMachine:
             print(f"Failed to initialize logger: {e}")
             self.logger = None
 
-        # Define valid state transitions (from_state: [allowed_to_states])
+        # Valid state transitions map: each key state may only move to the listed states.
+        # Any transition not listed here will be rejected by transition_to().
+        #
+        # Allowed transition graph:
+        #   CALIBRATING -> IDLE
+        #   IDLE        -> PATROLLING | CALIBRATING | ERROR
+        #   PATROLLING  -> DETECTING  | IDLE        | ERROR
+        #   DETECTING   -> FIRE_DETECTED | PATROLLING | ERROR
+        #   FIRE_DETECTED -> REPORTING | ERROR
+        #   REPORTING   -> RETURNING  | ERROR
+        #   RETURNING   -> IDLE       | ERROR
+        #   ERROR       -> IDLE
         self._valid_transitions = {
             RobotState.CALIBRATING: [RobotState.IDLE],
             RobotState.IDLE: [RobotState.PATROLLING, RobotState.CALIBRATING, RobotState.ERROR],
@@ -128,10 +144,10 @@ class StateMachine:
         return self._current_mode
 
     def get_state(self):
-        """Get the current robot state."""
+        """Return the current RobotState."""
         return self._current_state
 
     def close(self):
-        """Clean up logger resources."""
+        """Release logger resources; call once on shutdown."""
         if hasattr(self, 'logger') and self.logger is not None:
             self.logger.close()
