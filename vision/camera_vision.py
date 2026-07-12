@@ -28,6 +28,8 @@ try:
 except ImportError:
     YOLO = None
 
+# Canonical empty result used as a template when camera or model is unavailable.
+# Always copied before returning to prevent callers from mutating the shared object.
 _EMPTY_RESULT = {
     "camera_available": False,
     "model_available": False,
@@ -40,7 +42,12 @@ _EMPTY_RESULT = {
 
 
 def _copy_result(result):
-    """Return a result copy with a fresh detections list."""
+    """
+    Return a shallow copy of a detection result with a fully independent detections list.
+
+    Bbox lists inside each detection are also copied so callers cannot mutate
+    the stored _latest_result through a returned reference.
+    """
     copied = dict(result)
     copied["detections"] = [
         {
@@ -84,8 +91,8 @@ class CameraVision:
         self._latest_result = _empty_result()
         self._latest_frame = None
 
-        self._camera_available = False
-        self._model_available = False
+        self._camera_available = False  # True after VideoCapture is successfully opened
+        self._model_available = False    # True after YOLO model is loaded from MODEL_PATH
 
         if cv2 is None:
             self.logger.log_error("CameraVision.__init__", "opencv-python (cv2) is not installed")
@@ -93,6 +100,7 @@ class CameraVision:
             try:
                 cap = cv2.VideoCapture(CAMERA_DEVICE)
                 if cap.isOpened():
+                    # Set capture resolution and frame rate to config values
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
                     cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
@@ -108,7 +116,7 @@ class CameraVision:
             self.logger.log_error("CameraVision.__init__", "ultralytics is not installed")
         else:
             try:
-                self._model = YOLO(MODEL_PATH)
+                self._model = YOLO(MODEL_PATH)  # Loads weights from MODEL_PATH (e.g. best.pt)
                 self._model_available = True
             except Exception as e:
                 self.logger.log_error("CameraVision.__init__", f"Model load error ({MODEL_PATH}): {e}")
@@ -201,6 +209,7 @@ class CameraVision:
             return result
 
         try:
+            # Run YOLO inference; verbose=False suppresses per-frame console output
             predictions = self._model(frame, verbose=False, conf=CAMERA_CONFIDENCE_THRESHOLD, iou=CAMERA_IOU_THRESHOLD)
         except Exception as e:
             self.logger.log_error("CameraVision.detect_from_frame", f"Inference error: {e}")
@@ -218,7 +227,7 @@ class CameraVision:
                     try:
                         conf = float(box.conf[0])
                         if conf < CAMERA_CONFIDENCE_THRESHOLD:
-                            continue
+                            continue  # Skip low-confidence detections
                         cls_id = int(box.cls[0])
                         cls_name = names.get(cls_id, str(cls_id)).lower()
                         x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
@@ -226,7 +235,7 @@ class CameraVision:
                             "class_id": cls_id,
                             "class_name": cls_name,
                             "confidence": conf,
-                            "bbox": [x1, y1, x2, y2],
+                            "bbox": [x1, y1, x2, y2],  # Pixel coordinates [left, top, right, bottom]
                         })
                         if cls_name in CAMERA_FIRE_CLASSES:
                             result["detected"] = True
@@ -235,7 +244,7 @@ class CameraVision:
                             if cls_name == "smoke":
                                 result["smoke_detected"] = True
                             if conf > result["confidence"]:
-                                result["confidence"] = conf
+                                result["confidence"] = conf  # Track highest confidence among detections
                     except Exception as e:
                         self.logger.log_error("CameraVision.detect_from_frame", f"Box parse error: {e}")
 
