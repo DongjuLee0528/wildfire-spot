@@ -8,6 +8,15 @@ from utils.config import (ROBOT_L1, ROBOT_L2, ROBOT_L3, ROBOT_L4, ROBOT_L, ROBOT
                          ROBOT_BODY_HEIGHT, GAIT_BODY_POS, GAIT_BODY_ROT)
 
 def create_3d_plot(axis_range):
+    """
+    Create a symmetric 3D matplotlib axes for visualising robot geometry.
+
+    Args:
+        axis_range: Half-width of each axis in mm (e.g. 200 → range [-200, 200]).
+
+    Returns:
+        Axes3D instance with labelled X/Y/Z axes.
+    """
     figure_axis = plt.axes(projection="3d")
     figure_axis.set_xlim(-axis_range, axis_range)
     figure_axis.set_ylim(-axis_range, axis_range)
@@ -37,23 +46,29 @@ class DHParameterSolver:
     """
 
     def __init__(self):
+        """
+        Load robot geometry constants from config and initialise the angle buffer.
+
+        All link lengths are in millimetres. Index constants map leg identifiers
+        to rows/columns in the 4×3 joint-angle result array.
+        """
         # Link lengths (mm) loaded from config
-        self.L1 = ROBOT_L1   # Coxa (shoulder to femur pivot)
-        self.L2 = ROBOT_L2   # Femur lateral offset
-        self.L3 = ROBOT_L3   # Femur link
-        self.L4 = ROBOT_L4   # Tibia link
+        self.L1 = ROBOT_L1   # Coxa: shoulder pivot to femur pivot
+        self.L2 = ROBOT_L2   # Femur lateral offset from the shoulder axis
+        self.L3 = ROBOT_L3   # Femur link (upper leg)
+        self.L4 = ROBOT_L4   # Tibia link (lower leg)
 
         # Body dimensions (mm)
-        self.body_length_L = ROBOT_L  # Front-to-back leg spacing
-        self.body_width_W  = ROBOT_W  # Left-to-right leg spacing
+        self.body_length_L = ROBOT_L  # Front-to-back leg attachment spacing
+        self.body_width_W  = ROBOT_W  # Left-to-right leg attachment spacing
 
-        # Index constants used when storing angles into the 4×3 results array
+        # Row/column index constants for the 4×3 results array [FL, FR, BL, BR]
         self.front_leg_index = ROBOT_LEG_FRONT  # Row offset for front legs (0)
         self.back_leg_index  = ROBOT_LEG_BACK   # Row offset for rear legs  (2)
         self.left_leg_index  = ROBOT_LEG_LEFT   # Column offset for left legs (0)
         self.right_leg_index = ROBOT_LEG_RIGHT  # Column offset for right legs (1)
 
-        # Output buffer; updated by solve_complete_inverse_kinematics / init_ik
+        # Output buffer; shape (4, 3) — [leg_index, joint_index], radians
         self.computed_angles = np.zeros((4, 3), dtype=np.float64)
 
     def calculate_inverse_kinematics_single_leg(self, end_effector_pos):
@@ -81,26 +96,26 @@ class DHParameterSolver:
 
             x, y, z = float(end_effector_pos[0]), float(end_effector_pos[1]), float(end_effector_pos[2])
 
-            # Horizontal distance from shoulder to foot projected onto the XY plane
+            # F: horizontal reach from shoulder to foot in the XY plane (coxa removed)
             F = sqrt(max(0, x**2 + y**2 - L1**2))
-            G = F - L2  # Subtract the femur lateral offset
-            H = sqrt(G**2 + z**2)  # Straight-line distance from femur pivot to foot
+            G = F - L2  # Subtract femur lateral offset to get reach from femur pivot
+            H = sqrt(G**2 + z**2)  # Euclidean distance from femur pivot to foot
 
-            # Shoulder yaw: atan2 of projected position minus coxa offset angle
+            # theta1: shoulder yaw — angle to foot minus the coxa offset angle
             theta1 = -atan2(y, x) - atan2(F, -L1)
 
             if abs(L3 * L4) < 1e-10:
-                return (0, 0, 0)
+                return (0, 0, 0)  # Degenerate geometry — avoid division by zero
 
-            # Cosine rule for the knee angle (theta3)
+            # Cosine rule: D = cos(theta3), clipped to [-1, 1] for numerical safety
             D = (H**2 - L3**2 - L4**2) / (2 * L3 * L4)
             if not isfinite(D) or D < -1 or D > 1:
                 print(f"Unreachable IK target: {end_effector_pos}")
                 return (0, 0, 0)
 
-            theta3 = acos(D)  # Knee angle (always positive; sign handled by geometry)
+            theta3 = acos(D)  # Knee angle (always non-negative; sign managed by geometry)
 
-            # Femur angle: difference between line-to-foot angle and tibia contribution
+            # theta2: femur pitch — angle to foot minus the tibia's angular contribution
             theta2 = atan2(z, G) - atan2(L4*sin(theta3), L3+L4*cos(theta3))
 
             if not all(isfinite(angle) for angle in (theta1, theta2, theta3)):
@@ -165,7 +180,7 @@ class DHParameterSolver:
         Returns:
             List of four 4×4 numpy arrays [FL, FR, BL, BR].
         """
-        # Rotation matrices around each axis
+        # Elementary 4×4 rotation matrices (homogeneous coordinates)
         rotation_x = np.array([[1, 0, 0, 0],
                              [0, cos(roll_angle), -sin(roll_angle), 0],
                              [0, sin(roll_angle), cos(roll_angle), 0],
@@ -181,10 +196,10 @@ class DHParameterSolver:
                              [0, 0, 1, 0],
                              [0, 0, 0, 1]])
 
-        # Combined rotation: R = Rx · Ry · Rz
+        # Combined body rotation: R = Rx · Ry · Rz (extrinsic roll-pitch-yaw)
         combined_rotation = rotation_x.dot(rotation_y.dot(rotation_z))
 
-        # Pure translation component
+        # Translation added as the last column of the combined transform
         translation_transform = np.array([[0, 0, 0, x_trans],
                                         [0, 0, 0, y_trans],
                                         [0, 0, 0, z_trans],
@@ -192,12 +207,13 @@ class DHParameterSolver:
 
         complete_transform = translation_transform + combined_rotation
 
-        # Fixed 90° rotation used to reorient each leg attachment point
+        # 90° rotation aligns the leg-local coordinate frame with the body frame
         cos_90 = cos(pi/2)
         sin_90 = sin(pi/2)
         L, W = self.body_length_L, self.body_width_W
 
-        # Each leg attachment matrix = body_transform · fixed_leg_offset
+        # Leg attachment transforms: body_transform × fixed_leg_offset_matrix
+        # Offset encodes each leg's position on the body (±L/2 along X, ±W/2 along Z)
         front_left_transform = complete_transform.dot(np.array([[cos_90, 0, sin_90, L/2],
                                                               [0, 1, 0, 0],
                                                               [-sin_90, 0, cos_90, W/2],

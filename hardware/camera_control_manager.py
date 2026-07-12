@@ -52,21 +52,23 @@ class CameraControlManager:
         Never raises. On any hardware or library failure the manager enters an
         unavailable state; is_available() will return False.
         """
-        self._i2c_interface = None
-        self._front_driver = None
-        self._owns_driver = False
-        self._pan_motor = None
-        self._tilt_motor = None
-        self._tilt_angle = float(CAMERA_TILT_INITIAL_ANGLE)
-        self._pan_state = "stopped"
+        self._i2c_interface = None   # Only set when this manager owns the I2C bus
+        self._front_driver = None      # PCA9685 driver for the front board
+        self._owns_driver = False      # True only when this manager created the driver
+        self._pan_motor = None         # ContinuousServo on CAMERA_PAN_CHANNEL
+        self._tilt_motor = None        # Servo on CAMERA_TILT_CHANNEL
+        self._tilt_angle = float(CAMERA_TILT_INITIAL_ANGLE)  # Last commanded tilt angle
+        self._pan_state = "stopped"    # Human-readable pan direction: 'left'/'right'/'stopped'
 
         try:
             from adafruit_motor import servo as servo_module
 
             if front_driver is not None:
+                # Reuse the already-open PCA9685 driver from QuadrupedServoManager
                 self._front_driver = front_driver
                 self._owns_driver = False
             else:
+                # No shared driver — create an independent I2C + PCA9685 pair
                 from adafruit_pca9685 import PCA9685
                 import busio
                 self._i2c_interface = busio.I2C(I2C_SCL, I2C_SDA)
@@ -74,6 +76,7 @@ class CameraControlManager:
                 self._front_driver.frequency = PWM_FREQUENCY
                 self._owns_driver = True
 
+            # CH6 = 360° continuous servo (pan); CH7 = 180° positional servo (tilt)
             self._pan_motor = servo_module.ContinuousServo(
                 self._front_driver.channels[CAMERA_PAN_CHANNEL],
                 min_pulse=PWM_MIN_PULSE,
@@ -84,6 +87,7 @@ class CameraControlManager:
                 min_pulse=PWM_MIN_PULSE,
                 max_pulse=PWM_MAX_PULSE,
             )
+            # Initialise both motors to a safe resting position
             self._pan_motor.throttle = CAMERA_PAN_STOP_THROTTLE
             self._tilt_motor.angle = self._tilt_angle
         except Exception as e:
@@ -185,6 +189,14 @@ class CameraControlManager:
             self._i2c_interface = None
 
     def _set_pan(self, throttle, state_label, command):
+        """
+        Apply a throttle value to the continuous pan servo.
+
+        Args:
+            throttle: Float in [-1.0, 1.0] where 0.0 = stop.
+            state_label: Human-readable direction string stored in _pan_state.
+            command: API command name included in the response dict.
+        """
         if not self.is_available():
             return self._unavailable_response(command)
         try:
@@ -201,6 +213,14 @@ class CameraControlManager:
             return {"accepted": False, "command": command, "reason": str(e), "position": self._position()}
 
     def _set_tilt(self, new_angle, command):
+        """
+        Move the tilt servo to a new absolute angle.
+
+        Args:
+            new_angle: Target angle in degrees, clamped by camera_up/camera_down
+                       to [CAMERA_TILT_MIN_ANGLE, CAMERA_TILT_MAX_ANGLE].
+            command: API command name included in the response dict.
+        """
         if not self.is_available():
             return self._unavailable_response(command)
         try:
@@ -217,9 +237,11 @@ class CameraControlManager:
             return {"accepted": False, "command": command, "reason": str(e), "position": self._position()}
 
     def _position(self):
+        """Return the current pan state string and tilt angle as a dict."""
         return {"pan": self._pan_state, "tilt": self._tilt_angle}
 
     def _unavailable_response(self, command):
+        """Return a standardised rejection dict when hardware is not initialised."""
         return {
             "accepted": False,
             "command": command,
