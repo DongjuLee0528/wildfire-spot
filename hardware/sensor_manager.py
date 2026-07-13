@@ -46,13 +46,25 @@ except ImportError:
     busio = None
 
 class FlameReadings(dict):
+    """
+    Dict subclass for KY-026 flame sensor readings.
+
+    Keyed by position string ('front_left', 'front_right', 'left', 'right').
+    Iterating yields values (not keys) so it behaves like a list of booleans
+    when consumed by FireDetector._flame_values().
+    Integer indexing by position is also supported for legacy callers.
+    """
+
     def __iter__(self):
+        """Iterate over values (True/False/None per sensor) instead of keys."""
         return iter(self.values())
 
     def __bool__(self):
+        """Return True if any sensor reports flame detected."""
         return any(self.values())
 
     def __getitem__(self, key):
+        """Support both string key ('front_left') and integer index (0-3)."""
         if isinstance(key, int):
             return list(self.values())[key]
         return super().__getitem__(key)
@@ -169,6 +181,18 @@ class SensorManager:
         return int(sum(values) / len(values))
 
     def _init_mq2_adc(self, address, ads_attr, channel_attr):
+        """
+        Attempt to initialise a single ADS1115 ADC at the given I2C address.
+
+        On success, stores the ADS object and its A0 AnalogIn channel as instance
+        attributes and appends the channel to _mq2_channels for averaging.
+        On failure, logs the error without raising.
+
+        Args:
+            address: I2C address of the ADS1115 board (e.g. 0x48 or 0x49).
+            ads_attr: Name of the instance attribute to store the ADS object.
+            channel_attr: Name of the instance attribute to store the AnalogIn channel.
+        """
         if address is None:
             return
         try:
@@ -181,6 +205,19 @@ class SensorManager:
             self.logger.log_error("SensorManager.ADS1115_init", str(e))
 
     def _get_dht11_board_pin(self, pin):
+        """
+        Translate a BOARD pin number into the corresponding adafruit board attribute.
+
+        Args:
+            pin: Integer BOARD pin number (e.g. 18).
+
+        Returns:
+            board.Dxx attribute object for use with adafruit_dht.
+
+        Raises:
+            ValueError: if the pin number is not in the supported mapping.
+            AttributeError: if the board module lacks the expected attribute.
+        """
         supported_pins = {
             18: "D18",
         }
@@ -195,6 +232,11 @@ class SensorManager:
     def read_dht11(self):
         """
         Read temperature and humidity from DHT11 sensor.
+
+        Retries up to 3 times with 1-second delays because DHT11 frequently
+        returns checksum errors on the first read after a period of inactivity.
+        Falls back to the last successful reading (_last_dht11_reading) so
+        callers always receive a value even during transient sensor errors.
 
         Returns:
             Tuple of (temperature in Celsius, relative humidity percentage)
@@ -215,7 +257,7 @@ class SensorManager:
                 last_error = e
 
             if attempt < 2:
-                time.sleep(1.0)
+                time.sleep(1.0)  # DHT11 requires ~1 s between reads
 
         self.logger.warning(f"SensorManager.read_dht11 failed after retries: {last_error}")
         return self._last_dht11_reading
@@ -247,6 +289,17 @@ class SensorManager:
         return flame_detected
 
     def _check_hardware_confirmation(self, smoke, temperature, humidity, flame):
+        """
+        Derive fire_detected and confirmed_fire flags from raw sensor values.
+
+        fire_detected — True if any single indicator threshold is exceeded.
+        confirmed_fire — True only when flame is detected AND at least one
+                         additional indicator (gas, temperature, or humidity)
+                         also exceeds its threshold. This reduces false positives.
+
+        Returns:
+            Tuple (fire_detected: bool, confirmed_fire: bool)
+        """
         flame_values = [v for v in flame.values() if v is not None] if isinstance(flame, dict) else []
         flame_detected = any(flame_values) if flame_values else None
         sensor_conditions = {
@@ -256,6 +309,7 @@ class SensorManager:
             "humidity": humidity is not None and humidity < HUMIDITY_THRESHOLD
         }
         fire_detected = any(sensor_conditions.values())
+        # confirmed_fire requires flame PLUS at least one corroborating sensor
         confirmed_fire = flame_detected and any(
             detected for condition, detected in sensor_conditions.items() if condition != "flame"
         )

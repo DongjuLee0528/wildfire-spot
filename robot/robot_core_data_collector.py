@@ -30,8 +30,8 @@ from robot.robot_api_types import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_LIDAR_STATUS = "UNAVAILABLE"
-_FALLBACK_MODE = "UNKNOWN"
+_DEFAULT_LIDAR_STATUS = "UNAVAILABLE"  # Reported when LidarManager is None or unavailable
+_FALLBACK_MODE = "UNKNOWN"              # Reported when StateMachine cannot supply a mode string
 
 
 class RobotCoreDataCollector(RobotDataCollector):
@@ -98,7 +98,13 @@ class RobotCoreDataCollector(RobotDataCollector):
         )
 
     def get_status(self) -> RobotStatusData:
-        """Read current state from StateMachine and return as RobotStatusData."""
+        """
+        Read current state and mode from StateMachine and return as RobotStatusData.
+
+        robot_connected is always True because this method is only reachable
+        when the robot core process is running. Returns UNKNOWN fallbacks when
+        the StateMachine is None or raises.
+        """
         if self._state_machine is None:
             return RobotStatusData(
                 state="UNKNOWN",
@@ -139,6 +145,7 @@ class RobotCoreDataCollector(RobotDataCollector):
             return None
 
         if coordinates is None:
+            # GPS module present but no valid fix yet
             return None
 
         try:
@@ -148,6 +155,7 @@ class RobotCoreDataCollector(RobotDataCollector):
             logger.error("get_gps: invalid coordinates %r: %s", coordinates, e)
             return None
 
+        # fix=True because get_location() only returns when status == 'A'
         return RobotGpsData(
             latitude=latitude,
             longitude=longitude,
@@ -191,6 +199,7 @@ class RobotCoreDataCollector(RobotDataCollector):
             mq2_gas = int(raw_mq2_gas)
 
             if isinstance(raw_flame, dict):
+                # SensorManager.read_ky026() returns a FlameReadings dict keyed by position
                 if any(value is None for value in raw_flame.values()):
                     logger.debug("get_sensors: flame sensor data partially unavailable, skipping")
                     return None
@@ -201,6 +210,7 @@ class RobotCoreDataCollector(RobotDataCollector):
                     right=bool(raw_flame.get("right", False)),
                 )
             elif hasattr(raw_flame, "__iter__"):
+                # Fallback: treat as ordered iterable [front_left, front_right, left, right]
                 values = list(raw_flame)
                 if len(values) < 4 or any(value is None for value in values[:4]):
                     logger.debug("get_sensors: flame sensor data unavailable, skipping")
@@ -218,6 +228,7 @@ class RobotCoreDataCollector(RobotDataCollector):
             logger.error("get_sensors: sensor data mapping error: %s", e)
             return None
 
+        # Derive lidar_status from LidarManager availability (no data upload channel for lidar)
         lidar_status = _DEFAULT_LIDAR_STATUS
         try:
             if self._lidar_manager is not None:
@@ -289,15 +300,18 @@ class RobotCoreDataCollector(RobotDataCollector):
         try:
             from detection.fire_events import DetectionState
             fire_state = self._fire_detector.get_current_fire_state()
+            # Map DetectionState enum value to uppercase API string
             state_str = {
                 "normal": "NORMAL",
                 "suspected_fire": "SUSPECTED_FIRE",
                 "verified_fire": "VERIFIED_FIRE",
             }.get(fire_state.value, "NORMAL") if fire_state else "NORMAL"
+            # suspected is True for both SUSPECTED and VERIFIED states
             suspected = fire_state in (DetectionState.SUSPECTED_FIRE, DetectionState.VERIFIED_FIRE)
             verified = fire_state is DetectionState.VERIFIED_FIRE
             camera_detected = bool(self._fire_detector.camera_detected)
             sensor_detected = bool(self._fire_detector.sensor_detected)
+            # Defensive copies are produced by FireDetector to prevent external mutation
             latest_alert_event = self._fire_detector.get_latest_alert_event()
             latest_report_event = self._fire_detector.get_latest_report_event()
         except Exception as e:

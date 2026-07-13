@@ -10,6 +10,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     const [cameraStatus, setCameraStatus] = useState({ available: null, pan: 'IDLE', tilt: null });
     const [streamError, setStreamError] = useState(false);
     const imgRef = useRef(null);
+    const activeMovePointerId = useRef(null);
     const [cameraCommandError, setCameraCommandError] = useState('');
     const [controlError, setControlError] = useState('');
     const [modeCommandError, setModeCommandError] = useState('');
@@ -360,6 +361,24 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                 console.error('Camera command failed:', err);
                 setCameraCommandError('REQUEST_FAILED');
             });
+    };
+
+    const handleMoveStart = (command) => (e) => {
+        e.preventDefault();
+        if (activeMovePointerId.current !== null) return;
+        activeMovePointerId.current = e.pointerId;
+        setCurrentKeyCommand(command);
+        sendControlCommand(command);
+        e.currentTarget.blur();
+    };
+
+    const handleMoveStop = (e) => {
+        e.preventDefault();
+        if (activeMovePointerId.current === null || activeMovePointerId.current !== e.pointerId) return;
+        activeMovePointerId.current = null;
+        setCurrentKeyCommand('STOP');
+        sendControlCommand('STOP');
+        e.currentTarget.blur();
     };
 
     useEffect(() => {
@@ -719,12 +738,12 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                             <div className="panel-content command-layout">
                                 <div className="keyboard-map">
                                     <div className="key-row">
-                                        <button className={`key-cap ${currentKeyCommand === 'FORWARD' ? 'pressed' : ''}`} onClick={() => sendControlCommand('FORWARD')}>W</button>
+                                        <button type="button" className={`key-cap ${currentKeyCommand === 'FORWARD' ? 'pressed' : ''}`} onPointerDown={handleMoveStart('FORWARD')} onPointerUp={handleMoveStop} onPointerLeave={handleMoveStop} onPointerCancel={handleMoveStop} onDragStart={(e) => e.preventDefault()}>W</button>
                                     </div>
                                     <div className="key-row">
-                                        <button className={`key-cap ${currentKeyCommand === 'LEFT' ? 'pressed' : ''}`} onClick={() => sendControlCommand('LEFT')}>A</button>
-                                        <button className={`key-cap ${currentKeyCommand === 'BACKWARD' ? 'pressed' : ''}`} onClick={() => sendControlCommand('BACKWARD')}>S</button>
-                                        <button className={`key-cap ${currentKeyCommand === 'RIGHT' ? 'pressed' : ''}`} onClick={() => sendControlCommand('RIGHT')}>D</button>
+                                        <button type="button" className={`key-cap ${currentKeyCommand === 'LEFT' ? 'pressed' : ''}`} onPointerDown={handleMoveStart('LEFT')} onPointerUp={handleMoveStop} onPointerLeave={handleMoveStop} onPointerCancel={handleMoveStop} onDragStart={(e) => e.preventDefault()}>A</button>
+                                        <button type="button" className={`key-cap ${currentKeyCommand === 'BACKWARD' ? 'pressed' : ''}`} onPointerDown={handleMoveStart('BACKWARD')} onPointerUp={handleMoveStop} onPointerLeave={handleMoveStop} onPointerCancel={handleMoveStop} onDragStart={(e) => e.preventDefault()}>S</button>
+                                        <button type="button" className={`key-cap ${currentKeyCommand === 'RIGHT' ? 'pressed' : ''}`} onPointerDown={handleMoveStart('RIGHT')} onPointerUp={handleMoveStop} onPointerLeave={handleMoveStop} onPointerCancel={handleMoveStop} onDragStart={(e) => e.preventDefault()}>D</button>
                                     </div>
                                     <div className="key-row esc-row">
                                         <button className={`key-cap esc ${currentKeyCommand === 'STOP' ? 'pressed' : ''}`} onClick={() => sendControlCommand('STOP')}>ESC (STOP)</button>
