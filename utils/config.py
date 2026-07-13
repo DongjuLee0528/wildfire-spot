@@ -182,7 +182,7 @@ HUMIDITY_THRESHOLD = 20
 
 STEP_HEIGHT = 40
 FORWARD_DISTANCE = 120
-BACKWARD_DISTANCE = -50
+BACKWARD_DISTANCE = -20
 
 SERVO_CHANNELS = 12
 FRONT_LEG_CHANNELS = 6
@@ -201,7 +201,7 @@ LIDAR_PATH_CHECK_RANGE = 10  # Degrees on each side of a heading checked for a c
 
 GAIT_STEP_GAIN = 0.8  # Scaling factor applied to the computed step length
 GAIT_MAX_SL = 2  # Maximum step length multiplier
-GAIT_BODY_POS = (0, 100, 0)  # Default body position (x, y, z) in mm
+GAIT_BODY_POS = (50.0, 80.0, 0.0)  # Default body position (x, y, z) in mm
 GAIT_BODY_ROT = (0, 0, 0)  # Default body rotation (roll, pitch, yaw) in degrees
 GAIT_TIMING = [300, 1200, 300, 200]  # Gait phase durations in ms: [lift, swing, lower, stance]
 GAIT_INITIAL_VALUES = [0.0, 0, 0]
@@ -214,8 +214,8 @@ GAIT_TOTAL_TIME_CALC = 1000  # Normalisation divisor for gait timing calculation
 STAND_FOOT_POSITIONS = (
     (120.0, -100.0, 80.0, 1.0),
     (120.0, -100.0, -80.0, 1.0),
-    (-50.0, -100.0, 80.0, 1.0),
-    (-50.0, -100.0, -80.0, 1.0),
+    (-20.0, -100.0, 80.0, 1.0),
+    (-20.0, -100.0, -80.0, 1.0),
 )
 STAND_BODY_POS = (50.0, 80.0, 0.0)
 STAND_BODY_ROT = (0.0, 0.0, 0.0)
