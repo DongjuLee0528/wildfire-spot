@@ -211,6 +211,15 @@ GAIT_ANGLE_STEP = 0.5  # Step size in degrees for iterative IK angle search
 GAIT_END_Y = 0
 GAIT_TOTAL_TIME_CALC = 1000  # Normalisation divisor for gait timing calculations
 
+STAND_FOOT_POSITIONS = (
+    (120.0, -100.0, 80.0, 1.0),
+    (120.0, -100.0, -80.0, 1.0),
+    (-50.0, -100.0, 80.0, 1.0),
+    (-50.0, -100.0, -80.0, 1.0),
+)
+STAND_BODY_POS = (50.0, 80.0, 0.0)
+STAND_BODY_ROT = (0.0, 0.0, 0.0)
+
 ROBOT_L1 = 50   # Coxa link length in mm
 ROBOT_L2 = 20   # Femur offset length in mm
 ROBOT_L3 = 100  # Femur link length in mm
