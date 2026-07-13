@@ -100,10 +100,21 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
 
     def _loop():
         # Import config inside thread to ensure values are read at runtime
-        from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT
+        from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT, STAND_BODY_POS, STAND_BODY_ROT, STAND_FOOT_POSITIONS
         import numpy as np
         _diag_last_log = [0.0]  # mutable cell so inner scope can update it
         _DIAG_INTERVAL = 1.0    # emit GAIT_DEBUG at most once per second
+        _stand_pose_applied = [False]
+
+        def _apply_stand_pose_once():
+            if _stand_pose_applied[0]:
+                return
+            stand_foot_positions = np.array(STAND_FOOT_POSITIONS, dtype=np.float64)
+            stand_joint_angles = kinematics.solve_complete_inverse_kinematics(
+                stand_foot_positions, STAND_BODY_POS, STAND_BODY_ROT
+            )
+            servo_manager.execute_servo_motion(stand_joint_angles)
+            _stand_pose_applied[0] = True
 
         while True:
             command_data = None
@@ -115,8 +126,9 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                 continue
 
             try:
-                # Skip movement if StartStepping is False (STOP / RESET command)
+                # Hold a known stand pose when idle or stopped.
                 if not command_data.get("StartStepping", False):
+                    _apply_stand_pose_once()
                     command_queue.put(command_data)
                     time.sleep(0.02)
                     continue
@@ -133,6 +145,7 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                     foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT
                 )
                 servo_manager.execute_servo_motion(joint_angles)
+                _stand_pose_applied[0] = False
 
                 # Diagnostic log — emitted at most once per second while stepping
                 try:
