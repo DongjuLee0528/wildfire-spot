@@ -182,7 +182,7 @@ HUMIDITY_THRESHOLD = 20
 
 STEP_HEIGHT = 40
 FORWARD_DISTANCE = 120
-BACKWARD_DISTANCE = -50
+BACKWARD_DISTANCE = -20
 
 SERVO_CHANNELS = 12
 FRONT_LEG_CHANNELS = 6
@@ -214,8 +214,8 @@ GAIT_TOTAL_TIME_CALC = 1000  # Normalisation divisor for gait timing calculation
 STAND_FOOT_POSITIONS = (
     (120.0, -100.0, 80.0, 1.0),
     (120.0, -100.0, -80.0, 1.0),
-    (-50.0, -100.0, 80.0, 1.0),
-    (-50.0, -100.0, -80.0, 1.0),
+    (-20.0, -100.0, 80.0, 1.0),
+    (-20.0, -100.0, -80.0, 1.0),
 )
 STAND_BODY_POS = (50.0, 80.0, 0.0)
 STAND_BODY_ROT = (0.0, 0.0, 0.0)
