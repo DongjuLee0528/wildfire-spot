@@ -201,7 +201,7 @@ LIDAR_PATH_CHECK_RANGE = 10  # Degrees on each side of a heading checked for a c
 
 GAIT_STEP_GAIN = 0.8  # Scaling factor applied to the computed step length
 GAIT_MAX_SL = 2  # Maximum step length multiplier
-GAIT_BODY_POS = (0, 100, 0)  # Default body position (x, y, z) in mm
+GAIT_BODY_POS = (50.0, 80.0, 0.0)  # Default body position (x, y, z) in mm
 GAIT_BODY_ROT = (0, 0, 0)  # Default body rotation (roll, pitch, yaw) in degrees
 GAIT_TIMING = [300, 1200, 300, 200]  # Gait phase durations in ms: [lift, swing, lower, stance]
 GAIT_INITIAL_VALUES = [0.0, 0, 0]
