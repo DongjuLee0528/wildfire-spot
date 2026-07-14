@@ -96,6 +96,21 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
         print(f"Gait loop unavailable: {e}")
         return
 
+    import atexit
+    _rear_gait_log_path = "/tmp/wildfire-rear-gait-debug.log"
+    _rg_file = open(_rear_gait_log_path, "a", buffering=1)
+    atexit.register(_rg_file.close)
+    _RG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+    def _rg_write(line):
+        try:
+            if _rg_file.tell() >= _RG_MAX_BYTES:
+                _rg_file.seek(0)
+                _rg_file.truncate()
+            _rg_file.write(line + "\n")
+        except Exception:
+            pass
+
     command_queue = kb_controller.robot_commands
 
     def _loop():
@@ -104,7 +119,11 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
         import numpy as np
         _diag_last_log = [0.0]  # mutable cell so inner scope can update it
         _DIAG_INTERVAL = 1.0    # emit GAIT_DEBUG at most once per second
+        from utils.config import GAIT_TIMING, GAIT_TOTAL_TIME_CALC
+        _GAIT_TOTAL_PERIOD = sum(GAIT_TIMING)
         _stand_pose_applied = [False]
+        _was_stepping = [False]
+        _last_command_name = ["STOP"]
 
         def _apply_stand_pose_once():
             if _stand_pose_applied[0]:
@@ -116,36 +135,127 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
             servo_manager.execute_servo_motion(stand_joint_angles)
             _stand_pose_applied[0] = True
 
+        _last_known_command = [{'IDstepLength': 0.0, 'IDstepWidth': 0.0, 'IDstepAlpha': 0.0, 'StartStepping': False}]
+
+        def _drain_latest():
+            latest = None
+            while True:
+                try:
+                    latest = command_queue.get_nowait()
+                except Exception:
+                    break
+            if latest is not None:
+                _last_known_command[0] = latest
+            return _last_known_command[0]
+
         while True:
-            command_data = None
-            try:
-                # Block until a command is available (up to 0.1 s timeout)
-                command_data = command_queue.get(timeout=0.1)
-            except Exception:
-                # Timeout or queue error — just retry
-                continue
+            command_data = _drain_latest()
 
             try:
                 # Hold a known stand pose when idle or stopped.
                 if not command_data.get("StartStepping", False):
+                    if _was_stepping[0]:
+                        try:
+                            _rg_write(
+                                f"REAR_GAIT_DEBUG | ts={time.time():.6f} elapsed={time.monotonic():.6f}"
+                                f" phase_ms=STOP command=STOP"
+                                f" start=False IDstepLength={command_data.get('IDstepLength',0)}"
+                                f" IDstepWidth={command_data.get('IDstepWidth',0)}"
+                                f" IDstepAlpha={command_data.get('IDstepAlpha',0)}"
+                                f" BL_foot=[] BL_local=[] BL_joint=[] BL_servo=[]"
+                                f" BR_foot=[] BR_local=[] BR_joint=[] BR_servo=[]"
+                                f" clamped=[] servo_ok=False"
+                            )
+                        except Exception:
+                            pass
+                        _was_stepping[0] = False
+                        _last_command_name[0] = "STOP"
                     _apply_stand_pose_once()
-                    command_queue.put(command_data)
                     time.sleep(0.02)
                     continue
 
                 # Only execute physical movement when the robot is in MANUAL mode
                 if mode_control_manager is not None and not mode_control_manager.is_manual():
-                    command_queue.put(command_data)
                     time.sleep(0.02)
                     continue
 
                 # Full pipeline: gait trajectory → inverse kinematics → servo output
-                foot_positions = gait.calculate_leg_positions(time.time(), command_data)
+                _gait_time = time.time()
+                foot_positions = gait.calculate_leg_positions(_gait_time, command_data)
                 joint_angles = kinematics.solve_complete_inverse_kinematics(
                     foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT
                 )
                 servo_manager.execute_servo_motion(joint_angles)
                 _stand_pose_applied[0] = False
+                _was_stepping[0] = True
+
+                try:
+                    _mono = time.monotonic()
+
+                    # ① command: infer from step values since payload has no 'command' key
+                    _sl = command_data.get('IDstepLength', 0.0)
+                    _sw = command_data.get('IDstepWidth', 0.0)
+                    if _sl < 0:
+                        _cmd_name = "FORWARD"
+                    elif _sl > 0:
+                        _cmd_name = "BACKWARD"
+                    elif _sw < 0:
+                        _cmd_name = "LEFT"
+                    elif _sw > 0:
+                        _cmd_name = "RIGHT"
+                    else:
+                        _cmd_name = "FORWARD"
+                    _last_command_name[0] = _cmd_name
+
+                    # ② phase: actual gait cycle position in ms
+                    _phase_ms = int((_gait_time * GAIT_TOTAL_TIME_CALC) % _GAIT_TOTAL_PERIOD)
+
+                    # ③ servo values: read from _angle_array AFTER clamp inside execute_servo_motion
+                    _final = servo_manager.get_current_angles()
+                    _bl_servo = [round(float(_final[6]), 1), round(float(_final[7]), 1), round(float(_final[8]), 1)]
+                    _br_servo = [round(float(_final[9]), 1), round(float(_final[10]), 1), round(float(_final[11]), 1)]
+
+                    # clamped channels: compare before/after inside servo_manager is not exposed;
+                    # approximate by re-checking final values against limits
+                    from utils.config import SERVO_MAX_ANGLE, SERVO_MIN_ANGLE
+                    _clamped = [ch for ch, v in enumerate(_final)
+                                if v == SERVO_MAX_ANGLE - 1 or v == SERVO_MIN_ANGLE + 1]
+
+                    _roll, _pitch, _yaw = GAIT_BODY_ROT
+                    _bx, _by, _bz = GAIT_BODY_POS
+                    _leg_transforms = kinematics.compute_body_transformation(
+                        _roll, _pitch, _yaw, _bx, _by, _bz
+                    )
+                    _mirror = np.array([[-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
+                    _bl_world = foot_positions[2]
+                    _br_world = foot_positions[3]
+                    _bl_local = np.linalg.inv(_leg_transforms[2]).dot(_bl_world)
+                    _br_local = _mirror.dot(np.linalg.inv(_leg_transforms[3]).dot(_br_world))
+
+                    _bl_j = joint_angles[2]
+                    _br_j = joint_angles[3]
+                    _bl_deg = [round(float(_bl_j[i]) * 180.0 / np.pi, 2) for i in range(3)]
+                    _br_deg = [round(float(_br_j[i]) * 180.0 / np.pi, 2) for i in range(3)]
+
+                    _bl_foot_r = [round(float(_bl_world[i]), 2) for i in range(3)]
+                    _br_foot_r = [round(float(_br_world[i]), 2) for i in range(3)]
+                    _bl_local_r = [round(float(_bl_local[i]), 2) for i in range(3)]
+                    _br_local_r = [round(float(_br_local[i]), 2) for i in range(3)]
+
+                    _rg_write(
+                        f"REAR_GAIT_DEBUG | ts={_gait_time:.6f} elapsed={_mono:.6f}"
+                        f" phase_ms={_phase_ms} command={_cmd_name}"
+                        f" start=True IDstepLength={_sl}"
+                        f" IDstepWidth={_sw}"
+                        f" IDstepAlpha={command_data.get('IDstepAlpha',0)}"
+                        f" BL_foot={_bl_foot_r} BL_local={_bl_local_r}"
+                        f" BL_joint={_bl_deg} BL_servo=[CH6={_bl_servo[0]},CH7={_bl_servo[1]},CH8={_bl_servo[2]}]"
+                        f" BR_foot={_br_foot_r} BR_local={_br_local_r}"
+                        f" BR_joint={_br_deg} BR_servo=[CH9={_br_servo[0]},CH10={_br_servo[1]},CH11={_br_servo[2]}]"
+                        f" clamped={_clamped} servo_ok=True"
+                    )
+                except Exception:
+                    pass
 
                 # Diagnostic log — emitted at most once per second while stepping
                 try:
@@ -169,16 +279,8 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                 except Exception:
                     pass
 
-                # Re-insert command so the next loop iteration can read it
-                command_queue.put(command_data)
             except Exception as e:
                 logger.log_error("GaitLoop", str(e))
-                # Always restore the command to avoid starving the queue
-                if command_data is not None:
-                    try:
-                        command_queue.put(command_data)
-                    except Exception:
-                        pass
             # ~50 Hz max update rate
             time.sleep(0.02)
 
