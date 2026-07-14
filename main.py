@@ -135,14 +135,21 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
             servo_manager.execute_servo_motion(stand_joint_angles)
             _stand_pose_applied[0] = True
 
+        _last_known_command = [{'IDstepLength': 0.0, 'IDstepWidth': 0.0, 'IDstepAlpha': 0.0, 'StartStepping': False}]
+
+        def _drain_latest():
+            latest = None
+            while True:
+                try:
+                    latest = command_queue.get_nowait()
+                except Exception:
+                    break
+            if latest is not None:
+                _last_known_command[0] = latest
+            return _last_known_command[0]
+
         while True:
-            command_data = None
-            try:
-                # Block until a command is available (up to 0.1 s timeout)
-                command_data = command_queue.get(timeout=0.1)
-            except Exception:
-                # Timeout or queue error — just retry
-                continue
+            command_data = _drain_latest()
 
             try:
                 # Hold a known stand pose when idle or stopped.
@@ -151,7 +158,7 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                         try:
                             _rg_write(
                                 f"REAR_GAIT_DEBUG | ts={time.time():.6f} elapsed={time.monotonic():.6f}"
-                                f" phase_ms=STOP command={_last_command_name[0]}"
+                                f" phase_ms=STOP command=STOP"
                                 f" start=False IDstepLength={command_data.get('IDstepLength',0)}"
                                 f" IDstepWidth={command_data.get('IDstepWidth',0)}"
                                 f" IDstepAlpha={command_data.get('IDstepAlpha',0)}"
@@ -164,13 +171,11 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                         _was_stepping[0] = False
                         _last_command_name[0] = "STOP"
                     _apply_stand_pose_once()
-                    command_queue.put(command_data)
                     time.sleep(0.02)
                     continue
 
                 # Only execute physical movement when the robot is in MANUAL mode
                 if mode_control_manager is not None and not mode_control_manager.is_manual():
-                    command_queue.put(command_data)
                     time.sleep(0.02)
                     continue
 
@@ -274,16 +279,8 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                 except Exception:
                     pass
 
-                # Re-insert command so the next loop iteration can read it
-                command_queue.put(command_data)
             except Exception as e:
                 logger.log_error("GaitLoop", str(e))
-                # Always restore the command to avoid starving the queue
-                if command_data is not None:
-                    try:
-                        command_queue.put(command_data)
-                    except Exception:
-                        pass
             # ~50 Hz max update rate
             time.sleep(0.02)
 
