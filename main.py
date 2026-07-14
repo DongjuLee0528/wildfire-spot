@@ -16,6 +16,7 @@ import time
 import re
 import json
 import threading
+import logging
 from pathlib import Path
 from hardware.camera_control_manager import CameraControlManager
 from utils.config import PATROL_ZONE_MIN_POINTS, SPRING_TELEMETRY_ENABLED, SPRING_API_BASE_URL, DEVICE_SERIAL_NUMBER, DEVICE_KEY
@@ -96,6 +97,16 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
         print(f"Gait loop unavailable: {e}")
         return
 
+    _rear_gait_log_path = "/tmp/wildfire-rear-gait-debug.log"
+    _rear_gait_logger = logging.getLogger("rear_gait_debug")
+    _rear_gait_logger.setLevel(logging.DEBUG)
+    if not _rear_gait_logger.handlers:
+        _rg_file = open(_rear_gait_log_path, "a", buffering=1)
+        _rg_handler = logging.StreamHandler(_rg_file)
+        _rg_handler.setFormatter(logging.Formatter("%(message)s"))
+        _rear_gait_logger.addHandler(_rg_handler)
+        _rear_gait_logger.propagate = False
+
     command_queue = kb_controller.robot_commands
 
     def _loop():
@@ -105,6 +116,7 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
         _diag_last_log = [0.0]  # mutable cell so inner scope can update it
         _DIAG_INTERVAL = 1.0    # emit GAIT_DEBUG at most once per second
         _stand_pose_applied = [False]
+        _was_stepping = [False]
 
         def _apply_stand_pose_once():
             if _stand_pose_applied[0]:
@@ -128,6 +140,21 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
             try:
                 # Hold a known stand pose when idle or stopped.
                 if not command_data.get("StartStepping", False):
+                    if _was_stepping[0]:
+                        try:
+                            _rear_gait_logger.debug(
+                                f"REAR_GAIT_DEBUG | ts={time.time():.6f} elapsed={time.monotonic():.6f}"
+                                f" phase=STOP command={command_data.get('command','?')}"
+                                f" start=False IDstepLength={command_data.get('IDstepLength',0)}"
+                                f" IDstepWidth={command_data.get('IDstepWidth',0)}"
+                                f" IDstepAlpha={command_data.get('IDstepAlpha',0)}"
+                                f" BL_foot=[] BL_local=[] BL_joint=[] BL_servo=[]"
+                                f" BR_foot=[] BR_local=[] BR_joint=[] BR_servo=[]"
+                                f" clamped=[] servo_ok=False"
+                            )
+                        except Exception:
+                            pass
+                        _was_stepping[0] = False
                     _apply_stand_pose_once()
                     command_queue.put(command_data)
                     time.sleep(0.02)
@@ -140,12 +167,64 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                     continue
 
                 # Full pipeline: gait trajectory → inverse kinematics → servo output
-                foot_positions = gait.calculate_leg_positions(time.time(), command_data)
+                _gait_time = time.time()
+                foot_positions = gait.calculate_leg_positions(_gait_time, command_data)
                 joint_angles = kinematics.solve_complete_inverse_kinematics(
                     foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT
                 )
                 servo_manager.execute_servo_motion(joint_angles)
                 _stand_pose_applied[0] = False
+                _was_stepping[0] = True
+
+                try:
+                    _mono = time.monotonic()
+                    _roll, _pitch, _yaw = GAIT_BODY_ROT
+                    _bx, _by, _bz = GAIT_BODY_POS
+                    _leg_transforms = kinematics.compute_body_transformation(
+                        _roll, _pitch, _yaw, _bx, _by, _bz
+                    )
+                    _mirror = np.array([[-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
+
+                    _bl_world = foot_positions[2]
+                    _br_world = foot_positions[3]
+                    _bl_local = np.linalg.inv(_leg_transforms[2]).dot(_bl_world)
+                    _br_local = _mirror.dot(np.linalg.inv(_leg_transforms[3]).dot(_br_world))
+
+                    _bl_j = joint_angles[2]
+                    _br_j = joint_angles[3]
+                    _bl_deg = [round(float(_bl_j[i]) * 180.0 / np.pi, 2) for i in range(3)]
+                    _br_deg = [round(float(_br_j[i]) * 180.0 / np.pi, 2) for i in range(3)]
+
+                    servo_manager.process_angle_mapping(joint_angles)
+                    _mapped = servo_manager.get_current_angles()
+                    _bl_servo_raw = [round(float(_mapped[6]), 1), round(float(_mapped[7]), 1), round(float(_mapped[8]), 1)]
+                    _br_servo_raw = [round(float(_mapped[9]), 1), round(float(_mapped[10]), 1), round(float(_mapped[11]), 1)]
+
+                    from utils.config import SERVO_MAX_ANGLE, SERVO_MIN_ANGLE
+                    _clamped = []
+                    for _ch, _v in enumerate(_mapped):
+                        if _v > SERVO_MAX_ANGLE or _v <= SERVO_MIN_ANGLE:
+                            _clamped.append(_ch)
+
+                    _bl_foot_r = [round(float(_bl_world[i]), 2) for i in range(3)]
+                    _br_foot_r = [round(float(_br_world[i]), 2) for i in range(3)]
+                    _bl_local_r = [round(float(_bl_local[i]), 2) for i in range(3)]
+                    _br_local_r = [round(float(_br_local[i]), 2) for i in range(3)]
+
+                    _rear_gait_logger.debug(
+                        f"REAR_GAIT_DEBUG | ts={_gait_time:.6f} elapsed={_mono:.6f}"
+                        f" phase={_gait_time:.4f} command={command_data.get('command','?')}"
+                        f" start=True IDstepLength={command_data.get('IDstepLength',0)}"
+                        f" IDstepWidth={command_data.get('IDstepWidth',0)}"
+                        f" IDstepAlpha={command_data.get('IDstepAlpha',0)}"
+                        f" BL_foot={_bl_foot_r} BL_local={_bl_local_r}"
+                        f" BL_joint={_bl_deg} BL_servo=[CH6={_bl_servo_raw[0]},CH7={_bl_servo_raw[1]},CH8={_bl_servo_raw[2]}]"
+                        f" BR_foot={_br_foot_r} BR_local={_br_local_r}"
+                        f" BR_joint={_br_deg} BR_servo=[CH9={_br_servo_raw[0]},CH10={_br_servo_raw[1]},CH11={_br_servo_raw[2]}]"
+                        f" clamped={_clamped} servo_ok=True"
+                    )
+                except Exception:
+                    pass
 
                 # Diagnostic log — emitted at most once per second while stepping
                 try:
