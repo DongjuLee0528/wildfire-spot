@@ -292,22 +292,23 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
 
 def _start_fire_detection_loop(logger, fire_detector, camera_vision):
     """
-    Start a daemon thread that calls FireDetector.evaluate() at a fixed interval.
+    Start a thread that calls FireDetector.evaluate() at a fixed interval.
 
     Skips evaluation when fire_detector or camera_vision is unavailable.
     Exceptions inside evaluate() are logged but do not stop the loop.
-    The thread is daemonised so it exits automatically when the main process ends.
     """
     if fire_detector is None:
         logger.log_system_state("FIRE_DETECTION_LOOP_SKIPPED fire_detector=None")
         print("Fire detection loop skipped: FireDetector unavailable")
-        return
+        return None, None
+
+    stop_event = threading.Event()
 
     def _loop():
         logger.log_system_state(
             f"FIRE_DETECTION_LOOP_STARTED interval={FIRE_DETECTION_INTERVAL_SECONDS}s"
         )
-        while True:
+        while not stop_event.is_set():
             try:
                 if camera_vision is not None:
                     fire_detector.evaluate()
@@ -315,11 +316,13 @@ def _start_fire_detection_loop(logger, fire_detector, camera_vision):
                     logger.log_system_state("FIRE_DETECTION_LOOP_SKIP camera_vision=None")
             except Exception as e:
                 logger.log_error("FireDetectionLoop", str(e))
-            time.sleep(FIRE_DETECTION_INTERVAL_SECONDS)
+            stop_event.wait(FIRE_DETECTION_INTERVAL_SECONDS)
+        logger.log_system_state("FIRE_DETECTION_LOOP_STOPPED")
 
-    thread = threading.Thread(target=_loop, daemon=True, name="fire-detection-loop")
+    thread = threading.Thread(target=_loop, name="fire-detection-loop")
     thread.start()
     print(f"Fire detection loop started (interval={FIRE_DETECTION_INTERVAL_SECONDS}s)")
+    return stop_event, thread
 
 
 def _start_robot_api_server(logger):
@@ -568,6 +571,8 @@ def main():
     patrol_zone_manager = None
     _kb_controller = None
     _servo_manager = None
+    fire_detection_stop_event = None
+    fire_detection_thread = None
 
     # Initialize logger first
     try:
@@ -666,7 +671,11 @@ def main():
         )
 
         _start_robot_api_server(logger)
-        _start_fire_detection_loop(logger, runtime.fire_detector, camera_vision)
+        fire_detection_stop_event, fire_detection_thread = _start_fire_detection_loop(
+            logger,
+            runtime.fire_detector,
+            camera_vision,
+        )
 
         if SPRING_TELEMETRY_ENABLED:
             print("SpringTelemetry: enabled")
@@ -735,6 +744,13 @@ def main():
         logger.log_error("Main.init", str(e))
         print(f"Failed to initialize: {e}")
     finally:
+        if fire_detection_stop_event is not None:
+            fire_detection_stop_event.set()
+        if fire_detection_thread is not None:
+            try:
+                fire_detection_thread.join(timeout=FIRE_DETECTION_INTERVAL_SECONDS + 1.0)
+            except Exception:
+                pass
         # Clean up resources in reverse initialization order.
         # camera_control_manager.close() must precede _servo_manager.shutdown_servos()
         # because the camera uses the shared front PCA9685 driver owned by servo_manager.
