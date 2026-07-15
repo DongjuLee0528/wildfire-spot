@@ -294,7 +294,8 @@ def _start_fire_detection_loop(logger, fire_detector, camera_vision):
     """
     Start a thread that calls FireDetector.evaluate() at a fixed interval.
 
-    Skips evaluation when fire_detector or camera_vision is unavailable.
+    Skips evaluation only when fire_detector is unavailable.
+    camera_vision availability is handled internally by FireDetector.evaluate().
     Exceptions inside evaluate() are logged but do not stop the loop.
     """
     if fire_detector is None:
@@ -310,10 +311,7 @@ def _start_fire_detection_loop(logger, fire_detector, camera_vision):
         )
         while not stop_event.is_set():
             try:
-                if camera_vision is not None:
-                    fire_detector.evaluate()
-                else:
-                    logger.log_system_state("FIRE_DETECTION_LOOP_SKIP camera_vision=None")
+                fire_detector.evaluate()
             except Exception as e:
                 logger.log_error("FireDetectionLoop", str(e))
             stop_event.wait(FIRE_DETECTION_INTERVAL_SECONDS)
