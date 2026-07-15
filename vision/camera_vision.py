@@ -218,6 +218,7 @@ class CameraVision:
             self._latest_result = _copy_result(result)
             return result
 
+        print(f"[DEBUG][CameraVision] Threshold conf={CAMERA_CONFIDENCE_THRESHOLD} iou={CAMERA_IOU_THRESHOLD}")
         try:
             # Run YOLO inference; verbose=False suppresses per-frame console output
             predictions = self._model(frame, verbose=False, conf=CAMERA_CONFIDENCE_THRESHOLD, iou=CAMERA_IOU_THRESHOLD)
@@ -226,20 +227,25 @@ class CameraVision:
             self._latest_result = _copy_result(result)
             return result
 
+        print(f"[DEBUG][CameraVision] predictions={len(predictions)}")
         try:
             detections = []
             for pred in predictions:
                 boxes = pred.boxes
                 if boxes is None:
+                    print("[DEBUG][CameraVision] pred.boxes=None")
                     continue
                 names = pred.names if pred.names else {}
+                print(f"[DEBUG][CameraVision] Boxes={len(boxes)}")
                 for box in boxes:
                     try:
                         conf = float(box.conf[0])
-                        if conf < CAMERA_CONFIDENCE_THRESHOLD:
-                            continue  # Skip low-confidence detections
                         cls_id = int(box.cls[0])
                         cls_name = names.get(cls_id, str(cls_id)).lower()
+                        print(f"[DEBUG][CameraVision] {cls_name} cls_id={cls_id} conf={conf:.5f}")
+                        if conf < CAMERA_CONFIDENCE_THRESHOLD:
+                            print(f"[DEBUG][CameraVision] DROP_BY_CONF conf={conf:.5f} threshold={CAMERA_CONFIDENCE_THRESHOLD}")
+                            continue  # Skip low-confidence detections
                         x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
                         detections.append({
                             "class_id": cls_id,
@@ -247,6 +253,7 @@ class CameraVision:
                             "confidence": conf,
                             "bbox": [x1, y1, x2, y2],  # Pixel coordinates [left, top, right, bottom]
                         })
+                        print(f"[DEBUG][CameraVision] detections={len(detections)}")
                         if cls_name in CAMERA_FIRE_CLASSES:
                             result["detected"] = True
                             if cls_name == "fire":
@@ -262,7 +269,9 @@ class CameraVision:
         except Exception as e:
             self.logger.log_error("CameraVision.detect_from_frame", f"Result parse error: {e}")
 
+        print(f"[DEBUG][CameraVision] detected={result['detected']} fire_detected={result['fire_detected']} smoke_detected={result['smoke_detected']} detections={len(result['detections'])}")
         self._latest_result = _copy_result(result)
+        print(f"[DEBUG][CameraVision] overlay bbox={len(result['detections'])}")
         self._latest_overlay_frame = self._draw_overlay(frame, result["detections"])
         return result
 
