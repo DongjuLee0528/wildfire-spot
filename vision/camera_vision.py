@@ -292,7 +292,7 @@ class CameraVision:
                     x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
                     color = _BBOX_COLOR.get(cls_name, _BBOX_COLOR_DEFAULT)
                     cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
-                    label = f"{cls_name.capitalize()} {conf:.2f}"
+                    label = cls_name.capitalize()
                     cv2.putText(overlay, label, (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
                 except Exception as e:
                     self.logger.log_error("CameraVision._draw_overlay", f"Box draw error: {e}")
