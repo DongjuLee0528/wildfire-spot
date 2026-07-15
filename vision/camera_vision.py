@@ -16,6 +16,7 @@ from utils.config import (
     CAMERA_IOU_THRESHOLD,
     CAMERA_FIRE_CLASSES,
 )
+import threading
 from utils.logger import WildfireLogger
 
 try:
@@ -91,6 +92,7 @@ class CameraVision:
         self._latest_result = _empty_result()
         self._latest_frame = None
 
+        self._camera_lock = threading.Lock()
         self._camera_available = False  # True after VideoCapture is successfully opened
         self._model_available = False    # True after YOLO model is loaded from MODEL_PATH
 
@@ -146,17 +148,18 @@ class CameraVision:
             numpy ndarray (BGR) on success, None if the camera is unavailable
             or the read fails.
         """
-        if not self._camera_available or self._cap is None:
-            return None
-        try:
-            ret, frame = self._cap.read()
-            if not ret or frame is None:
+        with self._camera_lock:
+            if not self._camera_available or self._cap is None:
                 return None
-            self._latest_frame = frame
-            return frame
-        except Exception as e:
-            self.logger.log_error("CameraVision.read_frame", str(e))
-            return None
+            try:
+                ret, frame = self._cap.read()
+                if not ret or frame is None:
+                    return None
+                self._latest_frame = frame
+                return frame
+            except Exception as e:
+                self.logger.log_error("CameraVision.read_frame", str(e))
+                return None
 
     def detect(self) -> dict:
         """
@@ -301,11 +304,12 @@ class CameraVision:
         Should be called during system shutdown. Safe to call if the camera
         was never successfully opened.
         """
-        if self._cap is not None:
-            try:
-                self._cap.release()
-            except Exception as e:
-                self.logger.log_error("CameraVision.release", str(e))
-            finally:
-                self._cap = None
-                self._camera_available = False
+        with self._camera_lock:
+            if self._cap is not None:
+                try:
+                    self._cap.release()
+                except Exception as e:
+                    self.logger.log_error("CameraVision.release", str(e))
+                finally:
+                    self._cap = None
+                    self._camera_available = False
