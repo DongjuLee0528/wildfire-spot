@@ -100,20 +100,12 @@ class RobotRuntimeContext:
                 self.gps_manager,
             )
             return
-        camera_vision = None
-        try:
-            from vision.camera_vision import CameraVision
-            camera_vision = CameraVision()
-            logger.info("RobotRuntimeContext: CameraVision initialised for FireDetector")
-        except Exception as e:
-            logger.error("RobotRuntimeContext: CameraVision init failed: %s", e)
         try:
             from detection.fire_detection import FireDetector
             self.fire_detector = FireDetector(
                 sensor_manager=self.sensor_manager,
                 gps_manager=self.gps_manager,
                 pan_tilt_controller=None,
-                camera_vision=camera_vision,
             )
             logger.info("RobotRuntimeContext: FireDetector initialised")
         except Exception as e:
