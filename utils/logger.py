@@ -128,7 +128,10 @@ class WildfireLogger:
             flame = sensor_data.get('flame', []) if sensor_data else []
             distance = sensor_data.get('distance', 0.0) if sensor_data else 0.0
 
-            message = f"SENSOR_VALUES | Smoke: {smoke} | Temp: {temperature:.1f}C | Humidity: {humidity:.1f}% | Flame: {flame} | Distance: {distance:.2f}cm"
+            temp_str = f"{temperature:.1f}" if temperature is not None else "N/A"
+            hum_str = f"{humidity:.1f}" if humidity is not None else "N/A"
+            dist_str = f"{distance:.2f}" if distance is not None else "N/A"
+            message = f"SENSOR_VALUES | Smoke: {smoke} | Temp: {temp_str}C | Humidity: {hum_str}% | Flame: {flame} | Distance: {dist_str}cm"
             self.logger.debug(message)
         except (ValueError, TypeError, KeyError) as e:
             self.logger.error(f"Failed to log sensor values: {e}")
