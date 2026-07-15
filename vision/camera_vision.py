@@ -236,10 +236,10 @@ class CameraVision:
                 for box in boxes:
                     try:
                         conf = float(box.conf[0])
-                        if conf < CAMERA_CONFIDENCE_THRESHOLD:
-                            continue  # Skip low-confidence detections
                         cls_id = int(box.cls[0])
                         cls_name = names.get(cls_id, str(cls_id)).lower()
+                        if conf < CAMERA_CONFIDENCE_THRESHOLD:
+                            continue  # Skip low-confidence detections
                         x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
                         detections.append({
                             "class_id": cls_id,
@@ -351,6 +351,23 @@ class CameraVision:
     def get_latest_result(self) -> dict:
         """Return the result from the most recent detect() or detect_from_frame() call."""
         return _copy_result(self._latest_result)
+
+    def draw_overlay_on_frame(self, frame):
+        """
+        Draw the most recent detection results onto an externally supplied frame.
+
+        Uses the detections list from the last detect() or detect_from_frame() call.
+        No YOLO inference is performed.
+
+        Args:
+            frame: numpy ndarray (BGR). If None, returns None.
+
+        Returns:
+            New numpy ndarray with bounding boxes drawn, or None if frame is None.
+        """
+        if frame is None:
+            return None
+        return self._draw_overlay(frame, self._latest_result.get("detections", []))
 
     def release(self):
         """
