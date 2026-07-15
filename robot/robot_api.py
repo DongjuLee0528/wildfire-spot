@@ -453,9 +453,7 @@ async def get_camera_stream():
         _MAX_FAILURES = 30
         while True:
             try:
-                frame = _camera_vision.get_latest_overlay_frame()
-                if frame is None:
-                    frame = _camera_vision.read_frame()
+                frame = _camera_vision.draw_overlay_on_frame(_camera_vision.read_frame())
             except Exception as e:
                 logger.warning("camera stream read_frame failed: %s", e)
                 break
