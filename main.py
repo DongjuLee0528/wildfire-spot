@@ -18,7 +18,7 @@ import json
 import threading
 from pathlib import Path
 from hardware.camera_control_manager import CameraControlManager
-from utils.config import PATROL_ZONE_MIN_POINTS, SPRING_TELEMETRY_ENABLED, SPRING_API_BASE_URL, DEVICE_SERIAL_NUMBER, DEVICE_KEY
+from utils.config import PATROL_ZONE_MIN_POINTS, SPRING_TELEMETRY_ENABLED, SPRING_API_BASE_URL, DEVICE_SERIAL_NUMBER, DEVICE_KEY, FIRE_DETECTION_INTERVAL_SECONDS
 from utils.logger import WildfireLogger
 import robot.robot_api as robot_api
 
@@ -288,6 +288,38 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
     thread.start()
     logger.log_system_state("GAIT_LOOP_STARTED")
     print("Gait loop started (servo motion active)")
+
+
+def _start_fire_detection_loop(logger, fire_detector, camera_vision):
+    """
+    Start a daemon thread that calls FireDetector.evaluate() at a fixed interval.
+
+    Skips evaluation when fire_detector or camera_vision is unavailable.
+    Exceptions inside evaluate() are logged but do not stop the loop.
+    The thread is daemonised so it exits automatically when the main process ends.
+    """
+    if fire_detector is None:
+        logger.log_system_state("FIRE_DETECTION_LOOP_SKIPPED fire_detector=None")
+        print("Fire detection loop skipped: FireDetector unavailable")
+        return
+
+    def _loop():
+        logger.log_system_state(
+            f"FIRE_DETECTION_LOOP_STARTED interval={FIRE_DETECTION_INTERVAL_SECONDS}s"
+        )
+        while True:
+            try:
+                if camera_vision is not None:
+                    fire_detector.evaluate()
+                else:
+                    logger.log_system_state("FIRE_DETECTION_LOOP_SKIP camera_vision=None")
+            except Exception as e:
+                logger.log_error("FireDetectionLoop", str(e))
+            time.sleep(FIRE_DETECTION_INTERVAL_SECONDS)
+
+    thread = threading.Thread(target=_loop, daemon=True, name="fire-detection-loop")
+    thread.start()
+    print(f"Fire detection loop started (interval={FIRE_DETECTION_INTERVAL_SECONDS}s)")
 
 
 def _start_robot_api_server(logger):
@@ -634,6 +666,7 @@ def main():
         )
 
         _start_robot_api_server(logger)
+        _start_fire_detection_loop(logger, runtime.fire_detector, camera_vision)
 
         if SPRING_TELEMETRY_ENABLED:
             print("SpringTelemetry: enabled")

@@ -30,7 +30,6 @@ class AlertEvent:
     timestamp: float
     latitude: Optional[float]
     longitude: Optional[float]
-    smoke: float
     temperature: float
     humidity: float
     flame: object
@@ -53,7 +52,6 @@ class ReportEvent:
     report_timestamp: float
     latitude: Optional[float]
     longitude: Optional[float]
-    smoke: float
     temperature: float
     humidity: float
     flame: object

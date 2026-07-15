@@ -16,6 +16,7 @@ from utils.config import (
     CAMERA_IOU_THRESHOLD,
     CAMERA_FIRE_CLASSES,
 )
+import threading
 from utils.logger import WildfireLogger
 
 try:
@@ -27,6 +28,12 @@ try:
     from ultralytics import YOLO
 except ImportError:
     YOLO = None
+
+_BBOX_COLOR = {
+    "fire": (0, 0, 255),
+    "smoke": (255, 0, 0),
+}
+_BBOX_COLOR_DEFAULT = (0, 255, 0)
 
 # Canonical empty result used as a template when camera or model is unavailable.
 # Always copied before returning to prevent callers from mutating the shared object.
@@ -91,6 +98,8 @@ class CameraVision:
         self._latest_result = _empty_result()
         self._latest_frame = None
 
+        self._camera_lock = threading.Lock()
+        self._latest_overlay_frame = None
         self._camera_available = False  # True after VideoCapture is successfully opened
         self._model_available = False    # True after YOLO model is loaded from MODEL_PATH
 
@@ -146,17 +155,18 @@ class CameraVision:
             numpy ndarray (BGR) on success, None if the camera is unavailable
             or the read fails.
         """
-        if not self._camera_available or self._cap is None:
-            return None
-        try:
-            ret, frame = self._cap.read()
-            if not ret or frame is None:
+        with self._camera_lock:
+            if not self._camera_available or self._cap is None:
                 return None
-            self._latest_frame = frame
-            return frame
-        except Exception as e:
-            self.logger.log_error("CameraVision.read_frame", str(e))
-            return None
+            try:
+                ret, frame = self._cap.read()
+                if not ret or frame is None:
+                    return None
+                self._latest_frame = frame
+                return frame
+            except Exception as e:
+                self.logger.log_error("CameraVision.read_frame", str(e))
+                return None
 
     def detect(self) -> dict:
         """
@@ -253,7 +263,55 @@ class CameraVision:
             self.logger.log_error("CameraVision.detect_from_frame", f"Result parse error: {e}")
 
         self._latest_result = _copy_result(result)
+        self._latest_overlay_frame = self._draw_overlay(frame, result["detections"])
         return result
+
+    def _draw_overlay(self, frame, detections: list):
+        """
+        Draw bounding boxes and labels onto a copy of frame.
+
+        Args:
+            frame: numpy ndarray (BGR). Must not be None.
+            detections: list of detection dicts from detect_from_frame().
+
+        Returns:
+            New numpy ndarray with boxes/labels drawn, or the original frame
+            if cv2 is unavailable or drawing fails.
+        """
+        if cv2 is None or frame is None:
+            return frame
+        try:
+            overlay = frame.copy()
+            for det in detections:
+                try:
+                    bbox = det.get("bbox")
+                    cls_name = det.get("class_name", "")
+                    conf = det.get("confidence", 0.0)
+                    if bbox is None or len(bbox) < 4:
+                        continue
+                    x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+                    color = _BBOX_COLOR.get(cls_name, _BBOX_COLOR_DEFAULT)
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+                    label = f"{cls_name.capitalize()} {conf:.2f}"
+                    cv2.putText(overlay, label, (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+                except Exception as e:
+                    self.logger.log_error("CameraVision._draw_overlay", f"Box draw error: {e}")
+            return overlay
+        except Exception as e:
+            self.logger.log_error("CameraVision._draw_overlay", str(e))
+            return frame
+
+    def get_latest_overlay_frame(self):
+        """
+        Return the most recent frame with bounding box overlay applied.
+
+        Returns the overlay frame produced by the last detect_from_frame() call,
+        or None if no detection has been performed yet.
+
+        Returns:
+            numpy ndarray (BGR) or None.
+        """
+        return self._latest_overlay_frame
 
     def save_evidence_image(self, state_name: str, output_dir: str) -> str | None:
         """
@@ -269,7 +327,7 @@ class CameraVision:
         if cv2 is None:
             self.logger.log_error("CameraVision.save_evidence_image", "cv2 not available")
             return None
-        frame = self._latest_frame
+        frame = self._latest_overlay_frame if self._latest_overlay_frame is not None else self._latest_frame
         if frame is None:
             self.logger.log_error("CameraVision.save_evidence_image", "no frame available")
             return None
@@ -301,11 +359,12 @@ class CameraVision:
         Should be called during system shutdown. Safe to call if the camera
         was never successfully opened.
         """
-        if self._cap is not None:
-            try:
-                self._cap.release()
-            except Exception as e:
-                self.logger.log_error("CameraVision.release", str(e))
-            finally:
-                self._cap = None
-                self._camera_available = False
+        with self._camera_lock:
+            if self._cap is not None:
+                try:
+                    self._cap.release()
+                except Exception as e:
+                    self.logger.log_error("CameraVision.release", str(e))
+                finally:
+                    self._cap = None
+                    self._camera_available = False

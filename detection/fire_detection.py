@@ -5,7 +5,7 @@ Combines sensor data (smoke, temperature, humidity, flame) with
 optional camera-based detection to identify and locate wildfires.
 """
 
-from utils.config import (MQ2_SMOKE_THRESHOLD, TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
+from utils.config import (TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
                          DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT,
                          EVIDENCE_DIR)
 from utils.logger import WildfireLogger
@@ -86,28 +86,24 @@ class FireDetector:
             False otherwise
 
         Fire indicators:
-        - High smoke level (MQ2)
         - High temperature
         - Low humidity (dry conditions)
-        - Any flame sensor triggered
+        - Any flame sensor triggered (KY026)
         """
         try:
             if sensor_data is None or not hasattr(sensor_data, 'get'):
                 self.sensor_detected = False
                 return False
 
-            smoke_level = sensor_data.get('smoke', 0)
             temperature = sensor_data.get('temperature', 0)
             humidity = sensor_data.get('humidity', 100)
             flame_detected = sensor_data.get('flame', False)
-            smoke_level = _safe_number(smoke_level, 0)
             temperature = _safe_number(temperature, 0)
             humidity = _safe_number(humidity, 100)
             flame_detected = any(bool(value) for value in _flame_values(flame_detected))
 
             # Check if any fire indicator threshold is exceeded
-            if (smoke_level > MQ2_SMOKE_THRESHOLD or
-                temperature > TEMP_THRESHOLD or
+            if (temperature > TEMP_THRESHOLD or
                 humidity < HUMIDITY_THRESHOLD or
                 flame_detected):
                 self.sensor_detected = True
@@ -305,9 +301,9 @@ class FireDetector:
         Run staged fire verification and return current state with any generated event.
 
         Detection rules:
-        - SUSPECTED_FIRE: camera detects fire/smoke OR MQ2 smoke threshold exceeded OR
-          any KY026 flame sensor triggered. DHT11 alone does not trigger.
-        - VERIFIED_FIRE: camera detection AND (MQ2 threshold exceeded OR KY026 triggered).
+        - SUSPECTED_FIRE: camera detects fire/smoke OR any KY026 flame sensor triggered.
+          DHT11 alone does not trigger.
+        - VERIFIED_FIRE: camera detection AND KY026 triggered.
           DHT11 readings alone never produce VERIFIED_FIRE.
 
         Returns:
@@ -323,13 +319,11 @@ class FireDetector:
         if sensor_data is None:
             sensor_data = {}
 
-        smoke = _safe_number(sensor_data.get("smoke", 0), 0)
         temperature = _safe_number(sensor_data.get("temperature", 0), 0)
         humidity = _safe_number(sensor_data.get("humidity", 100), 100)
         flame_raw = sensor_data.get("flame", False)
         flame_values = _flame_values(flame_raw)
 
-        mq2_triggered = smoke > MQ2_SMOKE_THRESHOLD
         ky026_triggered = any(bool(v) for v in flame_values)
 
         try:
@@ -350,10 +344,10 @@ class FireDetector:
             lat = None
             lon = None
 
-        # Hard sensor triggers: MQ2 smoke above threshold OR any KY026 flame sensor active.
+        # Hard sensor trigger: any KY026 flame sensor active.
         # DHT11 temperature/humidity readings alone never produce a hard trigger.
-        sensor_hard_triggered = mq2_triggered or ky026_triggered
-        # Suspected if either the camera AI or any hard sensor triggered
+        sensor_hard_triggered = ky026_triggered
+        # Suspected if either the camera AI or KY026 triggered
         suspected = camera_fire or sensor_hard_triggered
 
         self.sensor_detected = sensor_hard_triggered
@@ -365,17 +359,15 @@ class FireDetector:
             self._latest_report_event = None
             return DetectionState.NORMAL, None, None
 
-        # VERIFIED_FIRE requires both camera confirmation AND at least one hard sensor
+        # VERIFIED_FIRE requires both camera confirmation AND KY026 trigger
         if camera_fire and sensor_hard_triggered:
             state = DetectionState.VERIFIED_FIRE
             reasons = []
-            if mq2_triggered:
-                reasons.append("mq2")
             if ky026_triggered:
                 reasons.append("ky026")
             if camera_fire:
                 reasons.append("camera")
-            reason_str = "+".join(reasons)  # e.g. "mq2+ky026+camera"
+            reason_str = "+".join(reasons)  # e.g. "ky026+camera" or "camera"
             image_path = None
             if self.camera_vision is not None:
                 try:
@@ -390,7 +382,6 @@ class FireDetector:
                 report_timestamp=now,
                 latitude=lat,
                 longitude=lon,
-                smoke=smoke,
                 temperature=temperature,
                 humidity=humidity,
                 flame=flame_raw,
@@ -404,15 +395,13 @@ class FireDetector:
             self.logger.info(f"FIRE_EVAL | VERIFIED_FIRE | reason={reason_str} | lat={lat}, lon={lon}")
             return state, None, event
 
-        # SUSPECTED_FIRE: camera OR hard sensor, but not both simultaneously
+        # SUSPECTED_FIRE: camera OR KY026, but not both simultaneously
         reasons = []
         if camera_fire:
             reasons.append("camera")
-        if mq2_triggered:
-            reasons.append("mq2")
         if ky026_triggered:
             reasons.append("ky026")
-        reason_str = "+".join(reasons)  # e.g. "camera" or "mq2+ky026"
+        reason_str = "+".join(reasons)  # e.g. "camera" or "ky026"
         state = DetectionState.SUSPECTED_FIRE
         image_path = None
         if self.camera_vision is not None:
@@ -426,7 +415,6 @@ class FireDetector:
             timestamp=time.time(),
             latitude=lat,
             longitude=lon,
-            smoke=smoke,
             temperature=temperature,
             humidity=humidity,
             flame=flame_raw,
