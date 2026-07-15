@@ -577,6 +577,10 @@ def main():
             logger.log_error("Main.camera_vision_init", str(e))
             print(f"CameraVision unavailable: {e}")
 
+        if runtime.fire_detector is not None:
+            runtime.fire_detector.camera_vision = camera_vision
+            logger.log_system_state(f"FIRE_DETECTOR_CAMERA_VISION_WIRED camera_vision={camera_vision is not None}")
+
         from robot.robot_core_data_collector import RobotCoreDataCollector
         _collector = RobotCoreDataCollector.from_runtime_context(runtime)
 
