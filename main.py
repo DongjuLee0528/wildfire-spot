@@ -295,7 +295,8 @@ def _start_fire_detection_loop(logger, fire_detector, camera_vision):
     Start a thread that calls FireDetector.evaluate() at a fixed interval.
 
     Skips evaluation only when fire_detector is unavailable.
-    camera_vision availability is handled internally by FireDetector.evaluate().
+    camera_vision is accepted for interface symmetry but is not used directly
+    here; it must be wired into fire_detector.camera_vision before this call.
     Exceptions inside evaluate() are logged but do not stop the loop.
     """
     if fire_detector is None:

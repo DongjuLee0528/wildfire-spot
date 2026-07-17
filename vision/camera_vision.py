@@ -315,7 +315,10 @@ class CameraVision:
 
     def save_evidence_image(self, state_name: str, output_dir: str) -> str | None:
         """
-        Save the latest captured frame to disk as a JPEG evidence image.
+        Save the most recent frame to disk as a JPEG evidence image.
+
+        Prefers the overlay frame (with bounding boxes drawn) when available;
+        falls back to the raw captured frame if no overlay exists yet.
 
         Args:
             state_name: Detection state label used in the filename (e.g. 'suspected_fire').
