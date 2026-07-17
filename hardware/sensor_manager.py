@@ -372,7 +372,11 @@ class SensorManager:
             - smoke: MQ2 smoke level, or None when unavailable
             - temperature: Temperature in Celsius, or None when unavailable
             - humidity: Relative humidity percentage, or None when unavailable
-            - flame: Mapping of flame readings, or None when unavailable
+            - flame: FlameReadings dict keyed by position, or None when unavailable
+            - flame_list: list of flame values in position order, or None when unavailable
+            - gas: alias for smoke (same value)
+            - fire_detected: True if any single sensor threshold is exceeded
+            - confirmed_fire: True if flame AND at least one other threshold exceeded
             - distance: Ultrasonic distance in cm, or None when unavailable
 
         Logs the readings for monitoring and debugging.
