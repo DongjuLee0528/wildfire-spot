@@ -157,11 +157,13 @@ class FireDetector:
             sensor_data: Dictionary containing flame sensor readings
 
         Returns:
-            Average direction angle (degrees) where flame detected
-            None if no flame detected or error occurs
+            Average direction angle (degrees) where flame is detected,
+            or DEFAULT_DIRECTION_VALUE if no flame is detected or an error occurs.
 
-        Uses 4 KY-026 flame sensors positioned at different angles.
-        Calculates average direction and rotates pan-tilt camera to face it.
+        Uses KY-026 flame sensors positioned at different angles.
+        Calculates the average direction and calls pan_tilt_controller.rotate_to_angle()
+        to aim the camera. pan_tilt_controller must not be None when any flame sensor
+        is triggered; otherwise AttributeError will propagate to the caller.
         """
         try:
             if sensor_data is None or not hasattr(sensor_data, 'get'):
