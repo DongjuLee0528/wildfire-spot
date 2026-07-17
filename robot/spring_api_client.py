@@ -66,7 +66,11 @@ class SpringApiClient:
     def login(self) -> bool:
         """
         Authenticate device against POST /api/device-auth/login.
-        Stores the returned deviceToken in memory.
+
+        Accepts any of the following token field names in the response JSON:
+        'accessToken', 'deviceToken', or 'token'. The first non-empty value
+        found is stored in memory and attached to subsequent requests.
+
         Returns True on success, False on any failure.
         """
         try:
