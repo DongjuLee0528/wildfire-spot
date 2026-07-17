@@ -140,7 +140,7 @@ def get_status():
 
 @app.get("/robot/gps")
 def get_gps():
-    """Return the latest GPS fix data; latitude/longitude are None when no fix."""
+    """Return the latest GPS fix data. Returns 503 when the GPS manager is absent or has no fix."""
     try:
         if _collector is None:
             return {"latitude": None, "longitude": None, "fix": False, "updatedAt": datetime.now().isoformat()}
@@ -434,10 +434,11 @@ def get_camera_status():
 @app.get("/robot/camera/stream")
 async def get_camera_stream():
     """
-    Stream MJPEG video from the onboard camera.
+    Stream MJPEG video from the onboard camera with detection overlay.
 
-    Returns a multipart/x-mixed-replace response at ~30 fps.
-    Stops automatically after 30 consecutive frame-read failures.
+    Each frame has bounding boxes drawn from the latest fire/smoke detection
+    results via draw_overlay_on_frame(). Returns a multipart/x-mixed-replace
+    response at ~30 fps. Stops automatically after 30 consecutive frame-read failures.
     """
     try:
         import cv2 as _cv2

@@ -249,7 +249,8 @@ class RobotCoreDataCollector(RobotDataCollector):
         Poll each subsystem for availability and return a health snapshot.
 
         robot_core is always True (this method is only reachable if the core is running).
-        camera is always False until vision is implemented.
+        camera is always False because CameraVision is wired into robot_api directly
+        and is not referenced by this collector.
         gps, lidar, and sensors reflect each manager's is_available() result.
         """
         robot_core = True
