@@ -1,3 +1,25 @@
+"""
+Dataset preprocessing pipeline for YOLOv8/v10 wildfire detection training.
+
+Aggregates images and YOLO-format labels from multiple source datasets,
+normalises class IDs, converts all images to RGB JPEG, and produces a
+unified dataset with train/val/test splits and a data.yaml file.
+
+Supported input datasets:
+  FASDD / FASDD_UAV  — YOLO split-file layout
+  PyroNear           — Parquet format
+  AI Hub             — COCO-style JSON with category ID remapping
+  D-Fire             — clean_yolo layout (class IDs remapped: 0→smoke, 1→fire)
+  NASA AMS           — clean_yolo layout; multi-band images converted to RGB
+
+Output class mapping:
+  0 = fire
+  1 = smoke
+
+Run as a script:
+    python -m training.preprocess
+"""
+
 import os
 import json
 import pandas as pd
@@ -29,6 +51,19 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
 
 class DatasetProcessor:
+    """
+    Processes and merges multiple wildfire image datasets into a single
+    YOLO-format dataset ready for training.
+
+    Workflow:
+      1. validate_input_datasets()  — count source images; refuse to proceed if zero.
+      2. prepare_build_workspace()  — create isolated BUILD_DIR and TEMP_ROOT.
+      3. process_*()                — one method per source dataset.
+      4. split_and_create_files()   — shuffle and write train/val/test splits.
+      5. create_data_yaml()         — write data.yaml.
+      6. _verify_unified_dataset()  — integrity check before publishing.
+      7. publish_build()            — atomic rename of BUILD_DIR to OUTPUT_DIR.
+    """
 
     def __init__(self):
         self.all_image_paths = []
@@ -53,6 +88,11 @@ class DatasetProcessor:
         }
 
     def prepare_build_workspace(self):
+        """
+        Remove any leftover BUILD_DIR and TEMP_ROOT, then recreate them empty.
+
+        Must be called before any process_*() method to ensure a clean state.
+        """
         print("Preparing isolated build workspace...")
 
         for path in [BUILD_DIR, TEMP_ROOT]:
@@ -63,6 +103,17 @@ class DatasetProcessor:
         os.makedirs(TEMP_ROOT, exist_ok=True)
 
     def publish_build(self):
+        """
+        Atomically replace OUTPUT_DIR with the verified BUILD_DIR.
+
+        Uses a side-backup of the previous OUTPUT_DIR so that the original
+        dataset can be restored if the rename fails. Removes TEMP_ROOT and
+        any backup directories on success.
+
+        Raises:
+            RuntimeError: if BUILD_DIR is missing, the rename fails, or
+                          restoration of the previous dataset fails.
+        """
         print("Publishing verified dataset build...")
 
         if not os.path.exists(BUILD_DIR):
@@ -122,6 +173,12 @@ class DatasetProcessor:
             shutil.rmtree(TEMP_ROOT)
 
     def validate_input_datasets(self):
+        """
+        Count available source images across all datasets before modifying OUTPUT_DIR.
+
+        Raises RuntimeError if the combined count is zero, preventing accidental
+        deletion of an existing good dataset when source data is missing.
+        """
         print("Validating input datasets before touching output directory...")
 
         counts = {
@@ -173,6 +230,11 @@ class DatasetProcessor:
         )
 
     def _count_split_file_inputs(self, dataset_path, annotations_path, labels_dir, prefix):
+        """
+        Count image/label pairs referenced by FASDD-style split text files.
+
+        Only counts entries where both the image and its label file exist on disk.
+        """
         count = 0
 
         for split in ["train", "val", "test"]:
@@ -296,6 +358,11 @@ class DatasetProcessor:
         return count
 
     def _count_label_classes(self, label_path):
+        """
+        Read a YOLO label file and increment fire/smoke counters in self.stats.
+
+        Class 0 = fire, class 1 = smoke. A single image may increment both.
+        """
         has_fire = False
         has_smoke = False
 
@@ -325,6 +392,12 @@ class DatasetProcessor:
             self.stats["smoke_images"] += 1
 
     def process_fasdd(self):
+        """
+        Load FASDD images and labels into self.all_image_paths.
+
+        Reads split files from annotations/YOLO/{train,val,test}.txt.
+        Skips images with unsupported extensions.
+        """
         print("Processing FASDD dataset...")
         fasdd_path = f"{BASE}/FASDD"
 
@@ -353,6 +426,11 @@ class DatasetProcessor:
                 print(f"Error reading split file {split_file}: {e}")
 
     def process_fasdd_uav(self):
+        """
+        Load FASDD_UAV images and labels into self.all_image_paths.
+
+        Reads split files from annotations/YOLO_UAV/{train,val,test}.txt.
+        """
         print("Processing FASDD_UAV dataset...")
         fasdd_uav_path = f"{BASE}/FASDD_UAV"
 
@@ -381,6 +459,12 @@ class DatasetProcessor:
                 print(f"Error reading split file {split_file}: {e}")
 
     def process_pyronear(self):
+        """
+        Extract PyroNear images from Parquet files and convert bounding boxes to YOLO format.
+
+        All PyroNear annotations use class 1 (smoke). Images are saved as JPEG
+        to TEMP_ROOT/pyronear_temp before being added to self.all_image_paths.
+        """
         print("Processing PyroNear dataset...")
         pyronear_path = f"{BASE}/PyroNear/data"
 
@@ -449,6 +533,16 @@ class DatasetProcessor:
                     print(f"Error processing PyroNear file {file}: {e}")
 
     def process_ai_hub(self):
+        """
+        Convert AI Hub COCO-style JSON annotations to YOLO format.
+
+        Category ID remapping:
+          3        → 0 (fire)
+          1, 2, 6  → 1 (smoke)
+
+        Source images are symlinked into TEMP_ROOT/aihub/images/train to avoid
+        copying large files. Labels are written as YOLO .txt files.
+        """
         print("Processing AI Hub dataset...")
         ai_hub_path = f"{BASE}/{AIHUB_DATASET_SUBPATH}"
 
@@ -564,6 +658,16 @@ class DatasetProcessor:
                         print(f"Error processing AI Hub file {json_path}: {e}")
 
     def process_dfire(self):
+        """
+        Load D-Fire images and remap class IDs to the project convention.
+
+        D-Fire class mapping (input → output):
+          0 (smoke) → 1
+          1 (fire)  → 0
+
+        Converted labels are written to TEMP_ROOT/dfire_temp before being
+        added to self.all_image_paths.
+        """
         print("Processing D-Fire dataset...")
 
         dfire_path = DFIRE_CLEAN_YOLO_PATH
@@ -654,6 +758,13 @@ class DatasetProcessor:
                     print(f"Error processing D-Fire label file {src_label}: {e}")
 
     def process_nasa_ams(self):
+        """
+        Convert NASA AMS multi-band imagery to RGB JPEG and copy labels.
+
+        Reads from NASA_AMS_CLEAN_YOLO_PATH (train/val/test splits). All images
+        are converted to 3-channel RGB JPEG at quality 95 and written to
+        TEMP_ROOT/nasa_ams_rgb before being added to self.all_image_paths.
+        """
         print("Processing NASA AMS dataset...")
 
         nasa_path = NASA_AMS_CLEAN_YOLO_PATH
@@ -753,6 +864,13 @@ class DatasetProcessor:
                     print(f"Error reading NASA AMS label file {dst_label}: {e}")
 
     def split_and_create_files(self):
+        """
+        Shuffle self.all_image_paths and create train/val/test splits in BUILD_DIR.
+
+        Ratios are taken from DATASET_TRAIN_RATIO and DATASET_VAL_RATIO; the
+        remainder goes to test. Raises RuntimeError if either train or val is empty.
+        Calls _create_unified_dataset() for each split.
+        """
         print("Creating train/val/test split files...")
 
         if not self.all_image_paths:
@@ -800,6 +918,13 @@ class DatasetProcessor:
         self._create_unified_dataset("test", test_data)
 
     def _create_unified_dataset(self, split, data):
+        """
+        Copy images and labels for one split into BUILD_DIR with unique filenames.
+
+        Each image is re-encoded as RGB JPEG. Labels are validated line-by-line
+        via _validate_yolo_line() before writing. The absolute final image path
+        (under OUTPUT_DIR) is appended to the split's .txt file.
+        """
         txt_file = f"{BUILD_DIR}/{split}.txt"
 
         with open(txt_file, "w") as f:
@@ -851,6 +976,13 @@ class DatasetProcessor:
                 f.write(f"{final_img_path}\n")
 
     def _validate_yolo_line(self, line, img_path, label_path):
+        """
+        Return True if line is a valid YOLO annotation; False otherwise.
+
+        Validates that the line has 5 fields, class_id is 0 or 1, all bbox
+        coordinates are in [0, 1], and width/height are positive.
+        Increments stats['invalid_bbox_skipped'] and logs a warning on failure.
+        """
         try:
             parts = line.split()
             if len(parts) < 5:
@@ -984,6 +1116,12 @@ class DatasetProcessor:
         print("✓ Dataset verification passed")
 
     def _build_path_for_final_path(self, final_path):
+        """
+        Translate a final OUTPUT_DIR path to its BUILD_DIR equivalent for verification.
+
+        Used by _verify_unified_dataset() to check file existence inside BUILD_DIR
+        before publishing, since split .txt files reference OUTPUT_DIR paths.
+        """
         final_abs = os.path.abspath(final_path)
         output_abs = os.path.abspath(OUTPUT_DIR)
 
@@ -994,6 +1132,11 @@ class DatasetProcessor:
         return final_path
 
     def create_data_yaml(self):
+        """
+        Write a YOLO data.yaml to BUILD_DIR referencing the two output classes.
+
+        Classes: 0=fire, 1=smoke.
+        """
         data_yaml = (
             f"path: {OUTPUT_DIR}\n"
             f"train: train.txt\n"
