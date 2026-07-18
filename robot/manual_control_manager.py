@@ -2,7 +2,7 @@
 Manual control command layer for web-based robot control.
 
 Translates high-level directional commands into the KB_CONTROL_OFFSET
-dict format consumed by monitor_commands() and the existing keyboard
+dict format consumed by the gait execution loop and the existing keyboard
 control pipeline. Acts as a parallel input source alongside keyboard
 control; does not replace or modify the keyboard path.
 """
@@ -50,7 +50,7 @@ class ManualControlManager:
     The command queue must hold exactly one dict at a time following the
     KB_CONTROL_OFFSET schema. This manager drains the current value,
     replaces it with the translated command dict, and re-inserts it so
-    monitor_commands() picks it up on its next read.
+    the gait execution loop picks it up on its next iteration.
     """
 
     def __init__(self, command_queue=None, mode_manager=None, movement_available=False):

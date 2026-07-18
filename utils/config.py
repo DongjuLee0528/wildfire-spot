@@ -209,7 +209,7 @@ GAIT_FOOT_POSITIONS = [87, 77]  # Default foot x/z rest positions in mm
 GAIT_RC = [-50, 0, 0, 1]
 GAIT_ANGLE_STEP = 0.5  # Step size in degrees for iterative IK angle search
 GAIT_END_Y = 0
-GAIT_TOTAL_TIME_CALC = 1000  # Normalisation divisor for gait timing calculations
+GAIT_TOTAL_TIME_CALC = 1000  # Multiplier converting gait time from seconds to milliseconds
 
 STAND_FOOT_POSITIONS = (
     (120.0, -100.0, 80.0, 1.0),
@@ -274,7 +274,7 @@ EVIDENCE_DIR = _env_path("WILDFIRE_EVIDENCE_DIR", "evidence/fire_events")
 GPS_READ_MAX_ATTEMPTS = 10
 
 SENSOR_READ_TIMEOUT = 5.0  # Seconds to wait for a sensor read before timing out
-SENSOR_CHANNEL_DIVISOR = 2  # ADS1115 uses two channels per MQ-2 sensor
+SENSOR_CHANNEL_DIVISOR = 2  # Number of ADS1115 boards used to average MQ-2 readings
 
 LIDAR_READ_TIMEOUT = 10.0
 

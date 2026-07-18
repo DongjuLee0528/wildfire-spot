@@ -1,11 +1,25 @@
+"""
+Keyboard-based robot motion controller using multiprocessing.
+
+Captures WASD/QE/Space key presses in a subprocess and translates them
+into KB_CONTROL_OFFSET command dicts placed on a shared multiprocessing Queue.
+The gait execution loop in main.py reads from this queue.
+
+Key mappings:
+  W / S    : forward / backward  (IDstepLength)
+  A / D    : strafe left / right (IDstepWidth)
+  Q / E    : yaw left / right    (IDstepAlpha)
+  Space    : stop (reset all movement to zero)
+"""
+
 from utils.config import (KB_KEY_VALUES, KB_CONTROL_OFFSET, FORWARD_DISTANCE,
                          KB_X_STEP_DIVISOR, KB_Y_STEP, KB_YAW_STEP, KB_TEST_SLEEP_TIME)
 import time
 from queue import Empty
 from multiprocessing import Process, Queue, Lock, Value
 
-KEYBOARD_POLL_SLEEP = 0.02
-COMMAND_QUEUE_TIMEOUT = 0.2
+KEYBOARD_POLL_SLEEP = 0.02    # Seconds between keyboard polls (~50 Hz)
+COMMAND_QUEUE_TIMEOUT = 0.2   # Seconds to block waiting for a command in monitor_commands
 
 
 def _load_keyboard():
@@ -17,6 +31,17 @@ def _load_keyboard():
 
 
 class RobotKeyboardController:
+    """
+    Keyboard input handler for the Wildfire Spot robot.
+
+    Maintains two single-element multiprocessing Queues:
+      movement_data  — raw key press counts per key.
+      robot_commands — KB_CONTROL_OFFSET dict consumed by the gait loop.
+
+    start_listening() is intended to run inside a child Process.
+    calculate_movement() translates accumulated key state into gait commands
+    and is called from within the same child process on each poll cycle.
+    """
 
     def __init__(self):
         self.movement_data = Queue()
@@ -32,12 +57,14 @@ class RobotKeyboardController:
         self._running = Value('b', True)
 
     def reset_movement(self, movement_queue=None):
+        """Clear all accumulated key press counts and set StartStepping to False."""
         movement_queue = movement_queue or self.movement_data
         with self.movement_lock:
             movement_queue.get()
             movement_queue.put(KB_KEY_VALUES.copy())
 
     def register_key(self, key_char, movement_queue=None):
+        """Increment the press count for key_char and set the move flag to True."""
         movement_queue = movement_queue or self.movement_data
         with self.movement_lock:
             current_data = movement_queue.get()
@@ -46,6 +73,13 @@ class RobotKeyboardController:
             movement_queue.put(current_data)
 
     def calculate_movement(self, movement_queue=None, command_queue=None):
+        """
+        Translate current key press state into a KB_CONTROL_OFFSET command dict
+        and replace the value in command_queue.
+
+        W/S drive IDstepLength, A/D drive IDstepWidth, Q/E drive IDstepAlpha.
+        StartStepping is True only while a directional key is held.
+        """
         movement_queue = movement_queue or self.movement_data
         command_queue = command_queue or self.robot_commands
         with self.movement_lock:
@@ -65,15 +99,29 @@ class RobotKeyboardController:
             movement_queue.put(current_data)
 
     def stop(self):
+        """Signal the listening loop to exit on its next poll iteration."""
         self._running.value = False
 
     def cleanup(self):
+        """Close inter-process queues. Call after the listener process has terminated."""
         if hasattr(self, 'movement_data'):
             self.movement_data.close()
         if hasattr(self, 'robot_commands'):
             self.robot_commands.close()
 
     def start_listening(self, process_id, movement_queue, command_queue):
+        """
+        Poll the keyboard and update movement_queue and command_queue in a loop.
+
+        Designed to run inside a child Process. Polls at KEYBOARD_POLL_SLEEP intervals
+        and calls calculate_movement() on every iteration. On unhandled exception,
+        drains command_queue and inserts a stop command before exiting.
+
+        Args:
+            process_id: Unused process identifier (reserved for future logging).
+            movement_queue: Queue holding the current key press state dict.
+            command_queue: Queue holding the KB_CONTROL_OFFSET command dict.
+        """
         key_pressed = False
 
         try:
@@ -129,6 +177,17 @@ class RobotKeyboardController:
             })
 
 def monitor_commands(process_id, command_queue, running_flag):
+    """
+    Diagnostic loop that prints and re-enqueues command dicts from command_queue.
+
+    Intended for standalone testing only (see __main__ block). Exits when a
+    command dict contains 'stop_command': True or running_flag is cleared.
+
+    Args:
+        process_id: Unused identifier for the monitoring process.
+        command_queue: Queue holding KB_CONTROL_OFFSET dicts.
+        running_flag: multiprocessing.Value('b') controlling the loop.
+    """
     while running_flag.value:
         try:
             command_data = command_queue.get(timeout=COMMAND_QUEUE_TIMEOUT)

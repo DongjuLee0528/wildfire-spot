@@ -1,3 +1,17 @@
+"""
+Quadruped leg motion planning and diagonal trot gait generation.
+
+Three classes work together to animate the robot's legs:
+  LegMotionController    — time-based linear interpolation for a single leg.
+  QuadrupedMotionManager — coordinates motion for all four legs simultaneously.
+  QuadrupedGaitPattern   — generates target foot positions using a four-phase
+                           diagonal trot gait driven by keyboard input and time.
+
+The output of QuadrupedGaitPattern.calculate_leg_positions() is a numpy array
+of shape (4, 4) (homogeneous foot targets) fed to
+DHParameterSolver.solve_complete_inverse_kinematics() in the gait loop.
+"""
+
 from utils.config import (GAIT_STEP_GAIN, GAIT_MAX_SL, GAIT_BODY_POS, GAIT_BODY_ROT,
                          GAIT_TIMING, GAIT_INITIAL_VALUES, GAIT_FOOT_POSITIONS,
                          GAIT_RC, GAIT_ANGLE_STEP, GAIT_END_Y, GAIT_TOTAL_TIME_CALC,
@@ -8,13 +22,35 @@ import numpy as np
 import math
 
 class LegMotionController:
+    """
+    Time-based position interpolator for a single leg.
+
+    Moves a leg from its current position to a target position over a
+    given duration in milliseconds. An optional motion_func can modify
+    the interpolated position on each step (e.g. to add a lift arc).
+    """
 
     def __init__(self, initial_position):
+        """
+        Args:
+            initial_position: Starting foot position as a numpy array (homogeneous).
+        """
         self.current_time = time.time()
         self.is_active = False
         self.leg_position = initial_position
 
     def initiate_move(self, target_position, duration_ms, motion_func=None):
+        """
+        Start a new motion toward target_position over duration_ms milliseconds.
+
+        Returns False without starting if a motion is already in progress.
+
+        Args:
+            target_position: Destination foot position (numpy array, homogeneous).
+            duration_ms: Motion duration in milliseconds.
+            motion_func: Optional callable(progress_ratio, position) that modifies
+                         the interpolated position each step (e.g. swing arc).
+        """
         if self.is_active:
             print("Motion already in progress, please wait.")
             return False
@@ -28,6 +64,12 @@ class LegMotionController:
         return True
 
     def refresh_position(self):
+        """
+        Advance the interpolation by the time elapsed since initiate_move.
+
+        Updates self.leg_position. Applies motion_func if provided.
+        Sets is_active to False when the motion deadline is reached.
+        """
         elapsed_time = time.time() - self.motion_start_time
         position_delta = self.target_position - self.initial_position
         total_duration = self.motion_end_time - self.motion_start_time
@@ -47,26 +89,57 @@ class LegMotionController:
             self.leg_position = self.motion_function(progress_ratio, self.leg_position)
 
     def execute_step(self):
+        """
+        Advance the motion and return the current leg position.
+
+        Returns:
+            Current foot position as a numpy array.
+        """
         if self.is_active:
             self.refresh_position()
         return self.leg_position
 
 class QuadrupedMotionManager:
+    """
+    Coordinates simultaneous motion for all four legs.
+
+    Wraps four LegMotionController instances and provides convenience
+    methods to start and step all legs together.
+    """
 
     def __init__(self, leg_positions):
+        """
+        Args:
+            leg_positions: List of four initial foot positions (numpy arrays).
+        """
         self.leg_positions = leg_positions
         self.leg_controllers = [LegMotionController(leg_positions[i]) for i in range(4)]
 
     def move_all_legs(self, new_positions, duration_ms):
+        """Start a simultaneous motion on all four legs toward new_positions."""
         [self.leg_controllers[i].initiate_move(new_positions[i], duration_ms) for i in range(4)]
 
     def move_single_leg(self, leg_index, new_position, duration_ms, motion_func=None):
+        """Start a motion on a single leg; leg_index is 0=FL, 1=FR, 2=BL, 3=BR."""
         return self.leg_controllers[leg_index].initiate_move(new_position, duration_ms, motion_func)
 
     def execute_motion_step(self):
+        """Advance all leg motions and return the current foot positions as a list."""
         return [controller.execute_step() for controller in self.leg_controllers]
 
 class QuadrupedGaitPattern:
+    """
+    Diagonal trot gait: generates target foot positions from keyboard input and time.
+
+    The gait is divided into four sequential phases per leg (phase 0-3):
+      Phase 0: hold at start position
+      Phase 1: swing forward (air phase) with optional yaw rotation applied
+      Phase 2: hold at end position
+      Phase 3: push back (ground phase, with vertical lift arc)
+
+    Front-left/back-right and front-right/back-left legs move in opposing phase
+    (half-period offset) to maintain stability during a trot.
+    """
 
     def __init__(self):
         self.stride_gain = GAIT_STEP_GAIN
@@ -94,6 +167,18 @@ class QuadrupedGaitPattern:
         self.rotation_center = GAIT_RC
 
     def compute_leg_trajectory(self, time_param, x_pos, y_pos, z_pos):
+        """
+        Compute the target foot position for one leg at the given gait phase time.
+
+        Args:
+            time_param: Current phase time in milliseconds (0 to total period).
+            x_pos: Nominal foot X position in mm (forward offset from body centre).
+            y_pos: Nominal foot Y position in mm (body height, negative downward).
+            z_pos: Nominal foot Z position in mm (lateral offset, sign encodes side).
+
+        Returns:
+            numpy array of shape (4,) — homogeneous foot target [x, y, z, 1].
+        """
         start_position = np.array([x_pos - self.stride_length/2.0, y_pos, z_pos - self.stride_width, 1])
         end_y_position = GAIT_END_Y
         end_position = np.array([x_pos + self.stride_length/2, y_pos + end_y_position, z_pos + self.stride_width, 1])
@@ -150,9 +235,24 @@ class QuadrupedGaitPattern:
             return current_position
 
     def set_stride_length(self, length):
+        """Override the stride length directly (bypasses keyboard input mapping)."""
         self.stride_length = length
 
     def calculate_leg_positions(self, time_value, keyboard_input={}):
+        """
+        Compute target foot positions for all four legs at the given wall-clock time.
+
+        Reads IDstepLength, IDstepWidth, and IDstepAlpha from keyboard_input to
+        update stride parameters, then evaluates the gait trajectory for each leg
+        with a half-period phase offset between diagonal pairs.
+
+        Args:
+            time_value: Current time in seconds (typically time.time()).
+            keyboard_input: KB_CONTROL_OFFSET dict from the command queue.
+
+        Returns:
+            numpy array of shape (4, 4) — homogeneous foot targets [FL, FR, BL, BR].
+        """
         front_foot_spacing = self.front_spacing
         rear_foot_spacing = self.rear_spacing
 
