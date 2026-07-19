@@ -93,9 +93,6 @@ LOG_DIR = _env_path("WILDFIRE_LOG_DIR", os.path.join(BASE_DIR, "wildfire_logs"))
 PCA9685_FRONT_LEGS = 0x41
 PCA9685_BACK_LEGS = 0x42
 
-ADS1115_MQ2_1 = _env_int_or_none("WILDFIRE_ADS1115_MQ2_1", 0x48)
-ADS1115_MQ2_2 = _env_int_or_none("WILDFIRE_ADS1115_MQ2_2", None)
-
 MPU6050_ADDRESS = 0x68
 
 PWM_FREQUENCY = 60
@@ -174,8 +171,6 @@ CAMERA_IOU_THRESHOLD = _env_float("WILDFIRE_CAMERA_IOU", 0.45)
 CAMERA_FIRE_CLASSES = ["fire", "smoke"]
 
 MODEL_PATH = _env_path("WILDFIRE_MODEL_PATH", "models/wildfire_baseline/weights/best.pt")
-
-MQ2_SMOKE_THRESHOLD = 300
 
 TEMP_THRESHOLD = 60
 HUMIDITY_THRESHOLD = 20
@@ -274,8 +269,6 @@ EVIDENCE_DIR = _env_path("WILDFIRE_EVIDENCE_DIR", "evidence/fire_events")
 GPS_READ_MAX_ATTEMPTS = 10
 
 SENSOR_READ_TIMEOUT = 5.0  # Seconds to wait for a sensor read before timing out
-SENSOR_CHANNEL_DIVISOR = 2  # Number of ADS1115 boards used to average MQ-2 readings
-
 LIDAR_READ_TIMEOUT = 10.0
 
 SERVO_MAX_ANGLE = 180
