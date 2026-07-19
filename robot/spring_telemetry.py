@@ -56,8 +56,8 @@ class SpringTelemetry:
         self._interval = max(1.0, interval)  # Enforce a minimum interval to avoid flooding
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._last_fire_detected: Optional[bool] = None   # Tracks last uploaded fire state
-        self._last_fire_upload_time: float = 0.0          # monotonic timestamp of last fire upload
+        self._last_fire_state: Optional[str] = None  # "NORMAL", "SUSPECTED_FIRE", or "VERIFIED_FIRE"
+        self._last_fire_upload_time: float = 0.0      # monotonic timestamp of last fire upload
 
     def start(self) -> None:
         """Start the background telemetry thread (non-blocking)."""
@@ -151,7 +151,7 @@ class SpringTelemetry:
 
     def _upload_sensors(self) -> None:
         """
-        Upload the latest sensor snapshot (temperature, humidity, smoke, flame).
+        Upload the latest sensor snapshot (temperature, humidity, flame).
 
         Skipped if collector is None or sensor data is unavailable.
         KY026 flame sensors are OR-reduced to a single boolean flag before upload.
@@ -169,7 +169,6 @@ class SpringTelemetry:
         try:
             temperature = getattr(sensors, "temperature", None)
             humidity = getattr(sensors, "humidity", None)
-            smoke_level = getattr(sensors, "mq2_gas", None)
             flame_obj = getattr(sensors, "flame", None)
             flame_detected = None
             if flame_obj is not None:
@@ -181,7 +180,6 @@ class SpringTelemetry:
             self._client.send_sensors(
                 temperature=temperature,
                 humidity=humidity,
-                smoke_level=float(smoke_level) if smoke_level is not None else None,
                 flame_detected=flame_detected,
             )
         except Exception as e:
@@ -192,10 +190,12 @@ class SpringTelemetry:
         Upload a fire event to the Spring backend when state changes or periodically.
 
         Upload is suppressed when:
-        - fire_detected is False and no prior state has been recorded (initial NORMAL).
+        - State is NORMAL and no prior fire state has been recorded (initial startup).
         - State has not changed since the last upload AND the force interval has not elapsed.
 
-        Confidence values: 0.9 for VERIFIED_FIRE, 0.5 for SUSPECTED_FIRE.
+        Confidence values: 0.9 for VERIFIED_FIRE, 0.5 for SUSPECTED_FIRE, None for NORMAL.
+        Severity values: "VERIFIED" for VERIFIED_FIRE, "SUSPECTED" for SUSPECTED_FIRE.
+        Both fields allow the Spring backend to distinguish alert tier without API changes.
         GPS coordinates are attached when a fix is available.
         """
         if self._collector is None:
@@ -210,20 +210,31 @@ class SpringTelemetry:
             return
 
         try:
+            current_state = getattr(fire_status, "state", "NORMAL")
             verified = getattr(fire_status, "verified", False)
             suspected = getattr(fire_status, "suspected", False)
             fire_detected = verified or suspected
-            confidence = 0.9 if verified else (0.5 if suspected else None)
+
+            if verified:
+                confidence = 0.9
+                severity = "VERIFIED"
+            elif suspected:
+                confidence = 0.5
+                severity = "SUSPECTED"
+            else:
+                confidence = None
+                severity = None
+
             source = "ROBOT_CORE"
 
             now = time.monotonic()
-            state_changed = fire_detected != self._last_fire_detected
+            state_changed = current_state != self._last_fire_state
 
-            # First cycle: skip upload if fire is not detected to avoid sending
+            # First cycle: skip upload if state is NORMAL to avoid sending
             # a "no fire" event on every fresh startup before any detection occurs.
-            if self._last_fire_detected is None:
+            if self._last_fire_state is None:
                 if not fire_detected:
-                    self._last_fire_detected = False
+                    self._last_fire_state = "NORMAL"
                     return
                 state_changed = True
 
@@ -246,17 +257,18 @@ class SpringTelemetry:
             ok = self._client.send_fire_event(
                 fire_detected=fire_detected,
                 confidence=confidence,
+                severity=severity,
                 source=source,
                 latitude=latitude,
                 longitude=longitude,
             )
             if ok:
-                self._last_fire_detected = fire_detected
+                self._last_fire_state = current_state
                 self._last_fire_upload_time = now
                 if state_changed:
                     logger.info(
-                        "SpringTelemetry: fire state changed → detected=%s confidence=%s",
-                        fire_detected, confidence,
+                        "SpringTelemetry: fire state changed → state=%s confidence=%s severity=%s",
+                        current_state, confidence, severity,
                     )
         except Exception as e:
             logger.error("SpringTelemetry: fire event upload error: %s", e)
