@@ -1,3 +1,15 @@
+"""
+YOLOv10 wildfire detection training entry point.
+
+Validates dataset paths and split files, optionally initialises
+Weights & Biases logging, loads the configured YOLO model, and
+launches training with augmentation settings from utils.config.
+
+Usage:
+    python -m training.train
+    python -m training.train --print-config
+"""
+
 import argparse
 import logging
 import os
@@ -34,6 +46,9 @@ LOGGER = logging.getLogger("wildfire.train")
 
 
 def _setup_logging():
+    """
+    Configure root logging to stdout and a per-run log file under TRAIN_OUTPUT_DIR.
+    """
     output_dir = Path(TRAIN_OUTPUT_DIR).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
     log_path = output_dir / f"{TRAIN_RUN_NAME}.log"
@@ -50,6 +65,9 @@ def _setup_logging():
 
 
 def _require_path(path, description):
+    """
+    Return path as a Path object; raise FileNotFoundError if it does not exist.
+    """
     path = Path(path).expanduser()
     if not path.exists():
         raise FileNotFoundError(f"{description} not found: {path}")
@@ -57,6 +75,17 @@ def _require_path(path, description):
 
 
 def _resolve_resume():
+    """
+    Resolve the resume checkpoint path from TRAIN_RESUME config.
+
+    Returns:
+        False if resume is disabled.
+        Path string of last.pt when TRAIN_RESUME is a truthy keyword (auto/true/yes/1).
+        Path string of the explicit checkpoint path otherwise.
+
+    Raises:
+        FileNotFoundError if the resolved checkpoint does not exist.
+    """
     if not TRAIN_RESUME:
         return False
 
@@ -74,6 +103,12 @@ def _resolve_resume():
 
 
 def _init_wandb():
+    """
+    Initialise Weights & Biases for experiment tracking.
+
+    Skipped silently if WANDB_MODE=disabled or the wandb package is missing.
+    W&B failures are logged as warnings and do not abort training.
+    """
     if os.environ.get("WANDB_MODE") == "disabled":
         LOGGER.warning("Weights & Biases disabled by WANDB_MODE=disabled")
         return
@@ -103,6 +138,14 @@ def _init_wandb():
 
 
 def _load_model(resume):
+    """
+    Load a YOLO model for training.
+
+    If resume is a checkpoint path, loads weights from that file.
+    If TRAIN_MODEL_PATH is an absolute path or contains a separator,
+    treats it as a file path (validated); otherwise treats it as a
+    model alias or cached weight name (e.g. 'yolov10s.pt').
+    """
     from ultralytics import YOLO
 
     if resume:
@@ -120,6 +163,12 @@ def _load_model(resume):
 
 
 def _resolve_img_path(raw, dataset_dir):
+    """
+    Resolve a raw image path from a split .txt file.
+
+    Absolute paths are returned as-is; relative paths are resolved
+    against dataset_dir.
+    """
     path = Path(raw)
     if path.is_absolute():
         return path
@@ -127,6 +176,20 @@ def _resolve_img_path(raw, dataset_dir):
 
 
 def _verify_split_paths(dataset_dir, split, required):
+    """
+    Verify that a split .txt file exists and all referenced image paths are present.
+
+    Args:
+        dataset_dir: Path to the unified dataset directory.
+        split: Split name ('train', 'val', or 'test').
+        required: If True, raises RuntimeError when the split file is empty.
+
+    Returns:
+        Total number of image paths listed in the split file.
+
+    Raises:
+        RuntimeError: if any image path is missing or the file is empty when required.
+    """
     txt_path = _require_path(dataset_dir / f"{split}.txt", f"{split}.txt")
 
     with open(txt_path, "r", encoding="utf-8") as file:
@@ -160,6 +223,15 @@ def _verify_split_paths(dataset_dir, split, required):
 
 
 def _verify_training_inputs():
+    """
+    Validate that the unified dataset and data.yaml exist and have non-empty splits.
+
+    Returns:
+        Resolved Path to the data.yaml file.
+
+    Raises:
+        RuntimeError or FileNotFoundError on any validation failure.
+    """
     dataset_dir = _require_path(DATASET_OUTPUT_PATH, "Unified dataset")
     data_yaml = _require_path(TRAIN_DATA_YAML, "Training data.yaml")
 
@@ -179,6 +251,12 @@ def _verify_training_inputs():
 
 
 def _verify_training_outputs(save_dir):
+    """
+    Confirm that the expected training output files exist after model.train() returns.
+
+    Checks for best.pt, last.pt, and results.csv inside save_dir/weights/.
+    Raises RuntimeError if any are missing.
+    """
     save_dir = Path(save_dir)
     weights_dir = save_dir / "weights"
     best = weights_dir / "best.pt"
@@ -204,6 +282,7 @@ def _verify_training_outputs(save_dir):
 
 
 def _print_config():
+    """Print resolved training configuration values without starting training."""
     print(f"DATASET_OUTPUT_PATH={DATASET_OUTPUT_PATH}")
     print(f"TRAIN_DATA_YAML={TRAIN_DATA_YAML}")
     print(f"TRAIN_PROJECT_PATH={TRAIN_OUTPUT_DIR}")
