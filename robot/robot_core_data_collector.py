@@ -187,16 +187,15 @@ class RobotCoreDataCollector(RobotDataCollector):
         try:
             raw_temperature = sensor_data.get("temperature")
             raw_humidity = sensor_data.get("humidity")
-            raw_mq2_gas = sensor_data.get("smoke")
             raw_flame = sensor_data.get("flame")
 
-            if raw_temperature is None or raw_humidity is None or raw_mq2_gas is None or raw_flame is None:
+            if raw_temperature is None or raw_humidity is None or raw_flame is None:
                 logger.debug("get_sensors: required sensor data unavailable, skipping")
                 return None
 
             temperature = float(raw_temperature)
             humidity = float(raw_humidity)
-            mq2_gas = int(raw_mq2_gas)
+            mq2_gas = 0
 
             if isinstance(raw_flame, dict):
                 # SensorManager.read_ky026() returns a FlameReadings dict keyed by position
