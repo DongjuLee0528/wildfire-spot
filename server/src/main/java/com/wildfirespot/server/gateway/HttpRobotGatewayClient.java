@@ -178,7 +178,7 @@ public class HttpRobotGatewayClient implements RobotGatewayClient {
 
     private SensorResponse fallbackSensors() {
         SensorResponse.FlameStatus flame = new SensorResponse.FlameStatus(false, false, false, false);
-        return new SensorResponse(0.0, 0.0, 0, flame, "UNAVAILABLE");
+        return new SensorResponse(0.0, 0.0, flame, "UNAVAILABLE");
     }
 
     private FireStatusResponse fallbackFireStatus() {
