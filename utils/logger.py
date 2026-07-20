@@ -100,14 +100,13 @@ class WildfireLogger:
             latitude = location[0] if (location and len(location) >= 2) else 0.0
             longitude = location[1] if (location and len(location) >= 2) else 0.0
 
-            # Extract all sensor values with defaults
-            smoke = sensor_data.get('smoke', 0) if sensor_data else 0
+            # Extract sensor values with defaults
             temperature = sensor_data.get('temperature', 0.0) if sensor_data else 0.0
             humidity = sensor_data.get('humidity', 0.0) if sensor_data else 0.0
             flame = sensor_data.get('flame', []) if sensor_data else []
             direction_val = direction if direction is not None else 0.0
 
-            message = f"FIRE_DETECTED | Location: ({latitude:.6f}, {longitude:.6f}) | Direction: {direction_val:.1f} | Smoke: {smoke} | Temp: {temperature:.1f}C | Humidity: {humidity:.1f}% | Flame: {flame}"
+            message = f"FIRE_DETECTED | Location: ({latitude:.6f}, {longitude:.6f}) | Direction: {direction_val:.1f} | Temp: {temperature:.1f}C | Humidity: {humidity:.1f}% | Flame: {flame}"
             self.logger.warning(message)
         except (ValueError, TypeError, KeyError) as e:
             self.logger.error(f"Failed to log fire detected: {e}")
@@ -122,7 +121,6 @@ class WildfireLogger:
         Logs as DEBUG level to avoid cluttering console output.
         """
         try:
-            smoke = sensor_data.get('smoke', 0) if sensor_data else 0
             temperature = sensor_data.get('temperature', 0.0) if sensor_data else 0.0
             humidity = sensor_data.get('humidity', 0.0) if sensor_data else 0.0
             flame = sensor_data.get('flame', []) if sensor_data else []
@@ -131,7 +129,7 @@ class WildfireLogger:
             temp_str = f"{temperature:.1f}" if temperature is not None else "N/A"
             hum_str = f"{humidity:.1f}" if humidity is not None else "N/A"
             dist_str = f"{distance:.2f}" if distance is not None else "N/A"
-            message = f"SENSOR_VALUES | Smoke: {smoke} | Temp: {temp_str}C | Humidity: {hum_str}% | Flame: {flame} | Distance: {dist_str}cm"
+            message = f"SENSOR_VALUES | Temp: {temp_str}C | Humidity: {hum_str}% | Flame: {flame} | Distance: {dist_str}cm"
             self.logger.debug(message)
         except (ValueError, TypeError, KeyError) as e:
             self.logger.error(f"Failed to log sensor values: {e}")
