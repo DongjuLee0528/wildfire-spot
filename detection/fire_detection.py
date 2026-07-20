@@ -1,12 +1,12 @@
 """
-Fire detection module integrating multiple sensors and camera.
+Fire detection module integrating KY-026 flame sensors and camera AI.
 
-Combines sensor data (smoke, temperature, humidity, flame) with
-optional camera-based detection to identify and locate wildfires.
+Combines KY-026 flame sensor data with optional camera-based detection
+to identify and locate wildfires. DHT11 temperature/humidity is used
+only for environmental logging, not for fire boolean decisions.
 """
 
-from utils.config import (TEMP_THRESHOLD, HUMIDITY_THRESHOLD,
-                         DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT,
+from utils.config import (DIRECTION_ANGLE_MULTIPLIER, DEFAULT_DIRECTION_VALUE, KY026_COUNT,
                          EVIDENCE_DIR)
 from utils.logger import WildfireLogger
 from detection.fire_events import AlertEvent, DetectionState, ReportEvent
@@ -45,8 +45,8 @@ class FireDetector:
     Multi-modal fire detection system.
 
     Integrates:
-    - Sensor-based detection (smoke, temperature, humidity, flame)
-    - Optional CameraVision candidate detection
+    - Camera-based fire/smoke AI detection (CameraVision)
+    - KY-026 flame sensor detection
     - GPS location tracking
     - Pan-tilt camera control for fire direction tracking
     """
@@ -66,69 +66,11 @@ class FireDetector:
         self.pan_tilt_controller = pan_tilt_controller
         self.camera_vision = camera_vision
         self.camera_detected = False          # True when camera AI reports fire/smoke
-        self.sensor_detected = False           # True when hardware sensors exceed thresholds
-        self.detection_log = []               # History of fire detections for direction analysis
-        self._last_detection_result = False   # Result of the most recent is_fire_detected() call
+        self.sensor_detected = False           # True when KY026 flame sensor triggered
         self._current_fire_state = DetectionState.NORMAL  # State from the most recent evaluate()
         self._latest_alert_event = None       # AlertEvent from the most recent SUSPECTED_FIRE
         self._latest_report_event = None      # ReportEvent from the most recent VERIFIED_FIRE
         self.logger = WildfireLogger("FireDetector")
-
-    def _check_sensor_thresholds(self, sensor_data):
-        """
-        Check if sensor readings exceed fire detection thresholds.
-
-        Args:
-            sensor_data: Dictionary containing sensor readings
-
-        Returns:
-            True if any threshold exceeded (fire conditions detected)
-            False otherwise
-
-        Fire indicators:
-        - High temperature
-        - Low humidity (dry conditions)
-        - Any flame sensor triggered (KY026)
-        """
-        try:
-            if sensor_data is None or not hasattr(sensor_data, 'get'):
-                self.sensor_detected = False
-                return False
-
-            temperature = sensor_data.get('temperature', 0)
-            humidity = sensor_data.get('humidity', 100)
-            flame_detected = sensor_data.get('flame', False)
-            temperature = _safe_number(temperature, 0)
-            humidity = _safe_number(humidity, 100)
-            flame_detected = any(bool(value) for value in _flame_values(flame_detected))
-
-            # Check if any fire indicator threshold is exceeded
-            if (temperature > TEMP_THRESHOLD or
-                humidity < HUMIDITY_THRESHOLD or
-                flame_detected):
-                self.sensor_detected = True
-                return True
-
-            self.sensor_detected = False
-            return False
-
-        except (ValueError, RuntimeError, KeyError, TypeError) as e:
-            self.logger.log_error("FireDetector._check_sensor_thresholds", str(e))
-            return False
-
-    def detect_by_sensor(self):
-        """
-        Perform sensor-based fire detection.
-
-        Returns:
-            True if fire detected by sensors, False otherwise
-        """
-        try:
-            sensor_data = self.sensor_manager.read_all()
-            return self._check_sensor_thresholds(sensor_data)
-        except (ValueError, RuntimeError, KeyError) as e:
-            self.logger.log_error("FireDetector.detect_by_sensor", str(e))
-            return False
 
     def detect_by_camera(self):
         """
@@ -148,155 +90,6 @@ class FireDetector:
             self.logger.log_error("FireDetector.detect_by_camera", str(e))
             self.camera_detected = False
             return False
-
-    def track_fire_direction(self, sensor_data):
-        """
-        Determine fire direction from flame sensors and aim camera.
-
-        Args:
-            sensor_data: Dictionary containing flame sensor readings
-
-        Returns:
-            Average direction angle (degrees) where flame is detected,
-            or DEFAULT_DIRECTION_VALUE if no flame is detected or an error occurs.
-
-        Uses KY-026 flame sensors positioned at different angles.
-        Calculates the average direction and calls pan_tilt_controller.rotate_to_angle()
-        to aim the camera. pan_tilt_controller must not be None when any flame sensor
-        is triggered; otherwise AttributeError will propagate to the caller.
-        """
-        try:
-            if sensor_data is None or not hasattr(sensor_data, 'get'):
-                return DEFAULT_DIRECTION_VALUE
-
-            flame_sensors = sensor_data.get('flame', [False] * KY026_COUNT)
-            flame_sensors = _flame_values(flame_sensors)
-
-            if any(flame_sensors):
-                detected_directions = []
-                # Convert sensor index to angle based on sensor positions
-                for i, detected in enumerate(flame_sensors):
-                    if detected:
-                        detected_directions.append(i * DIRECTION_ANGLE_MULTIPLIER)
-
-                if detected_directions:
-                    # Calculate average angle of detected flames
-                    avg_direction = sum(detected_directions) / len(detected_directions)
-                    # Point camera toward fire
-                    self.pan_tilt_controller.rotate_to_angle(avg_direction, DEFAULT_DIRECTION_VALUE)
-                    return avg_direction
-
-            return DEFAULT_DIRECTION_VALUE
-
-        except (ValueError, RuntimeError, KeyError, ZeroDivisionError, TypeError) as e:
-            self.logger.log_error("FireDetector.track_fire_direction", str(e))
-            return DEFAULT_DIRECTION_VALUE
-
-    def log_detection(self, location, direction, sensor_data):
-        """
-        Record a fire detection event with full context.
-
-        Args:
-            location: GPS coordinates (latitude, longitude) or None
-            direction: Fire direction angle or None
-            sensor_data: Dictionary of all sensor readings
-
-        Stores detection in internal log and writes to logger.
-        Detection history can be used to track fire movement or find strongest signal.
-        """
-        try:
-            detection_record = {
-                "timestamp": time.time(),
-                "latitude": location[0] if (location and len(location) >= 2) else DEFAULT_DIRECTION_VALUE,
-                "longitude": location[1] if (location and len(location) >= 2) else DEFAULT_DIRECTION_VALUE,
-                "direction": direction if direction is not None else DEFAULT_DIRECTION_VALUE,
-                "smoke": sensor_data.get('smoke', 0),
-                "temperature": sensor_data.get('temperature', 0.0),
-                "humidity": sensor_data.get('humidity', 0.0),
-                "flame": sensor_data.get('flame', [False] * KY026_COUNT)
-            }
-            self.detection_log.append(detection_record)
-            self.logger.log_fire_detected(location, sensor_data, direction)
-
-        except (ValueError, RuntimeError, KeyError) as e:
-            self.logger.log_error("FireDetector", str(e))
-
-    def get_strongest_direction(self):
-        """
-        Get direction of strongest fire detection from log history.
-
-        Returns:
-            Direction angle with highest smoke reading
-            None if no detections logged or error occurs
-
-        Useful for determining primary fire source when multiple detections exist.
-        """
-        try:
-            if not self.detection_log:
-                return None
-
-            # Find detection with highest smoke level
-            strongest_record = max(self.detection_log, key=lambda x: x['smoke'])
-            return strongest_record['direction']
-
-        except (ValueError, KeyError) as e:
-            self.logger.log_error("FireDetector.get_strongest_direction", str(e))
-            return None
-
-    def is_fire_detected(self):
-        """
-        Perform comprehensive fire detection check.
-
-        Returns:
-            True if fire detected by hardware sensors
-            False otherwise
-
-        Camera detection is recorded as candidate evidence but does not
-        replace hardware sensor confirmation. If fire is confirmed by
-        sensors, automatically logs the event with GPS location and tracks
-        fire direction with pan-tilt camera.
-        """
-        try:
-            sensor_data = self.sensor_manager.read_all()
-
-            # Run camera detection for logging/evidence even though it is not
-            # authoritative — only hardware sensor thresholds determine fire_detected.
-            self.detect_by_camera()
-            sensor_detection = self._check_sensor_thresholds(sensor_data)
-
-            # Camera result is stored but does not override sensor-based decision
-            fire_detected = sensor_detection
-
-            # On sensor-confirmed detection, record full context and aim camera
-            if fire_detected:
-                location = self.gps_manager.get_coordinates()
-                direction = self.track_fire_direction(sensor_data)
-                self.log_detection(location, direction, sensor_data)
-
-            self._last_detection_result = fire_detected
-            return fire_detected
-
-        except (ValueError, RuntimeError, KeyError) as e:
-            self.logger.log_error("FireDetector.is_fire_detected", str(e))
-            return False
-
-    def get_fire_location(self):
-        """
-        Get GPS coordinates of last fire detection.
-
-        Returns:
-            Tuple of (latitude, longitude) if fire detected
-            None if no fire detected or GPS unavailable
-
-        Only returns location if most recent detection check found fire.
-        """
-        try:
-            if self._last_detection_result:
-                return self.gps_manager.get_coordinates()
-            return None
-        except (ValueError, RuntimeError) as e:
-            self.logger.log_error("FireDetector.get_fire_location", str(e))
-            return None
 
     def evaluate(self):
         """
