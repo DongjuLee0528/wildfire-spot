@@ -179,13 +179,12 @@ class HttpRobotGatewayClientTest {
                         + "\"timestamp\":1234567890.123,"
                         + "\"latitude\":37.1,"
                         + "\"longitude\":127.1,"
-                        + "\"smoke\":450.0,"
                         + "\"temperature\":35.0,"
                         + "\"humidity\":30.0,"
                         + "\"flame\":{\"front_left\":true,\"front_right\":false,\"left\":false,\"right\":false},"
                         + "\"camera_detected\":true,"
                         + "\"camera_result\":{\"detected\":true,\"confidence\":0.91},"
-                        + "\"verification_reason\":\"camera+mq2\","
+                        + "\"verification_reason\":\"camera\","
                         + "\"image_path\":\"/tmp/img.jpg\""
                         + "},"
                         + "\"latestReportEvent\":null}",
@@ -199,7 +198,6 @@ class HttpRobotGatewayClientTest {
         assertThat(result.latestAlertEvent()).containsKey("timestamp");
         assertThat(result.latestAlertEvent()).containsKey("latitude");
         assertThat(result.latestAlertEvent()).containsKey("longitude");
-        assertThat(result.latestAlertEvent()).containsKey("smoke");
         assertThat(result.latestAlertEvent()).containsKey("temperature");
         assertThat(result.latestAlertEvent()).containsKey("humidity");
         assertThat(result.latestAlertEvent()).containsKey("flame");
@@ -207,7 +205,7 @@ class HttpRobotGatewayClientTest {
         assertThat(result.latestAlertEvent()).containsKey("camera_result");
         assertThat(result.latestAlertEvent()).containsKey("verification_reason");
         assertThat(result.latestAlertEvent()).containsKey("image_path");
-        assertThat(result.latestAlertEvent().get("verification_reason")).isEqualTo("camera+mq2");
+        assertThat(result.latestAlertEvent().get("verification_reason")).isEqualTo("camera");
         assertThat(result.latestAlertEvent().get("camera_detected")).isEqualTo(true);
         assertThat(result.latestAlertEvent().get("image_path")).isEqualTo("/tmp/img.jpg");
 
@@ -242,13 +240,12 @@ class HttpRobotGatewayClientTest {
                         + "\"report_timestamp\":1234567900.0,"
                         + "\"latitude\":37.1,"
                         + "\"longitude\":127.1,"
-                        + "\"smoke\":500.0,"
                         + "\"temperature\":38.0,"
                         + "\"humidity\":25.0,"
                         + "\"flame\":{\"front_left\":true},"
                         + "\"camera_detected\":true,"
                         + "\"camera_result\":{\"detected\":true,\"confidence\":0.95},"
-                        + "\"verification_reason\":\"camera+mq2+ky026\","
+                        + "\"verification_reason\":\"camera+ky026\","
                         + "\"image_path\":null"
                         + "}}",
                         MediaType.APPLICATION_JSON
@@ -264,7 +261,7 @@ class HttpRobotGatewayClientTest {
         assertThat(result.latestReportEvent()).containsKey("longitude");
         assertThat(result.latestReportEvent()).containsKey("verification_reason");
         assertThat(result.latestReportEvent()).containsKey("image_path");
-        assertThat(result.latestReportEvent().get("verification_reason")).isEqualTo("camera+mq2+ky026");
+        assertThat(result.latestReportEvent().get("verification_reason")).isEqualTo("camera+ky026");
         assertThat(result.latestReportEvent().get("report_timestamp")).isEqualTo(1234567900.0);
         assertThat(result.latestReportEvent().get("image_path")).isNull();
 
@@ -294,13 +291,12 @@ class HttpRobotGatewayClientTest {
                         + "\"timestamp\":1234567890.0,"
                         + "\"latitude\":null,"
                         + "\"longitude\":null,"
-                        + "\"smoke\":460.0,"
                         + "\"temperature\":33.0,"
                         + "\"humidity\":28.0,"
                         + "\"flame\":{},"
                         + "\"camera_detected\":false,"
                         + "\"camera_result\":null,"
-                        + "\"verification_reason\":\"mq2\","
+                        + "\"verification_reason\":\"ky026\","
                         + "\"image_path\":null"
                         + "},"
                         + "\"latestReportEvent\":null}",
@@ -314,7 +310,7 @@ class HttpRobotGatewayClientTest {
         assertThat(result.latestAlertEvent().get("longitude")).isNull();
         assertThat(result.latestAlertEvent().get("camera_result")).isNull();
         assertThat(result.latestAlertEvent().get("image_path")).isNull();
-        assertThat(result.latestAlertEvent().get("verification_reason")).isEqualTo("mq2");
+        assertThat(result.latestAlertEvent().get("verification_reason")).isEqualTo("ky026");
     }
 
     @Test
@@ -383,7 +379,6 @@ class HttpRobotGatewayClientTest {
                         + "\"timestamp\":1234567890.0,"
                         + "\"latitude\":37.1,"
                         + "\"longitude\":127.1,"
-                        + "\"smoke\":400.0,"
                         + "\"temperature\":32.0,"
                         + "\"humidity\":35.0,"
                         + "\"flame\":{},"

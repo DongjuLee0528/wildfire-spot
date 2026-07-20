@@ -20,7 +20,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     const GPS_FALLBACK = { latitude: null, longitude: null, fix: null };
     const [gpsData, setGpsData] = useState(GPS_FALLBACK);
     const SENSOR_FALLBACK = {
-        temperature: null, humidity: null, smokeLevel: null, gasLevel: null, flameDetected: null,
+        temperature: null, humidity: null, flameDetected: null,
     };
     const [sensorData, setSensorData] = useState(SENSOR_FALLBACK);
     const FIRE_FALLBACK = { fireDetected: null, confidence: null, severity: null, source: null };
@@ -241,8 +241,6 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                     setSensorData({
                         temperature: typeof data.temperature === 'number' ? data.temperature : null,
                         humidity: typeof data.humidity === 'number' ? data.humidity : null,
-                        smokeLevel: typeof data.smokeLevel === 'number' ? data.smokeLevel : null,
-                        gasLevel: typeof data.gasLevel === 'number' ? data.gasLevel : null,
                         flameDetected: typeof data.flameDetected === 'boolean' ? data.flameDetected : null,
                     });
                 })
@@ -812,23 +810,10 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                                 </div>
                                 <div className="sensor-bar-bg"><div className="sensor-bar-fill" style={{width: sensorData.humidity !== null ? `${Math.min(sensorData.humidity, 100).toFixed(1)}%` : '0%'}}></div></div>
                             </div>
-                            <div className="sensor-item">
-                                <div className="sensor-meta">
-                                    <span className="sensor-name">Smoke / Gas (MQ-2)</span>
-                                    <span className={`sensor-val ${sensorData.smokeLevel !== null && sensorData.smokeLevel < 300 ? 'text-success' : sensorData.smokeLevel !== null ? 'text-error' : ''}`}>
-                                        {sensorData.smokeLevel !== null ? `${sensorData.smokeLevel.toFixed(0)} ppm${sensorData.smokeLevel < 300 ? ' (Safe)' : ' (Alert)'}` : 'N/A'}
-                                    </span>
-                                </div>
-                                <div className="sensor-bar-bg"><div className="sensor-bar-fill safe" style={{width: sensorData.smokeLevel !== null ? `${Math.min(sensorData.smokeLevel / 1000 * 100, 100).toFixed(1)}%` : '0%'}}></div></div>
-                            </div>
                             <div className="sensor-grid-2x2">
                                 <div className={`sensor-mini-card flame-${sensorData.flameDetected === null ? 'unknown' : sensorData.flameDetected ? 'detected' : 'clear'}`}>
                                     <span className="mini-lbl">Flame Sensor</span>
                                     <span className="mini-val">{sensorData.flameDetected === null ? '...' : sensorData.flameDetected ? 'DETECTED' : 'CLEAR'}</span>
-                                </div>
-                                <div className="sensor-mini-card flame-unknown">
-                                    <span className="mini-lbl">Gas Level</span>
-                                    <span className="mini-val">{sensorData.gasLevel !== null ? sensorData.gasLevel.toFixed(0) : '...'}</span>
                                 </div>
                             </div>
                         </div>

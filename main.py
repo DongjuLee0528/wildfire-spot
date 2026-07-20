@@ -290,13 +290,54 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
     print("Gait loop started (servo motion active)")
 
 
-def _start_fire_detection_loop(logger, fire_detector, camera_vision):
+def _apply_fire_state_transition(state_machine, detection_state, logger):
+    """
+    Apply StateMachine transitions based on FireDetector.evaluate() result.
+
+    Transition rules (only attempted when transition is valid):
+    - SUSPECTED_FIRE → DETECTING  (robot is investigating a potential fire)
+    - VERIFIED_FIRE  → FIRE_DETECTED (confirmed fire; triggers reporting flow)
+    - NORMAL         → PATROLLING (resume patrol when suspicion clears)
+
+    Invalid transitions (e.g. IDLE → DETECTING) are silently skipped because
+    the robot may not be in PATROLLING when detection runs at startup.
+    StateMachine.transition_to() already logs rejected transitions internally.
+    """
+    if state_machine is None:
+        return
+
+    from detection.fire_events import DetectionState
+    from utils.state_machine import RobotState
+
+    try:
+        current = state_machine.get_state()
+
+        if detection_state == DetectionState.SUSPECTED_FIRE:
+            if current == RobotState.PATROLLING:
+                state_machine.transition_to(RobotState.DETECTING)
+        elif detection_state == DetectionState.VERIFIED_FIRE:
+            if current == RobotState.PATROLLING:
+                state_machine.transition_to(RobotState.DETECTING)
+            if state_machine.get_state() == RobotState.DETECTING:
+                state_machine.transition_to(RobotState.FIRE_DETECTED)
+            if state_machine.get_state() == RobotState.FIRE_DETECTED:
+                state_machine.transition_to(RobotState.REPORTING)
+        elif detection_state == DetectionState.NORMAL:
+            if current == RobotState.DETECTING:
+                state_machine.transition_to(RobotState.PATROLLING)
+    except Exception as e:
+        logger.log_error("FireDetectionLoop._apply_fire_state_transition", str(e))
+
+
+def _start_fire_detection_loop(logger, fire_detector, camera_vision, state_machine=None):
     """
     Start a thread that calls FireDetector.evaluate() at a fixed interval.
 
     Skips evaluation only when fire_detector is unavailable.
     camera_vision is accepted for interface symmetry but is not used directly
     here; it must be wired into fire_detector.camera_vision before this call.
+    When state_machine is provided, StateMachine transitions are applied after
+    each evaluate() call based on the returned DetectionState.
     Exceptions inside evaluate() are logged but do not stop the loop.
     """
     if fire_detector is None:
@@ -312,7 +353,8 @@ def _start_fire_detection_loop(logger, fire_detector, camera_vision):
         )
         while not stop_event.is_set():
             try:
-                fire_detector.evaluate()
+                detection_state, _alert, _report = fire_detector.evaluate()
+                _apply_fire_state_transition(state_machine, detection_state, logger)
             except Exception as e:
                 logger.log_error("FireDetectionLoop", str(e))
             stop_event.wait(FIRE_DETECTION_INTERVAL_SECONDS)
@@ -674,6 +716,7 @@ def main():
             logger,
             runtime.fire_detector,
             camera_vision,
+            state_machine=runtime.state_machine,
         )
 
         if SPRING_TELEMETRY_ENABLED:
