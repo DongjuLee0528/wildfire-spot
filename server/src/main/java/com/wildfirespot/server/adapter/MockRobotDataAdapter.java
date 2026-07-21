@@ -49,7 +49,6 @@ public class MockRobotDataAdapter implements RobotStatusProvider, RobotGpsProvid
         return new SensorResponse(
                 31.5,
                 42.0,
-                128,
                 flame,
                 "SCANNING"
         );
