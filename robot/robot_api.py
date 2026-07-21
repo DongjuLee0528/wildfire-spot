@@ -158,13 +158,12 @@ def get_gps():
 
 @app.get("/robot/sensors")
 def get_sensors():
-    """Return latest readings from all onboard sensors (DHT11, MQ2, KY026)."""
+    """Return latest readings from all onboard sensors (DHT11, KY026)."""
     try:
         if _collector is None:
             return {
                 "temperature": 0.0,
                 "humidity": 0.0,
-                "mq2Gas": 0,
                 "flame": {"frontLeft": False, "frontRight": False, "left": False, "right": False},
                 "lidarStatus": "UNAVAILABLE",
             }
@@ -172,7 +171,6 @@ def get_sensors():
         return {
             "temperature": data.temperature,
             "humidity": data.humidity,
-            "mq2Gas": data.mq2_gas,
             "flame": {
                 "frontLeft": data.flame.front_left,
                 "frontRight": data.flame.front_right,

@@ -43,7 +43,7 @@ class RobotRuntimeContext:
         handle None values. Initialisation order matters:
         1. StateMachine — no hardware dependency
         2. GPSManager   — UART/USB GPS device
-        3. SensorManager — I2C/GPIO sensors (DHT11, MQ2, KY026)
+        3. SensorManager — I2C/GPIO sensors (DHT11, KY026)
         4. FireDetector — requires sensor_manager and gps_manager
         """
         self.gps_manager = None

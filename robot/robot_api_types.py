@@ -42,7 +42,6 @@ class RobotSensorData:
     """Snapshot of all environmental sensor readings."""
     temperature: float
     humidity: float
-    mq2_gas: int
     flame: FlameStatus
     lidar_status: str
 

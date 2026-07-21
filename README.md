@@ -10,7 +10,7 @@ Detection pipeline: Sensor primary detection â†’ Camera secondary verification â
 
 - Platform: NVIDIA Jetson Nano B01
 - Servos: JX CLS6336HV x12, MG995 x2
-- Detection Sensors: MQ-2, SHT31, KY-026 x4, HC-SR04
+- Detection Sensors: DHT11, KY-026 x4, HC-SR04
 - GPS: NEO-6M
 - Camera: Logitech C922
 - LiDAR: UNITREE L2
