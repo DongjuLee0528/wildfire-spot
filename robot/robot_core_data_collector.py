@@ -195,7 +195,6 @@ class RobotCoreDataCollector(RobotDataCollector):
 
             temperature = float(raw_temperature)
             humidity = float(raw_humidity)
-            mq2_gas = 0
 
             if isinstance(raw_flame, dict):
                 # SensorManager.read_ky026() returns a FlameReadings dict keyed by position
@@ -238,7 +237,6 @@ class RobotCoreDataCollector(RobotDataCollector):
         return RobotSensorData(
             temperature=temperature,
             humidity=humidity,
-            mq2_gas=mq2_gas,
             flame=flame,
             lidar_status=lidar_status,
         )
