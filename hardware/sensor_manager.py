@@ -10,7 +10,7 @@ Integrates multiple sensor types:
 from utils.config import (I2C_SCL, I2C_SDA, DHT11_DATA_PIN,
                          KY026_FRONT_LEFT_PIN, KY026_FRONT_RIGHT_PIN, KY026_LEFT_PIN, KY026_RIGHT_PIN,
                          HCSR04_TRIGGER_PIN, HCSR04_ECHO_PIN, ULTRASONIC_DISTANCE_MULTIPLIER,
-                         SENSOR_READ_TIMEOUT, TEMP_THRESHOLD, HUMIDITY_THRESHOLD)
+                         SENSOR_READ_TIMEOUT)
 from utils.logger import WildfireLogger
 
 import time
@@ -213,30 +213,6 @@ class SensorManager:
                 flame_detected[position] = None
         return flame_detected
 
-    def _check_hardware_confirmation(self, temperature, humidity, flame):
-        """
-        Derive fire_detected and confirmed_fire flags from raw sensor values.
-
-        fire_detected — True if flame is detected.
-        confirmed_fire — True only when flame is detected AND temperature or
-                         humidity also exceeds its threshold.
-
-        Returns:
-            Tuple (fire_detected: bool, confirmed_fire: bool)
-        """
-        flame_values = [v for v in flame.values() if v is not None] if isinstance(flame, dict) else []
-        flame_detected = any(flame_values) if flame_values else None
-        sensor_conditions = {
-            "flame": flame_detected is True,
-            "temperature": temperature is not None and temperature > TEMP_THRESHOLD,
-            "humidity": humidity is not None and humidity < HUMIDITY_THRESHOLD
-        }
-        fire_detected = sensor_conditions["flame"]
-        confirmed_fire = flame_detected and any(
-            detected for condition, detected in sensor_conditions.items() if condition != "flame"
-        )
-        return fire_detected, confirmed_fire
-
     def read_hcsr04(self):
         """
         Read distance from HC-SR04 ultrasonic sensor.
@@ -281,7 +257,7 @@ class SensorManager:
 
     def read_all(self):
         """
-        Read all sensors and return consolidated data.
+        Read all sensors and return raw consolidated data.
 
         Returns:
             Dictionary containing all sensor readings:
@@ -289,23 +265,18 @@ class SensorManager:
             - humidity: Relative humidity percentage, or None when unavailable
             - flame: FlameReadings dict keyed by position, or None when unavailable
             - flame_list: list of flame values in position order, or None when unavailable
-            - fire_detected: True if flame sensor is triggered
-            - confirmed_fire: True if flame AND at least one DHT11 threshold exceeded
             - distance: Ultrasonic distance in cm, or None when unavailable
         """
         dht = self.read_dht11()
         temperature, humidity = dht if dht is not None else (None, None)
         flame = self.read_ky026()
         distance = self.read_hcsr04()
-        fire_detected, confirmed_fire = self._check_hardware_confirmation(temperature, humidity, flame)
 
         sensor_data = {
             "temperature": temperature,
             "humidity": humidity,
             "flame": flame,
             "flame_list": list(flame.values()) if flame is not None else None,
-            "fire_detected": fire_detected,
-            "confirmed_fire": confirmed_fire,
             "distance": distance
         }
 
