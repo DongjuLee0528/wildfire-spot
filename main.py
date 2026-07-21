@@ -295,9 +295,11 @@ def _apply_fire_state_transition(state_machine, detection_state, logger):
     Apply StateMachine transitions based on FireDetector.evaluate() result.
 
     Transition rules (only attempted when transition is valid):
-    - SUSPECTED_FIRE → DETECTING  (robot is investigating a potential fire)
-    - VERIFIED_FIRE  → FIRE_DETECTED (confirmed fire; triggers reporting flow)
-    - NORMAL         → PATROLLING (resume patrol when suspicion clears)
+    - SUSPECTED_FIRE → DETECTING      (robot is investigating a potential fire)
+    - VERIFIED_FIRE  → FIRE_DETECTED  (confirmed fire; REPORTING is triggered
+                                       externally by the telemetry layer after
+                                       a successful server report)
+    - NORMAL         → PATROLLING     (resume patrol when suspicion clears)
 
     Invalid transitions (e.g. IDLE → DETECTING) are silently skipped because
     the robot may not be in PATROLLING when detection runs at startup.
@@ -320,8 +322,6 @@ def _apply_fire_state_transition(state_machine, detection_state, logger):
                 state_machine.transition_to(RobotState.DETECTING)
             if state_machine.get_state() == RobotState.DETECTING:
                 state_machine.transition_to(RobotState.FIRE_DETECTED)
-            if state_machine.get_state() == RobotState.FIRE_DETECTED:
-                state_machine.transition_to(RobotState.REPORTING)
         elif detection_state == DetectionState.NORMAL:
             if current == RobotState.DETECTING:
                 state_machine.transition_to(RobotState.PATROLLING)
@@ -735,7 +735,7 @@ def main():
                         base_url=SPRING_API_BASE_URL,
                     )
                     if _spring_client.login():
-                        spring_telemetry = SpringTelemetry(_spring_client, data_collector=_collector)
+                        spring_telemetry = SpringTelemetry(_spring_client, data_collector=_collector, state_machine=runtime.state_machine)
                         spring_telemetry.start()
                         print(f"SpringTelemetry: started (url={SPRING_API_BASE_URL})")
                         logger.log_system_state("SPRING_TELEMETRY_STARTED")
