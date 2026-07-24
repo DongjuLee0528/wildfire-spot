@@ -81,7 +81,7 @@ class LidarManager:
           data[120:124] point_num (uint32, ≤ 300)
           data[124:724] ranges: 300 × uint16 (distance in mm, 0 = invalid)
         """
-        _MAGIC = 0x55AA050A
+        _MAGIC = 0x0A05AA55
         _PACKET_TYPE = 102
         _MIN_SIZE = 1044
         _GEOMETRY_OFFSET = 88
