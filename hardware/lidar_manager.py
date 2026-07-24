@@ -10,6 +10,7 @@ Transport: Unitree L2 LiDAR via Ethernet UDP
 """
 
 import socket
+import struct
 import time
 from utils.config import (LIDAR_ETHERNET_RX_PORT, LIDAR_SOCKET_TIMEOUT, LIDAR_OBSTACLE_THRESHOLD,
                           LIDAR_DIRECTION_ANGLES, LIDAR_FULL_SCAN_SIZE,
@@ -67,12 +68,68 @@ class LidarManager:
         return diff <= angle_range
 
     def _parse_udp_packet(self, data: bytes) -> dict:
-        """Parse a raw UDP packet from the LIDAR into an {angle: distance_mm} dict."""
+        """Parse a raw UDP packet from the LIDAR into an {angle: distance_mm} dict.
+
+        Packet layout (all little-endian unless noted):
+          [0:8]     UDP header (big-endian HHHH, 4 × uint16) – skipped
+          [8:]      payload
+            payload[0:4]   magic (uint32, must be 0x55AA050A)
+            payload[4:8]   packet_type (uint32, must be 102)
+            payload[8:12]  packet_size (uint32)
+            payload[96:128] geometry: 8 × float32
+                            [0] h_angle_start (deg)
+                            [1] h_angle_step  (deg)
+                            [2..7] reserved / other geometry fields
+            payload[128:132] point_num (uint32, ≤ 300)
+            payload[132:732] ranges: 300 × uint16 (distance in mm, 0 = invalid)
+        """
+        _MAGIC = 0x55AA050A
+        _PACKET_TYPE = 102
+        _UDP_HEADER_SIZE = 8
+        _PAYLOAD_MIN_SIZE = 732
+        _GEOMETRY_OFFSET = 96
+        _POINT_NUM_OFFSET = 128
+        _RANGES_OFFSET = 132
+        _MAX_POINTS = 300
 
         try:
             if not data:
                 return {}
-            return {}
+
+            if len(data) < _UDP_HEADER_SIZE + _PAYLOAD_MIN_SIZE:
+                return {}
+
+            payload = data[_UDP_HEADER_SIZE:]
+
+            magic, packet_type, _ = struct.unpack_from("<III", payload, 0)
+            if magic != _MAGIC or packet_type != _PACKET_TYPE:
+                return {}
+
+            geometry = struct.unpack_from("<8f", payload, _GEOMETRY_OFFSET)
+            h_angle_start = geometry[0]
+            h_angle_step = geometry[1]
+
+            if h_angle_step == 0.0:
+                return {}
+
+            (point_num,) = struct.unpack_from("<I", payload, _POINT_NUM_OFFSET)
+            point_num = min(point_num, _MAX_POINTS)
+
+            ranges = struct.unpack_from(f"<{_MAX_POINTS}H", payload, _RANGES_OFFSET)
+
+            result = {}
+            for i in range(point_num):
+                distance_mm = ranges[i]
+                if distance_mm == 0:
+                    continue
+                angle_raw = h_angle_start + i * h_angle_step
+                angle_deg = int(angle_raw % 360)
+                if angle_deg < 0:
+                    angle_deg += 360
+                result[angle_deg] = distance_mm
+
+            return result
+
         except Exception as e:
             self.logger.log_error("LidarManager._parse_udp_packet", str(e))
             return {}
