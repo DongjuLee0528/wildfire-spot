@@ -71,51 +71,46 @@ class LidarManager:
         """Parse a raw UDP packet from the LIDAR into an {angle: distance_mm} dict.
 
         Packet layout (all little-endian unless noted):
-          [0:8]     UDP header (big-endian HHHH, 4 × uint16) – skipped
-          [8:]      payload
-            payload[0:4]   magic (uint32, must be 0x55AA050A)
-            payload[4:8]   packet_type (uint32, must be 102)
-            payload[8:12]  packet_size (uint32)
-            payload[96:128] geometry: 8 × float32
-                            [0] h_angle_start (deg)
-                            [1] h_angle_step  (deg)
-                            [2..7] reserved / other geometry fields
-            payload[128:132] point_num (uint32, ≤ 300)
-            payload[132:732] ranges: 300 × uint16 (distance in mm, 0 = invalid)
+          data[0:4]   magic (uint32, must be 0x55AA050A)
+          data[4:8]   packet_type (uint32, must be 102)
+          data[8:12]  packet_size (uint32)
+          data[88:120] geometry: 8 × float32
+                        [0] h_angle_start (deg)
+                        [1] h_angle_step  (deg)
+                        [2..7] reserved / other geometry fields
+          data[120:124] point_num (uint32, ≤ 300)
+          data[124:724] ranges: 300 × uint16 (distance in mm, 0 = invalid)
         """
         _MAGIC = 0x55AA050A
         _PACKET_TYPE = 102
-        _UDP_HEADER_SIZE = 8
-        _PAYLOAD_MIN_SIZE = 732
-        _GEOMETRY_OFFSET = 96
-        _POINT_NUM_OFFSET = 128
-        _RANGES_OFFSET = 132
+        _MIN_SIZE = 1044
+        _GEOMETRY_OFFSET = 88
+        _POINT_NUM_OFFSET = 120
+        _RANGES_OFFSET = 124
         _MAX_POINTS = 300
 
         try:
             if not data:
                 return {}
 
-            if len(data) < _UDP_HEADER_SIZE + _PAYLOAD_MIN_SIZE:
+            if len(data) < _MIN_SIZE:
                 return {}
 
-            payload = data[_UDP_HEADER_SIZE:]
-
-            magic, packet_type, _ = struct.unpack_from("<III", payload, 0)
+            magic, packet_type, _ = struct.unpack_from("<III", data, 0)
             if magic != _MAGIC or packet_type != _PACKET_TYPE:
                 return {}
 
-            geometry = struct.unpack_from("<8f", payload, _GEOMETRY_OFFSET)
+            geometry = struct.unpack_from("<8f", data, _GEOMETRY_OFFSET)
             h_angle_start = geometry[0]
             h_angle_step = geometry[1]
 
             if h_angle_step == 0.0:
                 return {}
 
-            (point_num,) = struct.unpack_from("<I", payload, _POINT_NUM_OFFSET)
+            (point_num,) = struct.unpack_from("<I", data, _POINT_NUM_OFFSET)
             point_num = min(point_num, _MAX_POINTS)
 
-            ranges = struct.unpack_from(f"<{_MAX_POINTS}H", payload, _RANGES_OFFSET)
+            ranges = struct.unpack_from(f"<{_MAX_POINTS}H", data, _RANGES_OFFSET)
 
             result = {}
             for i in range(point_num):
