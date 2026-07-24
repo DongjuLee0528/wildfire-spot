@@ -9,6 +9,7 @@ Processes 360-degree scanning LIDAR data for:
 Transport: Unitree L2 LiDAR via Ethernet UDP
 """
 
+import math
 import socket
 import struct
 import time
@@ -74,19 +75,18 @@ class LidarManager:
           data[0:4]   magic (uint32, must be 0x55AA050A)
           data[4:8]   packet_type (uint32, must be 102)
           data[8:12]  packet_size (uint32)
-          data[88:120] geometry: 8 × float32
-                        [0] h_angle_start (deg)
-                        [1] h_angle_step  (deg)
-                        [2..7] reserved / other geometry fields
-          data[120:124] point_num (uint32, ≤ 300)
-          data[124:724] ranges: 300 × uint16 (distance in mm, 0 = invalid)
+          data[112:116] h_angle_start (float32, degrees)
+          data[120:124] h_step (float32, radians)
+          data[128:132] point_num (uint32, ≤ 300)
+          data[132:732] ranges: 300 × uint16 (distance in mm, 0 = invalid)
         """
         _MAGIC = 0x0A05AA55
         _PACKET_TYPE = 102
         _MIN_SIZE = 1044
-        _GEOMETRY_OFFSET = 88
-        _POINT_NUM_OFFSET = 120
-        _RANGES_OFFSET = 124
+        _H_ANGLE_START_OFFSET = 112
+        _H_STEP_OFFSET = 120
+        _POINT_NUM_OFFSET = 128
+        _RANGES_OFFSET = 132
         _MAX_POINTS = 300
 
         try:
@@ -100,12 +100,13 @@ class LidarManager:
             if magic != _MAGIC or packet_type != _PACKET_TYPE:
                 return {}
 
-            geometry = struct.unpack_from("<8f", data, _GEOMETRY_OFFSET)
-            h_angle_start = geometry[0]
-            h_angle_step = geometry[1]
+            (h_angle_start,) = struct.unpack_from("<f", data, _H_ANGLE_START_OFFSET)
+            (h_step_rad,) = struct.unpack_from("<f", data, _H_STEP_OFFSET)
 
-            if h_angle_step == 0.0:
+            if h_step_rad == 0.0:
                 return {}
+
+            h_angle_step = math.degrees(h_step_rad)
 
             (point_num,) = struct.unpack_from("<I", data, _POINT_NUM_OFFSET)
             point_num = min(point_num, _MAX_POINTS)
