@@ -200,8 +200,6 @@ class SpringApiClient:
         self,
         temperature: Optional[float] = None,
         humidity: Optional[float] = None,
-        smoke_level: Optional[float] = None,
-        gas_level: Optional[float] = None,
         flame_detected: Optional[bool] = None,
         recorded_at: Optional[datetime] = None,
     ) -> bool:
@@ -211,10 +209,6 @@ class SpringApiClient:
             payload["temperature"] = temperature
         if humidity is not None:
             payload["humidity"] = humidity
-        if smoke_level is not None:
-            payload["smokeLevel"] = smoke_level
-        if gas_level is not None:
-            payload["gasLevel"] = gas_level
         if flame_detected is not None:
             payload["flameDetected"] = flame_detected
         if recorded_at is not None:
