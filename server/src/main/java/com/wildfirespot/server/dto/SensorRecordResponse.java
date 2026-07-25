@@ -9,8 +9,6 @@ public record SensorRecordResponse(
         String deviceId,
         Double temperature,
         Double humidity,
-        Double smokeLevel,
-        Double gasLevel,
         Boolean flameDetected,
         LocalDateTime recordedAt,
         LocalDateTime createdAt
@@ -21,8 +19,6 @@ public record SensorRecordResponse(
                 record.getDevice().getId(),
                 record.getTemperature(),
                 record.getHumidity(),
-                record.getSmokeLevel(),
-                record.getGasLevel(),
                 record.getFlameDetected(),
                 record.getRecordedAt(),
                 record.getCreatedAt()

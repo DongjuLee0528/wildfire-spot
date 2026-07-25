@@ -36,8 +36,6 @@ public class SensorService {
                 device,
                 request.temperature(),
                 request.humidity(),
-                request.smokeLevel(),
-                request.gasLevel(),
                 request.flameDetected(),
                 recordedAt
         ));
