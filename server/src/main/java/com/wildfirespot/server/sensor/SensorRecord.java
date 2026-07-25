@@ -29,10 +29,6 @@ public class SensorRecord {
 
     private Double humidity;
 
-    private Double smokeLevel;
-
-    private Double gasLevel;
-
     private Boolean flameDetected;
 
     @Column(nullable = false)
@@ -44,13 +40,11 @@ public class SensorRecord {
     protected SensorRecord() {}
 
     public SensorRecord(Device device, Double temperature, Double humidity,
-                        Double smokeLevel, Double gasLevel, Boolean flameDetected,
+                        Boolean flameDetected,
                         LocalDateTime recordedAt) {
         this.device = device;
         this.temperature = temperature;
         this.humidity = humidity;
-        this.smokeLevel = smokeLevel;
-        this.gasLevel = gasLevel;
         this.flameDetected = flameDetected;
         this.recordedAt = recordedAt;
         this.createdAt = LocalDateTime.now();
@@ -60,8 +54,6 @@ public class SensorRecord {
     public Device getDevice() { return device; }
     public Double getTemperature() { return temperature; }
     public Double getHumidity() { return humidity; }
-    public Double getSmokeLevel() { return smokeLevel; }
-    public Double getGasLevel() { return gasLevel; }
     public Boolean getFlameDetected() { return flameDetected; }
     public LocalDateTime getRecordedAt() { return recordedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
