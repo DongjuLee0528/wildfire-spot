@@ -41,6 +41,7 @@ class SpringTelemetry:
         client: SpringApiClient,
         data_collector=None,
         interval: float = DEVICE_TELEMETRY_INTERVAL_SECONDS,
+        state_machine=None,
     ):
         """
         Initialise the telemetry uploader.
@@ -50,14 +51,18 @@ class SpringTelemetry:
             data_collector: RobotCoreDataCollector providing live sensor/GPS/fire data.
                             When None only heartbeats with default values are sent.
             interval: Upload cycle period in seconds (minimum 1.0).
+            state_machine: StateMachine instance for REPORTING state transitions.
+                           When None, state transitions are skipped.
         """
         self._client = client
         self._collector = data_collector
+        self._state_machine = state_machine
         self._interval = max(1.0, interval)  # Enforce a minimum interval to avoid flooding
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._last_fire_state: Optional[str] = None  # "NORMAL", "SUSPECTED_FIRE", or "VERIFIED_FIRE"
         self._last_fire_upload_time: float = 0.0      # monotonic timestamp of last fire upload
+        self._verified_report_completed: bool = False  # True after first successful VERIFIED_FIRE report
 
     def start(self) -> None:
         """Start the background telemetry thread (non-blocking)."""
@@ -270,5 +275,30 @@ class SpringTelemetry:
                         "SpringTelemetry: fire state changed → state=%s confidence=%s severity=%s",
                         current_state, confidence, severity,
                     )
+                if verified and not self._verified_report_completed:
+                    self._verified_report_completed = True
+                    self._transition_verified_report_success()
+                elif not verified:
+                    self._verified_report_completed = False
+            else:
+                logger.warning(
+                    "SpringTelemetry: fire event upload failed, will retry next cycle (state=%s)",
+                    current_state,
+                )
         except Exception as e:
             logger.error("SpringTelemetry: fire event upload error: %s", e)
+
+    def _transition_verified_report_success(self) -> None:
+        if self._state_machine is None:
+            return
+        try:
+            from utils.state_machine import RobotState
+            sm = self._state_machine
+            if sm.get_state() == RobotState.FIRE_DETECTED:
+                sm.transition_to(RobotState.REPORTING)
+            if sm.get_state() == RobotState.REPORTING:
+                sm.transition_to(RobotState.RETURNING)
+            if sm.get_state() == RobotState.RETURNING:
+                sm.transition_to(RobotState.PATROLLING)
+        except Exception as e:
+            logger.debug("SpringTelemetry: verified report success transition skipped: %s", e)
