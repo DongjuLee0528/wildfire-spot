@@ -66,3 +66,5 @@ server/build/
 # Local Files
 config.txt
 sensor_manager.txt
+# Agent Instructions
+AGENTS.md

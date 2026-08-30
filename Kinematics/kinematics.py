@@ -35,6 +35,9 @@ def _is_valid_coordinate_sequence(values, min_length):
     except (TypeError, ValueError, OverflowError):
         return False
 
+class IKError(ValueError):
+    """Raised when a leg target has no valid IK solution."""
+
 class DHParameterSolver:
     """
     Denavit-Hartenberg inverse kinematics solver for the Wildfire Spot quadruped.
@@ -85,33 +88,39 @@ class DHParameterSolver:
                 expressed in the leg's local coordinate frame.
 
         Returns:
-            Tuple (theta1, theta2, theta3) in radians, or (0, 0, 0) on failure.
+            Tuple (theta1, theta2, theta3) in radians.
+
+        Raises:
+            IKError: if the target is invalid or unreachable.
         """
         L1, L2, L3, L4 = self.L1, self.L2, self.L3, self.L4
 
         try:
             if not _is_valid_coordinate_sequence(end_effector_pos, 3):
-                print(f"Invalid IK target: {end_effector_pos}")
-                return (0, 0, 0)
+                raise IKError(f"invalid non-finite target {end_effector_pos}")
 
             x, y, z = float(end_effector_pos[0]), float(end_effector_pos[1]), float(end_effector_pos[2])
 
             # F: horizontal reach from shoulder to foot in the XY plane (coxa removed)
-            F = sqrt(max(0, x**2 + y**2 - L1**2))
+            f_domain = x**2 + y**2 - L1**2
+            if not isfinite(f_domain) or f_domain < 0:
+                raise IKError(f"invalid shoulder reach sqrt domain {f_domain} for target {end_effector_pos}")
+            F = sqrt(f_domain)
             G = F - L2  # Subtract femur lateral offset to get reach from femur pivot
             H = sqrt(G**2 + z**2)  # Euclidean distance from femur pivot to foot
+            if not all(isfinite(value) for value in (F, G, H)):
+                raise IKError(f"non-finite IK intermediate for target {end_effector_pos}")
 
             # theta1: shoulder yaw — angle to foot minus the coxa offset angle
             theta1 = -atan2(y, x) - atan2(F, -L1)
 
             if abs(L3 * L4) < 1e-10:
-                return (0, 0, 0)  # Degenerate geometry — avoid division by zero
+                raise IKError("degenerate leg geometry")
 
-            # Cosine rule: D = cos(theta3), clipped to [-1, 1] for numerical safety
+            # Cosine rule: D = cos(theta3)
             D = (H**2 - L3**2 - L4**2) / (2 * L3 * L4)
             if not isfinite(D) or D < -1 or D > 1:
-                print(f"Unreachable IK target: {end_effector_pos}")
-                return (0, 0, 0)
+                raise IKError(f"unreachable target {end_effector_pos}: D={D}")
 
             theta3 = acos(D)  # Knee angle (always non-negative; sign managed by geometry)
 
@@ -119,13 +128,13 @@ class DHParameterSolver:
             theta2 = atan2(z, G) - atan2(L4*sin(theta3), L3+L4*cos(theta3))
 
             if not all(isfinite(angle) for angle in (theta1, theta2, theta3)):
-                print(f"Invalid IK result for target: {end_effector_pos}")
-                return (0, 0, 0)
+                raise IKError(f"non-finite IK result for target {end_effector_pos}")
 
             return (theta1, theta2, theta3)
+        except IKError:
+            raise
         except (ValueError, ZeroDivisionError, OverflowError, TypeError, IndexError) as e:
-            print(f"IK calculation failed: {type(e).__name__}: {e}")
-            return (0, 0, 0)
+            raise IKError(f"IK calculation failed for target {end_effector_pos}: {type(e).__name__}: {e}") from e
 
     def forward_kinematics_dh_method(self, joint_angles):
         """
@@ -280,23 +289,20 @@ class DHParameterSolver:
                                        [0, 0, 1, 0],
                                        [0, 0, 0, 1]])
 
+        leg_targets = (
+            np.linalg.inv(leg_coordinate_transforms[0]).dot(foot_target_positions[0]),
+            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[1]).dot(foot_target_positions[1])),
+            np.linalg.inv(leg_coordinate_transforms[2]).dot(foot_target_positions[2]),
+            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[3]).dot(foot_target_positions[3])),
+        )
+        leg_names = ("FL", "FR", "BL", "BR")
         joint_angle_solutions = np.zeros((4, 3))
 
-        # Front-left (no mirror needed)
-        joint_angle_solutions[0] = self.calculate_inverse_kinematics_single_leg(
-            np.linalg.inv(leg_coordinate_transforms[0]).dot(foot_target_positions[0]))
-
-        # Front-right (mirrored)
-        joint_angle_solutions[1] = self.calculate_inverse_kinematics_single_leg(
-            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[1]).dot(foot_target_positions[1])))
-
-        # Back-left (no mirror needed)
-        joint_angle_solutions[2] = self.calculate_inverse_kinematics_single_leg(
-            np.linalg.inv(leg_coordinate_transforms[2]).dot(foot_target_positions[2]))
-
-        # Back-right (mirrored)
-        joint_angle_solutions[3] = self.calculate_inverse_kinematics_single_leg(
-            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[3]).dot(foot_target_positions[3])))
+        for leg_index, leg_target in enumerate(leg_targets):
+            try:
+                joint_angle_solutions[leg_index] = self.calculate_inverse_kinematics_single_leg(leg_target)
+            except IKError as e:
+                raise IKError(f"{leg_names[leg_index]} leg IK failed: {e}") from e
 
         return joint_angle_solutions
 
