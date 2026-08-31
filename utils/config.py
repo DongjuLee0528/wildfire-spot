@@ -5,6 +5,7 @@ and training settings are defined here. Values can be overridden via
 environment variables where noted.
 """
 
+import math
 import os
 from pathlib import Path
 
@@ -52,6 +53,18 @@ def _env_float(name, default):
         return default
 
 
+def _bounded_float(name, default, min_value, max_value):
+    value = _env_float(name, default)
+    if not math.isfinite(value):
+        print(f"Invalid finite float for {name}: {value}. Using default: {default}")
+        value = default
+    return min(max(value, min_value), max_value)
+
+
+def _bounded_int(name, default, min_value, max_value):
+    return min(max(_env_int(name, default), min_value), max_value)
+
+
 def _env_bool(name, default=False):
     """Return a boolean from an env variable; truthy strings are '1', 'true', 'yes', 'on'."""
     value = os.environ.get(name)
@@ -89,6 +102,12 @@ except (ImportError, AttributeError):
 
 BASE_DIR = _env_path("WILDFIRE_BASE_DIR", "/workspace")
 LOG_DIR = _env_path("WILDFIRE_LOG_DIR", os.path.join(BASE_DIR, "wildfire_logs"))
+GAIT_DIAGNOSTIC_LOG_ENABLED = _env_bool("GAIT_DIAGNOSTIC_LOG_ENABLED", False)
+GAIT_DIAGNOSTIC_LOG_PATH = _env_path("GAIT_DIAGNOSTIC_LOG_PATH", os.path.join(LOG_DIR, "gait_diagnostics.jsonl"))
+GAIT_DIAGNOSTIC_LOG_RATE_HZ = _bounded_float("GAIT_DIAGNOSTIC_LOG_RATE_HZ", 5.0, 0.1, 20.0)
+GAIT_DIAGNOSTIC_LOG_MAX_BYTES = _bounded_int("GAIT_DIAGNOSTIC_LOG_MAX_BYTES", 5 * 1024 * 1024, 1024, 100 * 1024 * 1024)
+GAIT_DIAGNOSTIC_LOG_BACKUPS = _bounded_int("GAIT_DIAGNOSTIC_LOG_BACKUPS", 2, 0, 10)
+GAIT_DIAGNOSTIC_REACH_WARNING_RATIO = _bounded_float("GAIT_DIAGNOSTIC_REACH_WARNING_RATIO", 0.95, 0.0, 1.0)
 
 PCA9685_FRONT_LEGS = 0x41
 PCA9685_BACK_LEGS = 0x42
