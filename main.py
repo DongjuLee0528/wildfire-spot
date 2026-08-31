@@ -280,7 +280,7 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
                     pass
 
             except Exception as e:
-                logger.log_error("GaitLoop", str(e))
+                logger.log_error("GaitLoop.IKServoTick", f"{type(e).__name__}: {e}")
             # ~50 Hz max update rate
             time.sleep(0.02)
 

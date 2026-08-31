@@ -22,6 +22,14 @@ from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEG
 import numpy as np
 import time as _time
 
+def _validated_joint_angle_array(joint_angles):
+    angle_array = np.asarray(joint_angles, dtype=np.float64)
+    if angle_array.shape != (4, 3):
+        raise ValueError(f"joint_angles must have shape (4, 3), got {angle_array.shape}")
+    if not np.all(np.isfinite(angle_array)):
+        raise ValueError("joint_angles must contain only finite values")
+    return angle_array
+
 def _load_servo_hardware():
     """Import and return PCA9685, servo, and busio modules; raises RuntimeError if unavailable."""
     try:
@@ -106,7 +114,7 @@ class QuadrupedServoManager:
 
         Stores the result in self._joint_angles as a list of lists of ints.
         """
-        angle_degrees = angle_radians * 180/np.pi
+        angle_degrees = _validated_joint_angle_array(angle_radians) * 180/np.pi
         angle_degrees_int = [[int(value) for value in row] for row in angle_degrees]
         self._joint_angles = angle_degrees_int
 
@@ -128,8 +136,7 @@ class QuadrupedServoManager:
         self.convert_to_degrees(angle_radians)
 
         if len(self._joint_angles) < 4 or any(len(leg) < 3 for leg in self._joint_angles):
-            print("Invalid joint angles array size")
-            return
+            raise ValueError("Invalid joint angles array size")
 
         # Front-left leg (IK leg index 0) — servos on CH0-2 of front board
         self._angle_array[0] = self._offset_values[0] - self._joint_angles[0][2]  # tibia
@@ -176,7 +183,7 @@ class QuadrupedServoManager:
         Args:
             joint_angles: numpy array of shape (4, 3) in radians.
         """
-        self.process_angle_mapping(joint_angles)
+        self.process_angle_mapping(_validated_joint_angle_array(joint_angles))
 
         # Snapshot angles before clamp for diagnostic comparison
         _before_clamp = list(self._angle_array)
