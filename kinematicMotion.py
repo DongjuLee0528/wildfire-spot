@@ -21,6 +21,18 @@ import time
 import numpy as np
 import math
 
+
+def _phase_label(time_param, phase_0, phase_1, phase_2, phase_3):
+    if time_param < phase_0:
+        return 0, "STANCE"
+    if time_param < phase_0 + phase_1:
+        return 1, "SWING"
+    if time_param < phase_0 + phase_1 + phase_2:
+        return 2, "STANCE"
+    if time_param < phase_0 + phase_1 + phase_2 + phase_3:
+        return 3, "STANCE"
+    return None, "STANCE"
+
 class LegMotionController:
     """
     Time-based position interpolator for a single leg.
@@ -166,7 +178,7 @@ class QuadrupedGaitPattern:
 
         self.rotation_center = GAIT_RC
 
-    def compute_leg_trajectory(self, time_param, x_pos, y_pos, z_pos):
+    def compute_leg_trajectory(self, time_param, x_pos, y_pos, z_pos, include_diagnostics=False):
         """
         Compute the target foot position for one leg at the given gait phase time.
 
@@ -183,8 +195,15 @@ class QuadrupedGaitPattern:
         end_y_position = GAIT_END_Y
         end_position = np.array([x_pos + self.stride_length/2, y_pos + end_y_position, z_pos + self.stride_width, 1])
 
+        phase, state = _phase_label(time_param, self.phase_0_time, self.phase_1_time, self.phase_2_time, self.phase_3_time)
+        diagnostics = {
+            "phase_time_ms": time_param,
+            "phase": phase,
+            "state": state,
+        } if include_diagnostics else None
+
         if time_param < self.phase_0_time:
-            return start_position
+            return (start_position, diagnostics) if include_diagnostics else start_position
 
         elif time_param < self.phase_0_time + self.phase_1_time:
             delta_time = time_param - self.phase_0_time
@@ -213,10 +232,10 @@ class QuadrupedGaitPattern:
                 current_position = rotation_matrix.dot(current_position)
             except (ValueError, np.linalg.LinAlgError) as e:
                 current_position = start_position
-            return current_position
+            return (current_position, diagnostics) if include_diagnostics else current_position
 
         elif time_param < self.phase_0_time + self.phase_1_time + self.phase_2_time:
-            return end_position
+            return (end_position, diagnostics) if include_diagnostics else end_position
 
         elif time_param < self.phase_0_time + self.phase_1_time + self.phase_2_time + self.phase_3_time:
             delta_time = time_param - (self.phase_0_time + self.phase_1_time + self.phase_2_time)
@@ -232,13 +251,13 @@ class QuadrupedGaitPattern:
                 current_position[1] += self.lift_height * math.sin(math.pi * time_progress)
             except (ValueError, OverflowError, IndexError) as e:
                 pass
-            return current_position
+            return (current_position, diagnostics) if include_diagnostics else current_position
 
     def set_stride_length(self, length):
         """Override the stride length directly (bypasses keyboard input mapping)."""
         self.stride_length = length
 
-    def calculate_leg_positions(self, time_value, keyboard_input={}):
+    def calculate_leg_positions(self, time_value, keyboard_input={}, include_diagnostics=False):
         """
         Compute target foot positions for all four legs at the given wall-clock time.
 
@@ -268,7 +287,8 @@ class QuadrupedGaitPattern:
         total_period = (self.phase_0_time + self.phase_1_time + self.phase_2_time + self.phase_3_time)
 
         if total_period == 0:
-            return np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]])
+            leg_positions = np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]])
+            return (leg_positions, []) if include_diagnostics else leg_positions
 
         half_period = total_period / 2
         phase_offset = 0
@@ -283,10 +303,16 @@ class QuadrupedGaitPattern:
         front_y_position = ROBOT_BODY_HEIGHT
         rear_y_position = ROBOT_BODY_HEIGHT
 
-        leg_positions = np.array([
-            self.compute_leg_trajectory(time_1, front_x_position, front_y_position, front_foot_spacing),
-            self.compute_leg_trajectory(time_2, front_x_position, front_y_position, -front_foot_spacing),
-            self.compute_leg_trajectory(rear_time_2, rear_x_position, rear_y_position, rear_foot_spacing),
-            self.compute_leg_trajectory(rear_time_1, rear_x_position, rear_y_position, -rear_foot_spacing)
-        ])
+        trajectory_inputs = (
+            (time_1, front_x_position, front_y_position, front_foot_spacing),
+            (time_2, front_x_position, front_y_position, -front_foot_spacing),
+            (rear_time_2, rear_x_position, rear_y_position, rear_foot_spacing),
+            (rear_time_1, rear_x_position, rear_y_position, -rear_foot_spacing),
+        )
+        if include_diagnostics:
+            results = [self.compute_leg_trajectory(*args, include_diagnostics=True) for args in trajectory_inputs]
+            leg_positions = np.array([position for position, _ in results])
+            return leg_positions, [diagnostics for _, diagnostics in results]
+
+        leg_positions = np.array([self.compute_leg_trajectory(*args) for args in trajectory_inputs])
         return leg_positions
