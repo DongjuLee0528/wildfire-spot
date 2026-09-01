@@ -20,7 +20,6 @@ from utils.config import (I2C_SCL, I2C_SDA, PCA9685_FRONT_LEGS, PCA9685_BACK_LEG
                          SERVO_MAX_ANGLE, SERVO_MIN_ANGLE, SERVO_ANGLE_ADJUSTMENT)
 
 import numpy as np
-import time as _time
 
 def _validated_joint_angle_array(joint_angles):
     angle_array = np.asarray(joint_angles, dtype=np.float64)
@@ -100,10 +99,6 @@ class QuadrupedServoManager:
         self._angle_array = [servo_index for servo_index in range(SERVO_CHANNELS)]
         self._joint_angles = []
 
-        # Diagnostic rate-limit: last time SERVO_DEBUG was emitted
-        self._diag_last_log = 0.0
-        self._DIAG_INTERVAL = 1.0
-
     def convert_to_degrees(self, angle_radians):
         """
         Convert a 4x3 array of joint angles from radians to integer degrees.
@@ -173,7 +168,7 @@ class QuadrupedServoManager:
         """Return the most recently computed per-channel servo angles (degrees)."""
         return self._angle_array
 
-    def execute_servo_motion(self, joint_angles):
+    def execute_servo_motion(self, joint_angles, diagnostics=None):
         """
         Convert joint angles and drive all 12 leg servos to the target positions.
 
@@ -183,39 +178,53 @@ class QuadrupedServoManager:
         Args:
             joint_angles: numpy array of shape (4, 3) in radians.
         """
-        self.process_angle_mapping(_validated_joint_angle_array(joint_angles))
+        try:
+            self.process_angle_mapping(_validated_joint_angle_array(joint_angles))
+        except ValueError as e:
+            if diagnostics is not None:
+                diagnostics.update({
+                    "accepted": False,
+                    "failure_reason": str(e),
+                    "servo_write_occurred": False,
+                })
+            raise
 
         # Snapshot angles before clamp for diagnostic comparison
         _before_clamp = list(self._angle_array)
+        if not np.all(np.isfinite(np.asarray(_before_clamp, dtype=np.float64))):
+            if diagnostics is not None:
+                diagnostics.update({
+                    "accepted": False,
+                    "mapped_servo_angles": _before_clamp,
+                    "failure_reason": "mapped servo angles must contain only finite values",
+                    "servo_write_occurred": False,
+                })
+            raise ValueError("mapped servo angles must contain only finite values")
 
         write_count = 0
+        clamped_channels = []
         for servo_index in range(len(self._angle_array)):
             # Clamp to safe hardware limits before writing
             if (self._angle_array[servo_index] > SERVO_MAX_ANGLE):
                 print("Angle exceeds maximum limit")
                 self._angle_array[servo_index] = SERVO_MAX_ANGLE - SERVO_ANGLE_ADJUSTMENT
+                clamped_channels.append(servo_index)
             if (self._angle_array[servo_index] <= SERVO_MIN_ANGLE):
                 print("Angle below minimum limit")
                 self._angle_array[servo_index] = SERVO_MIN_ANGLE + SERVO_ANGLE_ADJUSTMENT
+                clamped_channels.append(servo_index)
             self._servo_array[servo_index].angle = float(self._angle_array[servo_index])
             write_count += 1
 
-        # Diagnostic log — emitted at most once per second
-        try:
-            _now = _time.time()
-            if _now - self._diag_last_log >= self._DIAG_INTERVAL:
-                self._diag_last_log = _now
-                _after_clamp = list(self._angle_array)
-                _clamped_ch = [i for i in range(len(_before_clamp)) if _before_clamp[i] != _after_clamp[i]]
-                print(
-                    f"SERVO_DEBUG | "
-                    f"mapped_before_clamp={[round(v, 1) for v in _before_clamp]} "
-                    f"final_after_clamp={_after_clamp} "
-                    f"clamped_channels={_clamped_ch} "
-                    f"write_complete={write_count}"
-                )
-        except Exception:
-            pass
+        if diagnostics is not None:
+            diagnostics.update({
+                "accepted": True,
+                "mapped_servo_angles": _before_clamp,
+                "clamped_channels": clamped_channels,
+                "final_servo_angles": list(self._angle_array),
+                "servo_write_occurred": write_count > 0,
+                "write_count": write_count,
+            })
 
     def shutdown_servos(self):
         """
