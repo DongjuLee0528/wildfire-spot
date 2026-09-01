@@ -35,6 +35,9 @@ def _is_valid_coordinate_sequence(values, min_length):
     except (TypeError, ValueError, OverflowError):
         return False
 
+class IKError(ValueError):
+    """Raised when a leg target has no valid IK solution."""
+
 class DHParameterSolver:
     """
     Denavit-Hartenberg inverse kinematics solver for the Wildfire Spot quadruped.
@@ -71,7 +74,7 @@ class DHParameterSolver:
         # Output buffer; shape (4, 3) — [leg_index, joint_index], radians
         self.computed_angles = np.zeros((4, 3), dtype=np.float64)
 
-    def calculate_inverse_kinematics_single_leg(self, end_effector_pos):
+    def calculate_inverse_kinematics_single_leg(self, end_effector_pos, diagnostics=None):
         """
         Solve IK for a single leg given a foot target in the leg's local frame.
 
@@ -85,47 +88,69 @@ class DHParameterSolver:
                 expressed in the leg's local coordinate frame.
 
         Returns:
-            Tuple (theta1, theta2, theta3) in radians, or (0, 0, 0) on failure.
+            Tuple (theta1, theta2, theta3) in radians.
+
+        Raises:
+            IKError: if the target is invalid or unreachable.
         """
         L1, L2, L3, L4 = self.L1, self.L2, self.L3, self.L4
 
         try:
             if not _is_valid_coordinate_sequence(end_effector_pos, 3):
-                print(f"Invalid IK target: {end_effector_pos}")
-                return (0, 0, 0)
+                raise IKError(f"invalid non-finite target {end_effector_pos}")
 
             x, y, z = float(end_effector_pos[0]), float(end_effector_pos[1]), float(end_effector_pos[2])
+            if diagnostics is not None:
+                diagnostics.update({
+                    "target_xyz": [x, y, z],
+                    "link_lengths": {"L1": L1, "L2": L2, "L3": L3, "L4": L4},
+                })
 
             # F: horizontal reach from shoulder to foot in the XY plane (coxa removed)
-            F = sqrt(max(0, x**2 + y**2 - L1**2))
+            f_domain = x**2 + y**2 - L1**2
+            if diagnostics is not None:
+                diagnostics["F_domain"] = f_domain
+            if not isfinite(f_domain) or f_domain < 0:
+                raise IKError(f"invalid shoulder reach sqrt domain {f_domain} for target {end_effector_pos}")
+            F = sqrt(f_domain)
             G = F - L2  # Subtract femur lateral offset to get reach from femur pivot
             H = sqrt(G**2 + z**2)  # Euclidean distance from femur pivot to foot
+            reach_limit = abs(L3) + abs(L4)
+            reach_distance_ratio = H / reach_limit if reach_limit else float("inf")
+            if diagnostics is not None:
+                diagnostics.update({"F": F, "G": G, "H": H, "reach_distance_ratio": reach_distance_ratio})
+            if not all(isfinite(value) for value in (F, G, H, reach_distance_ratio)):
+                raise IKError(f"non-finite IK intermediate for target {end_effector_pos}")
 
             # theta1: shoulder yaw — angle to foot minus the coxa offset angle
             theta1 = -atan2(y, x) - atan2(F, -L1)
 
             if abs(L3 * L4) < 1e-10:
-                return (0, 0, 0)  # Degenerate geometry — avoid division by zero
+                raise IKError("degenerate leg geometry")
 
-            # Cosine rule: D = cos(theta3), clipped to [-1, 1] for numerical safety
+            # Cosine rule: D = cos(theta3)
             D = (H**2 - L3**2 - L4**2) / (2 * L3 * L4)
+            if diagnostics is not None:
+                diagnostics["D"] = D
             if not isfinite(D) or D < -1 or D > 1:
-                print(f"Unreachable IK target: {end_effector_pos}")
-                return (0, 0, 0)
+                raise IKError(f"unreachable target {end_effector_pos}: D={D}")
 
             theta3 = acos(D)  # Knee angle (always non-negative; sign managed by geometry)
 
             # theta2: femur pitch — angle to foot minus the tibia's angular contribution
             theta2 = atan2(z, G) - atan2(L4*sin(theta3), L3+L4*cos(theta3))
+            if diagnostics is not None:
+                diagnostics["joint_angles_rad"] = [theta1, theta2, theta3]
+                diagnostics["joint_angles_deg"] = [theta1 * 180.0 / pi, theta2 * 180.0 / pi, theta3 * 180.0 / pi]
 
             if not all(isfinite(angle) for angle in (theta1, theta2, theta3)):
-                print(f"Invalid IK result for target: {end_effector_pos}")
-                return (0, 0, 0)
+                raise IKError(f"non-finite IK result for target {end_effector_pos}")
 
             return (theta1, theta2, theta3)
+        except IKError:
+            raise
         except (ValueError, ZeroDivisionError, OverflowError, TypeError, IndexError) as e:
-            print(f"IK calculation failed: {type(e).__name__}: {e}")
-            return (0, 0, 0)
+            raise IKError(f"IK calculation failed for target {end_effector_pos}: {type(e).__name__}: {e}") from e
 
     def forward_kinematics_dh_method(self, joint_angles):
         """
@@ -236,7 +261,7 @@ class DHParameterSolver:
 
         return [front_left_transform, front_right_transform, back_left_transform, back_right_transform]
 
-    def solve_complete_inverse_kinematics(self, foot_target_positions, body_pos, body_orient):
+    def solve_complete_inverse_kinematics(self, foot_target_positions, body_pos, body_orient, diagnostics=None):
         """
         Solve IK for all four legs given foot targets in world space.
 
@@ -258,11 +283,15 @@ class DHParameterSolver:
         Raises:
             ValueError: if any input has wrong shape or non-finite values.
         """
+        leg_names = ("FL", "FR", "BL", "BR")
         if foot_target_positions is None or len(foot_target_positions) < 4:
             raise ValueError("foot_target_positions must contain 4 leg targets")
         for i in range(4):
             if not _is_valid_coordinate_sequence(foot_target_positions[i], 3):
-                raise ValueError(f"foot_target_positions[{i}] must contain 3 finite coordinates")
+                if diagnostics is not None:
+                    diagnostics["failed_leg"] = leg_names[i]
+                    diagnostics["failure_reason"] = f"foot_target_positions[{i}] must contain 3 finite coordinates"
+                raise IKError(f"{leg_names[i]} leg IK failed: foot_target_positions[{i}] must contain 3 finite coordinates")
         if not _is_valid_coordinate_sequence(body_pos, 3):
             raise ValueError("body_pos must contain 3 finite coordinates")
         if not _is_valid_coordinate_sequence(body_orient, 3):
@@ -280,23 +309,28 @@ class DHParameterSolver:
                                        [0, 0, 1, 0],
                                        [0, 0, 0, 1]])
 
+        leg_targets = (
+            np.linalg.inv(leg_coordinate_transforms[0]).dot(foot_target_positions[0]),
+            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[1]).dot(foot_target_positions[1])),
+            np.linalg.inv(leg_coordinate_transforms[2]).dot(foot_target_positions[2]),
+            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[3]).dot(foot_target_positions[3])),
+        )
         joint_angle_solutions = np.zeros((4, 3))
+        if diagnostics is not None:
+            diagnostics["legs"] = []
 
-        # Front-left (no mirror needed)
-        joint_angle_solutions[0] = self.calculate_inverse_kinematics_single_leg(
-            np.linalg.inv(leg_coordinate_transforms[0]).dot(foot_target_positions[0]))
-
-        # Front-right (mirrored)
-        joint_angle_solutions[1] = self.calculate_inverse_kinematics_single_leg(
-            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[1]).dot(foot_target_positions[1])))
-
-        # Back-left (no mirror needed)
-        joint_angle_solutions[2] = self.calculate_inverse_kinematics_single_leg(
-            np.linalg.inv(leg_coordinate_transforms[2]).dot(foot_target_positions[2]))
-
-        # Back-right (mirrored)
-        joint_angle_solutions[3] = self.calculate_inverse_kinematics_single_leg(
-            leg_mirror_transform.dot(np.linalg.inv(leg_coordinate_transforms[3]).dot(foot_target_positions[3])))
+        for leg_index, leg_target in enumerate(leg_targets):
+            leg_diagnostics = {"leg": leg_names[leg_index], "leg_local_target": leg_target} if diagnostics is not None else None
+            try:
+                joint_angle_solutions[leg_index] = self.calculate_inverse_kinematics_single_leg(leg_target, leg_diagnostics)
+            except IKError as e:
+                if diagnostics is not None:
+                    diagnostics["failed_leg"] = leg_names[leg_index]
+                    diagnostics["failure_reason"] = str(e)
+                    diagnostics["legs"].append(leg_diagnostics)
+                raise IKError(f"{leg_names[leg_index]} leg IK failed: {e}") from e
+            if diagnostics is not None:
+                diagnostics["legs"].append(leg_diagnostics)
 
         return joint_angle_solutions
 
