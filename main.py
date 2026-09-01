@@ -96,34 +96,104 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
         print(f"Gait loop unavailable: {e}")
         return
 
-    import atexit
-    _rear_gait_log_path = "/tmp/wildfire-rear-gait-debug.log"
-    _rg_file = open(_rear_gait_log_path, "a", buffering=1)
-    atexit.register(_rg_file.close)
-    _RG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+    from utils.config import GAIT_DIAGNOSTIC_REACH_WARNING_RATIO
+    from utils.gait_diagnostics import GaitDiagnosticLogger
+    import numpy as np
 
-    def _rg_write(line):
+    diag_logger = GaitDiagnosticLogger()
+    leg_names = ("FL", "FR", "BL", "BR")
+    servo_channels = ((0, 1, 2), (3, 4, 5), (6, 7, 8), (9, 10, 11))
+
+    def _command_name(command_data):
+        _sl = command_data.get('IDstepLength', 0.0)
+        _sw = command_data.get('IDstepWidth', 0.0)
+        if _sl < 0:
+            return "FORWARD"
+        if _sl > 0:
+            return "BACKWARD"
+        if _sw < 0:
+            return "LEFT"
+        if _sw > 0:
+            return "RIGHT"
+        return "FORWARD"
+
+    def _mode_name():
+        if mode_control_manager is None:
+            return None
         try:
-            if _rg_file.tell() >= _RG_MAX_BYTES:
-                _rg_file.seek(0)
-                _rg_file.truncate()
-            _rg_file.write(line + "\n")
+            return mode_control_manager.get_current_mode()
         except Exception:
-            pass
+            return None
+
+    def _tick_record(event_data):
+        record = {
+            "monotonic_time": event_data["monotonic_time"],
+            "loop_dt": event_data["loop_dt"],
+            "robot_mode": _mode_name(),
+            "command": event_data["command"],
+            "command_data": event_data.get("command_data"),
+            "gait_phase": event_data["gait_phase"],
+            "accepted": event_data["accepted"],
+            "legs": [],
+        }
+        foot_positions = event_data.get("foot_positions")
+        gait_diag = event_data.get("gait_diag") or []
+        ik_diag = event_data.get("ik_diag") or {}
+        servo_diag = event_data.get("servo_diag") or {}
+        joint_angles = event_data.get("joint_angles")
+        ik_by_leg = {item.get("leg"): item for item in ik_diag.get("legs", []) if item}
+        mapped = servo_diag.get("mapped_servo_angles")
+        final = servo_diag.get("final_servo_angles")
+        clamped = set(servo_diag.get("clamped_channels") or [])
+
+        for index, leg in enumerate(leg_names):
+            ik_leg = ik_by_leg.get(leg, {})
+            channels = servo_channels[index]
+            angles_rad = joint_angles[index] if joint_angles is not None else None
+            leg_record = {
+                "leg": leg,
+                "phase": gait_diag[index].get("phase") if index < len(gait_diag) else None,
+                "state": gait_diag[index].get("state") if index < len(gait_diag) else None,
+                "raw_foot_target": foot_positions[index][:3] if foot_positions is not None else None,
+                "leg_local_ik_target": ik_leg.get("leg_local_target"),
+                "link_lengths": ik_leg.get("link_lengths"),
+                "F": ik_leg.get("F"),
+                "G": ik_leg.get("G"),
+                "H": ik_leg.get("H"),
+                "D": ik_leg.get("D"),
+                "reach_distance_ratio": ik_leg.get("reach_distance_ratio"),
+                "joint_angles_rad": angles_rad,
+                "joint_angles_deg": [float(v) * 180.0 / np.pi for v in angles_rad] if angles_rad is not None else None,
+                "mapped_servo_angles": [mapped[channel] for channel in channels] if mapped else None,
+                "clamped": any(channel in clamped for channel in channels),
+                "final_servo_angles": [final[channel] for channel in channels] if final else None,
+            }
+            record["legs"].append(leg_record)
+        return record
+
+    def _log_anomaly(anomaly_type, event_data, reason, failed_leg=None):
+        if not diag_logger.enabled:
+            return
+        record = _tick_record(event_data)
+        record.update({
+            "anomaly_type": anomaly_type,
+            "failed_leg": failed_leg,
+            "failure_reason": reason,
+            "servo_write_occurred": (event_data.get("servo_diag") or {}).get("servo_write_occurred", False),
+        })
+        diag_logger.anomaly(record)
 
     command_queue = kb_controller.robot_commands
 
     def _loop():
         # Import config inside thread to ensure values are read at runtime
         from utils.config import GAIT_BODY_POS, GAIT_BODY_ROT, STAND_BODY_POS, STAND_BODY_ROT, STAND_FOOT_POSITIONS
-        import numpy as np
-        _diag_last_log = [0.0]  # mutable cell so inner scope can update it
-        _DIAG_INTERVAL = 1.0    # emit GAIT_DEBUG at most once per second
         from utils.config import GAIT_TIMING, GAIT_TOTAL_TIME_CALC
         _GAIT_TOTAL_PERIOD = sum(GAIT_TIMING)
         _stand_pose_applied = [False]
         _was_stepping = [False]
         _last_command_name = ["STOP"]
+        _last_loop_mono = [time.monotonic()]
 
         def _apply_stand_pose_once():
             if _stand_pose_applied[0]:
@@ -150,24 +220,22 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
 
         while True:
             command_data = _drain_latest()
+            _loop_mono = time.monotonic()
+            _loop_dt = _loop_mono - _last_loop_mono[0]
+            _last_loop_mono[0] = _loop_mono
+            _event_data = {
+                "monotonic_time": _loop_mono,
+                "loop_dt": _loop_dt,
+                "command": _command_name(command_data),
+                "command_data": dict(command_data),
+                "gait_phase": None,
+                "accepted": False,
+            }
 
             try:
                 # Hold a known stand pose when idle or stopped.
                 if not command_data.get("StartStepping", False):
                     if _was_stepping[0]:
-                        try:
-                            _rg_write(
-                                f"REAR_GAIT_DEBUG | ts={time.time():.6f} elapsed={time.monotonic():.6f}"
-                                f" phase_ms=STOP command=STOP"
-                                f" start=False IDstepLength={command_data.get('IDstepLength',0)}"
-                                f" IDstepWidth={command_data.get('IDstepWidth',0)}"
-                                f" IDstepAlpha={command_data.get('IDstepAlpha',0)}"
-                                f" BL_foot=[] BL_local=[] BL_joint=[] BL_servo=[]"
-                                f" BR_foot=[] BR_local=[] BR_joint=[] BR_servo=[]"
-                                f" clamped=[] servo_ok=False"
-                            )
-                        except Exception:
-                            pass
                         _was_stepping[0] = False
                         _last_command_name[0] = "STOP"
                     _apply_stand_pose_once()
@@ -181,105 +249,52 @@ def _start_gait_loop(logger, servo_manager, kb_controller, mode_control_manager)
 
                 # Full pipeline: gait trajectory → inverse kinematics → servo output
                 _gait_time = time.time()
-                foot_positions = gait.calculate_leg_positions(_gait_time, command_data)
+                _phase_ms = int((_gait_time * GAIT_TOTAL_TIME_CALC) % _GAIT_TOTAL_PERIOD)
+                _event_data["gait_phase"] = _phase_ms
+                if diag_logger.enabled:
+                    foot_positions, gait_diag = gait.calculate_leg_positions(_gait_time, command_data, include_diagnostics=True)
+                else:
+                    foot_positions = gait.calculate_leg_positions(_gait_time, command_data)
+                    gait_diag = None
+                ik_diag = {} if diag_logger.enabled else None
+                _event_data.update({
+                    "foot_positions": foot_positions,
+                    "gait_diag": gait_diag,
+                    "ik_diag": ik_diag,
+                })
                 joint_angles = kinematics.solve_complete_inverse_kinematics(
-                    foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT
+                    foot_positions, GAIT_BODY_POS, GAIT_BODY_ROT, diagnostics=ik_diag
                 )
-                servo_manager.execute_servo_motion(joint_angles)
+                servo_diag = {} if diag_logger.enabled else None
+                _event_data["joint_angles"] = joint_angles
+                _event_data["servo_diag"] = servo_diag
+                servo_manager.execute_servo_motion(joint_angles, diagnostics=servo_diag)
                 _stand_pose_applied[0] = False
                 _was_stepping[0] = True
+                _event_data["accepted"] = True
 
                 try:
-                    _mono = time.monotonic()
-
-                    # ① command: infer from step values since payload has no 'command' key
-                    _sl = command_data.get('IDstepLength', 0.0)
-                    _sw = command_data.get('IDstepWidth', 0.0)
-                    if _sl < 0:
-                        _cmd_name = "FORWARD"
-                    elif _sl > 0:
-                        _cmd_name = "BACKWARD"
-                    elif _sw < 0:
-                        _cmd_name = "LEFT"
-                    elif _sw > 0:
-                        _cmd_name = "RIGHT"
-                    else:
-                        _cmd_name = "FORWARD"
+                    _cmd_name = _event_data["command"]
                     _last_command_name[0] = _cmd_name
-
-                    # ② phase: actual gait cycle position in ms
-                    _phase_ms = int((_gait_time * GAIT_TOTAL_TIME_CALC) % _GAIT_TOTAL_PERIOD)
-
-                    # ③ servo values: read from _angle_array AFTER clamp inside execute_servo_motion
-                    _final = servo_manager.get_current_angles()
-                    _bl_servo = [round(float(_final[6]), 1), round(float(_final[7]), 1), round(float(_final[8]), 1)]
-                    _br_servo = [round(float(_final[9]), 1), round(float(_final[10]), 1), round(float(_final[11]), 1)]
-
-                    # clamped channels: compare before/after inside servo_manager is not exposed;
-                    # approximate by re-checking final values against limits
-                    from utils.config import SERVO_MAX_ANGLE, SERVO_MIN_ANGLE
-                    _clamped = [ch for ch, v in enumerate(_final)
-                                if v == SERVO_MAX_ANGLE - 1 or v == SERVO_MIN_ANGLE + 1]
-
-                    _roll, _pitch, _yaw = GAIT_BODY_ROT
-                    _bx, _by, _bz = GAIT_BODY_POS
-                    _leg_transforms = kinematics.compute_body_transformation(
-                        _roll, _pitch, _yaw, _bx, _by, _bz
-                    )
-                    _mirror = np.array([[-1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
-                    _bl_world = foot_positions[2]
-                    _br_world = foot_positions[3]
-                    _bl_local = np.linalg.inv(_leg_transforms[2]).dot(_bl_world)
-                    _br_local = _mirror.dot(np.linalg.inv(_leg_transforms[3]).dot(_br_world))
-
-                    _bl_j = joint_angles[2]
-                    _br_j = joint_angles[3]
-                    _bl_deg = [round(float(_bl_j[i]) * 180.0 / np.pi, 2) for i in range(3)]
-                    _br_deg = [round(float(_br_j[i]) * 180.0 / np.pi, 2) for i in range(3)]
-
-                    _bl_foot_r = [round(float(_bl_world[i]), 2) for i in range(3)]
-                    _br_foot_r = [round(float(_br_world[i]), 2) for i in range(3)]
-                    _bl_local_r = [round(float(_bl_local[i]), 2) for i in range(3)]
-                    _br_local_r = [round(float(_br_local[i]), 2) for i in range(3)]
-
-                    _rg_write(
-                        f"REAR_GAIT_DEBUG | ts={_gait_time:.6f} elapsed={_mono:.6f}"
-                        f" phase_ms={_phase_ms} command={_cmd_name}"
-                        f" start=True IDstepLength={_sl}"
-                        f" IDstepWidth={_sw}"
-                        f" IDstepAlpha={command_data.get('IDstepAlpha',0)}"
-                        f" BL_foot={_bl_foot_r} BL_local={_bl_local_r}"
-                        f" BL_joint={_bl_deg} BL_servo=[CH6={_bl_servo[0]},CH7={_bl_servo[1]},CH8={_bl_servo[2]}]"
-                        f" BR_foot={_br_foot_r} BR_local={_br_local_r}"
-                        f" BR_joint={_br_deg} BR_servo=[CH9={_br_servo[0]},CH10={_br_servo[1]},CH11={_br_servo[2]}]"
-                        f" clamped={_clamped} servo_ok=True"
-                    )
                 except Exception:
                     pass
 
-                # Diagnostic log — emitted at most once per second while stepping
-                try:
-                    _now = time.time()
-                    if _now - _diag_last_log[0] >= _DIAG_INTERVAL:
-                        _diag_last_log[0] = _now
-                        _deg = np.round(joint_angles * 180.0 / np.pi, 1).tolist()
-                        _fp_shape = tuple(np.array(foot_positions).shape)
-                        _ja_shape = tuple(np.array(joint_angles).shape)
-                        logger.info(
-                            f"GAIT_DEBUG | "
-                            f"command_data={command_data} "
-                            f"foot_shape={_fp_shape} "
-                            f"joint_shape={_ja_shape} "
-                            f"joint_deg=["
-                            f"FL:{_deg[0]}, "
-                            f"FR:{_deg[1]}, "
-                            f"BL:{_deg[2]}, "
-                            f"BR:{_deg[3]}]"
-                        )
-                except Exception:
-                    pass
+                if diag_logger.enabled:
+                    record = _tick_record(_event_data)
+                    diag_logger.snapshot(record)
+                    for leg in record["legs"]:
+                        ratio = leg.get("reach_distance_ratio")
+                        if ratio is not None and ratio >= GAIT_DIAGNOSTIC_REACH_WARNING_RATIO:
+                            _log_anomaly("near_reach_boundary", _event_data, f"reach_distance_ratio={ratio}", leg.get("leg"))
+                    if servo_diag.get("clamped_channels"):
+                        _log_anomaly("servo_clamp", _event_data, f"clamped_channels={servo_diag.get('clamped_channels')}")
 
             except Exception as e:
+                _event_data["failure_reason"] = str(e)
+                if diag_logger.enabled:
+                    ik_diag = _event_data.get("ik_diag")
+                    failed_leg = ik_diag.get("failed_leg") if isinstance(ik_diag, dict) else None
+                    _log_anomaly(type(e).__name__, _event_data, str(e), failed_leg)
                 logger.log_error("GaitLoop", str(e))
             # ~50 Hz max update rate
             time.sleep(0.02)
