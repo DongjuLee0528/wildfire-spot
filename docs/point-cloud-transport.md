@@ -157,30 +157,64 @@ They never run real main.py/SDK, connect to a Jetson, or access physical devices
 ## Web 3D viewer
 
 The dashboard places a live point-cloud panel below manual keyboard control,
-including tablet and mobile layouts. It draws the latest validated frame only,
-up to12000 points, using native WebGL with fixed GPU buffers. No production
+including tablet and mobile layouts. By default it draws only the latest validated
+frame, up to12000 points, using native WebGL with fixed GPU buffers. No production
 package is added.30m is the fixed sensor data filter, not a display range slider
 or a guarantee of detection on every surface. This is individual-frame point
 visualization, not meshing, mapping, SLAM or fire detection from LiDAR.
 
 Raw sensor XYZ is unchanged and Z is shown up; physical mounting alignment is
 not calibrated here. The grid spacing is5m, the colored short axes mark XYZ at
-the sensor origin, and point color represents sensor Z height, from blue at
--3m to amber at+5m, clamped beyond that interval. Default and Reset view fit
-the30m sphere with a65m camera distance; the narrower viewport dimension
-sets the field of view so portrait canvases also fit it. User zoom can crop
-points without changing the received count. There is no
-intensity channel or invented data. Drag to orbit, scroll to zoom, or use the
-labeled orbit/zoom/reset buttons. These controls never send robot commands.
+the sensor origin. The first nonempty frame centers the view on its XYZ bounds
+and fits its bounding sphere with a margin. New frames do not continually move
+the view. Fit scene repeats this operation on the latest frame while preserving
+the viewing angle; Reset view also restores the default oblique angle. A65m
+origin-centered view remains the fallback before any nonempty frame. The narrower
+viewport dimension sets the field of view so portrait canvases also fit.
+User zoom can crop points without changing the received count.
+
+Point color represents sensor Z height using blue, cyan, yellow and red. Its
+range is set from the fitted frame's minimum/maximum Z, with a minimum0.5m span
+for flat clouds; subsequent values outside that range are clamped. Fitting or
+resetting updates this color range, not the underlying XYZ coordinates. Colors
+are relative to the fitted scene, not a fixed absolute-height legend. Point
+sprites target2 CSS pixels, bounded by the WebGL device's supported size.
+There is no intensity channel or invented data. Drag to orbit, scroll to zoom,
+or use the labeled orbit/zoom/fit/reset buttons. These controls never send robot commands.
 Existing dashboard WASD/Escape robot shortcuts remain unchanged.
 
-Only a new frame or a view/size change schedules a draw; there is no idle render
-loop. CPU staging capacity and GPU cloud buffer are fixed at12000 XYZ triples;
-the latest update replaces previous points. Device pixel ratio is capped at2,
-and drawing dimensions at2048px per axis. A valid zero-point frame clears old
+A new frame, view/size change, or accumulation-expiration timer schedules a draw;
+there is no idle render loop. In single-frame mode CPU staging capacity and GPU cloud buffer are fixed
+at12000 XYZ triples; the latest update replaces previous points. Device pixel ratio is capped at2,
+and drawing dimensions at2048px per axis with a shared scale to preserve aspect. A valid zero-point frame clears old
 points and says no points; stale, retry and terminal failure clear the cloud.
 A healthy connection rotation preserves a still-fresh cloud while showing
 Reconnecting. Only onFrame(null), not CONNECTING by itself, clears the cloud.
+
+Accumulation is an optional, off-by-default browser display mode for a stationary
+sensor. It retains at most5 distinct frames from the last500ms of browser
+monotonic receipt time, not sensor timestamps, with at most60000 displayed points.
+Each source frame still obeys the12000-point wire limit. Raw XYZ is not transformed,
+and no points are interpolated. Source cloud ID plus timestamp identifies repeated
+frames: duplicates neither inflate the count nor renew their retention time.
+Clearing points on an automatic retry retains the last identity, so the same
+last cloud cannot revive the window. A new viewer session starts a new identity
+check; manual Reconnect and device/mode changes intentionally create that session.
+An empty frame immediately removes previous points. Expiration also runs without
+new input using one scheduled timer per viewer; browser timer throttling or a
+blocked event loop can delay cleanup, so this is not a hard real-time guarantee.
+
+Accumulation uses fixed CPU/GPU staging of60000 XYZ triples each and at most5
+source-frame buffers (at most720160 source bytes including headers). Switching
+mode recreates the viewer, resets its view, and clears history. Stale/retry/error,
+manual reconnect, device changes and unmount discard history and cancel the
+expiration timer. Healthy stream rotation can keep only the still-unexpired
+history, never extend its window. The latest source point count and combined
+displayed count are shown separately; coincident points can still overlap.
+This mode has no motion/pose compensation and can leave trails when the sensor
+or scene moves. It is not a persistent map or SLAM. Fit scene uses the currently
+displayed window; use it after the window fills if the initial fit was sparse.
+No server or receiver settings change when selecting this mode.
 
 Every session creates its own canvas. Device switch, reconnect, unmount and
 React StrictMode cleanup stop the old stream, cancel pending render work,
@@ -189,8 +223,11 @@ Graphics initialization or context loss reports an error and stops that stream;
 Reconnect creates a new canvas/context and retries with the current token.
 No automatic context restoration or simulated fallback cloud is used.
 
-Freshness in the browser means2s since a complete local frame receipt, not2s
-since acquisition. Sensor timestamps are not synchronized clocks. Server frame
+Single-frame browser freshness means2s since a complete local frame receipt, not2s
+since acquisition. Accumulation instead clears its visible window after500ms
+without a distinct frame and reports No fresh data even if the transport has not
+yet reached its2s stale deadline. A link below2Hz can therefore alternate between
+Live and No fresh data in accumulation mode; use single-frame mode on such links. Sensor timestamps are not synchronized clocks. Server frame
 transfer age is capped at4s from server receipt, but network/proxy buffering
 can add delay. The browser aborts after6s without a complete frame, so links
 unable to transfer a frame within that limit eventually exhaust retries. This

@@ -1,20 +1,26 @@
-const MAX_POINTS = 12000;
+import { MAX_FRAME_POINTS, MAX_HISTORY_FRAMES, MAX_HISTORY_POINTS } from './pointCloudHistory.js';
 export const DEFAULT_VIEW_DISTANCE = 65;
 const vertexSource = `
 attribute vec3 position;
-uniform vec3 eye, right, up;
+uniform vec3 eye, right, up, center;
+uniform vec2 heightRange;
 uniform float distance, aspect, pointSize;
 uniform bool points;
 uniform vec3 tint;
 varying vec3 color;
 void main() {
-    float depth = distance - dot(position, eye);
+    vec3 relative = position - center;
+    float depth = distance - dot(relative, eye);
     float scale = 1.7320508 * min(1.0, aspect);
-    gl_Position = vec4(dot(position, right) * scale / aspect,
-        dot(position, up) * scale, 1.0010005 * depth - 0.20010005, depth);
+    gl_Position = vec4(dot(relative, right) * scale / aspect,
+        dot(relative, up) * scale, 1.0010005 * depth - 0.20010005, depth);
     gl_PointSize = pointSize;
-    float height = clamp((position.z + 3.0) / 8.0, 0.0, 1.0);
-    color = points ? mix(vec3(0.05, 0.72, 0.9), vec3(1.0, 0.78, 0.2), height) : tint;
+    float height = clamp((position.z - heightRange.x) / (heightRange.y - heightRange.x), 0.0, 1.0);
+    vec3 low = vec3(0.12, 0.35, 1.0), middle = vec3(0.0, 0.95, 0.9);
+    vec3 high = vec3(1.0, 0.92, 0.12), top = vec3(1.0, 0.22, 0.12);
+    vec3 heightColor = height < 0.3333333 ? mix(low, middle, height * 3.0) :
+        height < 0.6666667 ? mix(middle, high, height * 3.0 - 1.0) : mix(high, top, height * 3.0 - 2.0);
+    color = points ? heightColor : tint;
 }`;
 const fragmentSource = `
 precision mediump float;
@@ -30,12 +36,32 @@ export function cameraBasis(yaw, pitch) {
     return { eye: [c * x, c * y, s], right: [-y, x, 0], up: [-s * x, -s * y, c] };
 }
 
-export function createPointCloudRenderer(canvas, onError) {
+export function fitPointCloud(positions, count) {
+    if (!Number.isInteger(count) || count < 1 || count > MAX_HISTORY_POINTS || positions.length < count * 3)
+        throw new Error('Invalid point cloud for scene fitting');
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < count * 3; i++) {
+        const value = positions[i], axis = i % 3;
+        if (!Number.isFinite(value)) throw new Error('Invalid point-cloud coordinate');
+        min[axis] = Math.min(min[axis], value); max[axis] = Math.max(max[axis], value);
+    }
+    const center = min.map((value, axis) => (value + max[axis]) / 2);
+    let radius = 0;
+    for (let i = 0; i < count; i++) radius = Math.max(radius,
+        Math.hypot(positions[i * 3] - center[0], positions[i * 3 + 1] - center[1], positions[i * 3 + 2] - center[2]));
+    const heightMiddle = (min[2] + max[2]) / 2, heightSpan = Math.max(0.5, max[2] - min[2]);
+    return { center, distance: Math.max(2, Math.min(100, radius * 2.2)),
+        heightRange: [heightMiddle - heightSpan / 2, heightMiddle + heightSpan / 2] };
+}
+
+export function createPointCloudRenderer(canvas, onError, { accumulate = false } = {}) {
     const gl = canvas.getContext('webgl', { alpha: false, antialias: false });
     if (!gl) throw new Error('WebGL is unavailable');
     let disposed = false, failed = false, raf = null, observer = null, pointer = null;
-    let yaw = -Math.PI / 4, pitch = 0.55, distance = DEFAULT_VIEW_DISTANCE, count = 0;
-    const vertices = new Float32Array(MAX_POINTS * 3);
+    let yaw = -Math.PI / 4, pitch = 0.35, distance = DEFAULT_VIEW_DISTANCE, count = 0;
+    let center = [0, 0, 0], heightRange = [-0.25, 0.25], fitted = false;
+    const capacity = accumulate ? MAX_HISTORY_POINTS : MAX_FRAME_POINTS;
+    const vertices = new Float32Array(capacity * 3);
     const buffers = [], shaders = [], listeners = [];
     let program;
     const listen = (target, name, handler, options) => {
@@ -74,7 +100,7 @@ export function createPointCloudRenderer(canvas, onError) {
         if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('Unable to link the 3D program');
         gl.useProgram(program);
         const position = gl.getAttribLocation(program, 'position');
-        const uniforms = Object.fromEntries(['eye', 'right', 'up', 'distance', 'aspect', 'pointSize', 'points', 'tint']
+        const uniforms = Object.fromEntries(['eye', 'right', 'up', 'center', 'heightRange', 'distance', 'aspect', 'pointSize', 'points', 'tint']
             .map(name => [name, gl.getUniformLocation(program, name)]));
         if (position < 0 || Object.values(uniforms).some(value => value == null)) throw new Error('Invalid 3D program attributes');
         const allocate = (data, usage) => {
@@ -100,7 +126,7 @@ export function createPointCloudRenderer(canvas, onError) {
             try {
                 const rect = canvas.getBoundingClientRect();
                 if (rect.width <= 0 || rect.height <= 0) return;
-                const dpr = Math.min(2, window.devicePixelRatio || 1);
+                const dpr = Math.min(2, window.devicePixelRatio || 1, 2048 / Math.max(rect.width, rect.height));
                 const width = Math.max(1, Math.min(2048, Math.round(rect.width * dpr)));
                 const height = Math.max(1, Math.min(2048, Math.round(rect.height * dpr)));
                 if (canvas.width !== width) canvas.width = width;
@@ -109,8 +135,9 @@ export function createPointCloudRenderer(canvas, onError) {
                 gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
                 const basis = cameraBasis(yaw, pitch);
                 for (const name of ['eye', 'right', 'up']) gl.uniform3fv(uniforms[name], basis[name]);
+                gl.uniform3fv(uniforms.center, center); gl.uniform2fv(uniforms.heightRange, heightRange);
                 gl.uniform1f(uniforms.distance, distance); gl.uniform1f(uniforms.aspect, rect.width / rect.height);
-                gl.uniform1f(uniforms.pointSize, Math.min(maxPointSize, 3 * dpr));
+                gl.uniform1f(uniforms.pointSize, Math.min(maxPointSize, Math.max(1, 2 * dpr)));
                 bind(reference); gl.uniform1i(uniforms.points, 0); gl.uniform3fv(uniforms.tint, [0.11, 0.17, 0.21]);
                 gl.drawArrays(gl.LINES, 0, grid.length / 3 - 6);
                 for (const [i, color] of [[0, [0.95, 0.3, 0.3]], [1, [0.3, 0.9, 0.5]], [2, [0.35, 0.6, 1]]]) {
@@ -121,6 +148,11 @@ export function createPointCloudRenderer(canvas, onError) {
             } catch (error) { fail(error); }
         };
         const schedule = () => { if (!disposed && !failed && raf == null) raf = requestAnimationFrame(draw); };
+        const fit = () => {
+            if (disposed || failed || count === 0) return;
+            ({ center, distance, heightRange } = fitPointCloud(vertices, count));
+            fitted = true; schedule();
+        };
         const orbit = (dx, dy) => {
             if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
             yaw = (yaw + dx) % (Math.PI * 2); pitch = Math.max(-1.45, Math.min(1.45, pitch + dy)); schedule();
@@ -152,23 +184,45 @@ export function createPointCloudRenderer(canvas, onError) {
         listen(window, 'resize', schedule);
         observer = new ResizeObserver(schedule); observer.observe(canvas); schedule();
         if (gl.getError() !== gl.NO_ERROR) throw new Error('Unable to initialize 3D graphics');
-        return {
-            setFrame(frame) {
-                if (disposed || failed) return;
-                if (frame == null) count = 0;
-                else {
-                    if (!(frame.data instanceof Uint8Array) || !Number.isInteger(frame.pointCount) || frame.pointCount < 0 ||
-                        frame.pointCount > MAX_POINTS || frame.data.byteLength !== 32 + frame.pointCount * 12)
-                        throw new Error('Invalid 3D frame');
-                    const view = new DataView(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
-                    for (let i = 0; i < frame.pointCount * 3; i++) vertices[i] = view.getFloat32(32 + i * 4, true);
-                    count = frame.pointCount;
-                    gl.bindBuffer(gl.ARRAY_BUFFER, cloud); gl.bufferSubData(gl.ARRAY_BUFFER, 0, vertices.subarray(0, count * 3));
+        const setFrames = frames => {
+            if (disposed || failed) return;
+            if (!Array.isArray(frames) || frames.length > (accumulate ? MAX_HISTORY_FRAMES : 1))
+                throw new Error('Invalid 3D frame batch');
+            let nextCount = 0;
+            for (const frame of frames) {
+                if (!(frame.data instanceof Uint8Array) || !Number.isInteger(frame.pointCount) || frame.pointCount < 0 ||
+                    frame.pointCount > MAX_FRAME_POINTS || frame.data.byteLength !== 32 + frame.pointCount * 12)
+                    throw new Error('Invalid 3D frame');
+                nextCount += frame.pointCount;
+            }
+            if (nextCount > capacity) throw new Error('3D point capacity exceeded');
+            let offset = 0;
+            for (const frame of frames) {
+                const view = new DataView(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
+                for (let i = 0; i < frame.pointCount * 3; i++) {
+                    const value = view.getFloat32(32 + i * 4, true);
+                    if (!Number.isFinite(value)) throw new Error('Invalid point-cloud coordinate');
+                    vertices[offset++] = value;
                 }
-                schedule();
+            }
+            count = nextCount;
+            if (frames.length > 0) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, cloud);
+                gl.bufferSubData(gl.ARRAY_BUFFER, 0, vertices.subarray(0, count * 3));
+                if (!fitted) fit();
+            }
+            schedule();
+        };
+        return {
+            setFrame(frame) { setFrames(frame == null ? [] : [frame]); },
+            setFrames,
+            orbit, zoom, fit,
+            reset() {
+                if (disposed || failed) return;
+                yaw = -Math.PI / 4; pitch = 0.35;
+                if (count > 0) fit();
+                else { center = [0, 0, 0]; distance = DEFAULT_VIEW_DISTANCE; heightRange = [-0.25, 0.25]; fitted = false; schedule(); }
             },
-            orbit, zoom,
-            reset() { yaw = -Math.PI / 4; pitch = 0.55; distance = DEFAULT_VIEW_DISTANCE; schedule(); },
             destroy,
         };
     } catch (error) { destroy(); throw error; }
