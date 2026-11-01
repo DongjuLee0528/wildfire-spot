@@ -143,6 +143,9 @@ class ManagerTests(unittest.TestCase):
         self.assertIsNone(manager.get_status()['pid'])
         self.assertIsNone(manager.get_latest_frame())
         self.assertEqual(self.counter.read_text(), '1')
+        self.assertGreaterEqual(manager._metrics.frames, 5)
+        self.assertEqual(manager._metrics.frames, manager._metrics.points)
+        self.assertTrue(manager._metrics.finished)
 
     def test_stale_frame_not_exposed_then_timeout(self):
         manager = self.manager('once')

@@ -1,4 +1,5 @@
 import json
+import struct
 from pathlib import Path
 import socket
 import threading
@@ -10,7 +11,7 @@ from unittest import mock
 
 import requests
 from hardware.point_cloud_manager import FrameDecoder
-from robot.point_cloud_uploader import PointCloudUploader, UploadProtocolError, start_point_cloud_uploader
+from robot.point_cloud_uploader import PointCloudUploader, UploadProtocolError, UploadUnavailable, start_point_cloud_uploader
 
 FIXTURES = json.loads((Path(__file__).parent / 'fixtures/point_cloud_v1.json').read_text())
 DATA = bytes.fromhex(FIXTURES[0]['hex'])
@@ -85,10 +86,13 @@ class UploaderTests(unittest.TestCase):
                 session = Session([login(), Response(status)])
                 uploader = self.uploader(session)
                 with self.assertRaises(UploadProtocolError): uploader._deliver(session, SimpleNamespace(data=DATA))
+                self.assertEqual(uploader._metrics.frames, 0)
         response = Response(204)
         session = Session([login(), response])
         uploader = self.uploader(session)
         self.assertEqual(uploader._deliver(session, SimpleNamespace(data=DATA)).data, DATA)
+        self.assertEqual(uploader._metrics.frames, 1)
+        self.assertEqual(uploader._metrics.bytes, len(DATA))
         self.assertTrue(response.consumed)
         self.assertFalse(session.calls[-1][1]['allow_redirects'])
         self.assertEqual(session.calls[-1][1]['data'], DATA)
@@ -97,13 +101,41 @@ class UploaderTests(unittest.TestCase):
     def test_auth_refresh_uses_fresh_source_and_only_once(self):
         session = Session([login(), Response(401), login(), Response(204)])
         uploader = self.uploader(session)
-        self.assertIsNotNone(uploader._deliver(session, SimpleNamespace(data=DATA)))
+        fresh_data = bytearray(DATA)
+        fresh_data.extend(struct.pack('<fff', 1, 2, 3))
+        struct.pack_into('<I', fresh_data, 8, len(fresh_data) - 32)
+        struct.pack_into('<I', fresh_data, 12, (len(fresh_data) - 32) // 12)
+        struct.pack_into('<I', fresh_data, 24, 99)
+        original, fresh = SimpleNamespace(data=DATA), SimpleNamespace(data=bytes(fresh_data))
+        uploader._manager = SimpleNamespace(get_latest_frame=mock.Mock(side_effect=[original, fresh]))
+        self.assertIs(uploader._deliver(session, original), fresh)
         self.assertEqual(len(session.calls), 4)
+        self.assertEqual(session.calls[1][1]['data'], DATA)
+        self.assertEqual(session.calls[3][1]['data'], fresh.data)
+        self.assertEqual(uploader._metrics.frames, 1)
+        self.assertEqual(uploader._metrics.bytes, len(fresh.data))
+        self.assertEqual(uploader._metrics.points, (len(fresh.data) - 32) // 12)
+        self.assertEqual(uploader._metrics.last_id, 99)
         session = Session([login(), Response(403), login(), Response(403)])
         uploader = self.uploader(session)
         with self.assertRaisesRegex(UploadProtocolError, 'after login'):
             uploader._deliver(session, SimpleNamespace(data=DATA))
         self.assertEqual(len(session.calls), 4)
+        self.assertEqual(uploader._metrics.frames, 0)
+
+    def test_metrics_ignore_failed_uploads_and_204_with_body(self):
+        for status in (429, 500, 503):
+            with self.subTest(status=status):
+                session = Session([login(), Response(status)])
+                uploader = self.uploader(session)
+                with self.assertRaises(UploadUnavailable):
+                    uploader._deliver(session, SimpleNamespace(data=DATA))
+                self.assertEqual((uploader._metrics.frames, uploader._metrics.points, uploader._metrics.bytes), (0, 0, 0))
+        session = Session([login(), Response(204, b'unexpected')])
+        uploader = self.uploader(session)
+        with self.assertRaises(UploadProtocolError):
+            uploader._deliver(session, SimpleNamespace(data=DATA))
+        self.assertEqual((uploader._metrics.frames, uploader._metrics.points, uploader._metrics.bytes), (0, 0, 0))
 
     def test_malformed_or_oversized_login_is_terminal(self):
         for body in [b'not json', b'[]', b'{}', b'{"accessToken":4}', b'x'*8193]:
@@ -126,7 +158,10 @@ class UploaderTests(unittest.TestCase):
         uploader.start()
         self.until(lambda: uploader.get_status()['state'] == 'STREAMING')
         self.assertEqual(uploader.get_status()['failures'], 0)
+        self.assertEqual(uploader._metrics.frames, 1)
+        self.assertEqual(uploader._metrics.bytes, len(DATA))
         uploader.close()
+        self.assertTrue(uploader._metrics.finished)
         self.assertTrue(session.closed)
 
     def test_credentials_401_is_terminal_and_close_interrupts_wait(self):

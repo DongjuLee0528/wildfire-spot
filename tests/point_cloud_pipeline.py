@@ -1,4 +1,5 @@
 import json
+from contextlib import redirect_stdout
 import logging
 import os
 from pathlib import Path
@@ -17,6 +18,9 @@ sys.path.insert(0, str(ROOT))
 from hardware.point_cloud_manager import PointCloudManager
 from robot.point_cloud_uploader import PointCloudUploader
 import requests
+
+
+PROTOCOL_OUTPUT = sys.stdout
 
 
 class CleanupFailed(RuntimeError):
@@ -70,7 +74,7 @@ def main():
     reader.start()
 
     def reply(event, **data):
-        print(json.dumps({'event': event, **data}), flush=True)
+        print(json.dumps({'event': event, **data}), file=PROTOCOL_OUTPUT, flush=True)
 
     def command():
         while not stopping():
@@ -256,8 +260,9 @@ def main():
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARNING)
     try:
-        exit_code = main()
+        with redirect_stdout(sys.stderr):
+            exit_code = main()
     except CleanupFailed as error:
-        print(json.dumps({'event': 'error', 'kind': type(error).__name__, 'message': str(error)}), flush=True)
+        print(json.dumps({'event': 'error', 'kind': type(error).__name__, 'message': str(error)}), file=PROTOCOL_OUTPUT, flush=True)
         exit_code = 1
     raise SystemExit(exit_code)

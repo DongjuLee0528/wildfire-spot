@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from utils.point_cloud_metrics import PointCloudMetrics
 
 logger = logging.getLogger(__name__)
 _HEADER = struct.Struct('<4sIIIdII')
@@ -84,6 +85,7 @@ class PointCloudManager:
         self._received_at = None
         self._restart_count = 0
         self._pid = None
+        self._metrics = PointCloudMetrics('receiver_decoded')
 
     def _set_state(self, state, error=None):
         with self._lock:
@@ -100,6 +102,7 @@ class PointCloudManager:
                     raise RuntimeError('Previous receiver has not been reaped; refusing another start')
                 self._restart_count = 0
             self._stop.clear()
+            self._metrics.reset()
             self._set_state('STARTING')
             if not Path(self._command[0]).is_file() or not os.access(self._command[0], os.X_OK):
                 error = 'L2 receiver executable is missing or not executable: ' + self._command[0]
@@ -164,6 +167,7 @@ class PointCloudManager:
                             with self._lock:
                                 self._latest, self._received_at = frame, last_frame
                                 self._state, self._error = 'STREAMING', None
+                            self._metrics.record(frame.data)
 
     def _drain_stderr(self, process, stderr_tail):
         os.set_blocking(process.stderr.fileno(), False)
@@ -207,6 +211,12 @@ class PointCloudManager:
                     process.stderr.close()
 
     def _run(self):
+        try:
+            self._run_receiver()
+        finally:
+            self._metrics.finish()
+
+    def _run_receiver(self):
         for attempt in range(len(self._restart_delays) + 1):
             if self._stop.is_set():
                 break

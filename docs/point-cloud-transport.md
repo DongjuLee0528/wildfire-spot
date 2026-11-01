@@ -238,3 +238,84 @@ step6 hardware/network validation.
 For the opt-in hardware-free C++/Python/Spring/browser pipeline, prerequisites,
 negative checks and exact cleanup limits, see
 [point-cloud integration tests](point-cloud-testing.md).
+
+
+## Pipeline measurement (diagnostic step 1)
+
+No binary protocol, backend endpoint, SDK setting, delivery cadence, or history
+limit changes are made. Deploy the updated Python files on Jetson and rebuild
+and deploy the frontend. No receiver rebuild or backend JAR update is required.
+Do not start main.py solely to inspect metrics: it initializes physical hardware.
+Use the existing separately approved hardware startup and shutdown procedure.
+
+Jetson prints `POINT_CLOUD_METRICS` JSON lines to stdout (independent of root
+logging configuration). Follow the [approved runtime procedure](operations.md#start-and-keep-running-after-ssh-disconnect)
+first, including physical support/clearance, power-cut readiness, and verification
+of the actual repository root and configuration. This section does not grant
+hardware startup approval. Use the existing `wildfire-robot` tmux session
+(inspect/attach if it already exists); do not launch a second main.py instance.
+In that session, verify the working directory, load the environment as described
+in the runbook, and replace only its final Python launch line with:
+
+```bash
+.venv/bin/python -u main.py 2>&1 | tee "main-debug-$(date +%Y%m%d-%H%M%S).log"
+```
+
+Do not close/kill that pane or type diagnostic/search commands into it. Follow
+the runbook's confirmed-idle and shutdown procedure, then press `q` in the robot
+session for software exit and verify both parent and receiver exit/port release.
+`q` is not an immediate motion stop, and Ctrl-C is not a reliable raw-mode exit.
+Inspect the exact log filename for that run from a second terminal using:
+
+```bash
+grep 'POINT_CLOUD_METRICS' /path/to/main-debug-YYYYMMDD-HHMMSS.log
+```
+
+Stages are `receiver_decoded` (all complete
+validated Python-decoded frames after C++/SDK filters) and `upload_accepted`
+(exact HTTP 204 accepted by the existing uploader, including an auth retry's
+actual selected frame, never failed or merely attempted requests).
+
+The browser developer console prints `POINT_CLOUD_METRICS` objects with stages
+`browser_decoded` (all complete validated binary frames, including coalesced
+frames) and `viewer_delivered` (the latest frame per read passed to the viewer
+callback; not GPU completion or screen presentation). Enable Info-level console
+messages. Reload/open a single viewer after Jetson starts, leave it open for at
+least 30 seconds, then save the metrics before closing the tab. Console output
+may be lost when navigating away. Mode changes and Reconnect create a new
+measurement session. Automatic HTTP rotation/retries retain that session.
+
+Each stage has its own session ID. Browser IDs are page-local diagnostic labels,
+not globally unique identifiers or authentication tokens; keep separate browser
+logs separate. Their generation does not require a secure browser context. Summaries are cumulative within that session,
+not independent 5-second windows: a report is emitted on the first frame after
+5 seconds since the previous report, plus one final report when the worker or
+browser transport settles. No frames means no periodic reports; a zero-count
+final report is possible. Hard process/tab termination cannot guarantee final
+output. Summary output errors are warned and do not abort frame processing.
+
+Fields include elapsed seconds since session start (including idle/setup time),
+frames, total points/bytes (32-byte headers included), minimum/maximum points,
+first/last cloud IDs, zero SDK timestamps, ID discontinuities, and local arrival
+interval count/minimum/mean/maximum in milliseconds. Timing uses monotonic local
+clocks; rates may be derived as 1000 / interval_mean_ms only when positive.
+These are cumulative arrival rates, not hardware scan rates or end-to-end delay.
+Browser batch decoding can produce zero intervals. No raw coordinates, device
+keys, tokens, URLs, or account information are included in summaries.
+
+Compare overlapping cloud-ID spans during one receiver run, not totals from
+independently started sessions. A discontinuity means only that adjacent IDs
+were not consecutive modulo uint32; repeats, SDK restart, latest-only selection,
+network batching, and reconnect can cause it. It is not proof or a count of UDP
+packet loss. A restarted receiver reuses IDs; split analysis at restart boundaries.
+This instrumentation does not count raw SDK points before filtering, rejected
+UDP packets, server-side arrivals, or actual GPU/display frames. The accepted
+upload and browser counts only bound the uninstrumented backend/proxy path;
+they do not locate a loss within that path. Original latest-only semantics and
+0.5-second/5-frame accumulation remain unchanged for a comparable baseline.
+
+
+The hardware-free pipeline helper reserves its original stdout for JSON command
+replies. It redirects diagnostic stdout to stderr for the entire main lifecycle,
+including worker shutdown, so periodic/final metrics cannot corrupt the Java
+consumer's response channel. Production main.py stdout capture is unchanged.

@@ -7,6 +7,7 @@ import time
 from urllib.parse import urlsplit
 
 import requests
+from utils.point_cloud_metrics import PointCloudMetrics
 
 logger = logging.getLogger(__name__)
 _UNSET = object()
@@ -50,6 +51,7 @@ class PointCloudUploader:
         self._token = None
         self._last_sent = None
         self._cleanup_error = None
+        self._metrics = PointCloudMetrics('upload_accepted')
 
     def _set_state(self, state, error=_UNSET):
         with self._lock:
@@ -66,6 +68,7 @@ class PointCloudUploader:
             if self._thread is not None and self._thread.is_alive():
                 return
             self._stop.clear()
+            self._metrics.reset()
             self._token = self._last_sent = None
             self._cleanup_error = None
             with self._lock:
@@ -140,6 +143,7 @@ class PointCloudUploader:
             if status in (401, 403):
                 raise UploadProtocolError('Point-cloud device authorization rejected after login')
         if status == 204:
+            self._metrics.record(frame.data)
             return frame
         if status == 429 or status >= 500:
             raise UploadUnavailable('Point-cloud backend temporarily unavailable')
@@ -187,6 +191,7 @@ class PointCloudUploader:
             self._set_state('ERROR', 'Point-cloud upload worker failed: ' + type(error).__name__)
             logger.error('Point-cloud upload worker failed (%s)', type(error).__name__)
         finally:
+            self._metrics.finish()
             if session is not None:
                 try:
                     session.close()
