@@ -197,3 +197,7 @@ unable to transfer a frame within that limit eventually exhaust retries. This
 is a known limitation, not a real-time acquisition-age guarantee. Real Jetson,
 production proxy buffering, sensor-axis alignment and achieved rate require
 step6 hardware/network validation.
+
+For the opt-in hardware-free C++/Python/Spring/browser pipeline, prerequisites,
+negative checks and exact cleanup limits, see
+[point-cloud integration tests](point-cloud-testing.md).

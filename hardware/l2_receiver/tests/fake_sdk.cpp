@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <limits>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -9,6 +10,15 @@
 namespace unilidar_sdk2 {
 namespace {
 std::string scenario() {
+    if (const char* path = std::getenv("L2_TEST_CONTROL_FILE")) {
+        std::ifstream input(path);
+        std::string selected;
+        if (!(input >> selected)) throw std::runtime_error("Cannot read test control file");
+        if (selected != "normal" && selected != "empty" && selected != "max" &&
+            selected != "idle" && selected != "recovered" && selected != "run_std")
+            throw std::runtime_error("Unknown test control scenario");
+        return selected;
+    }
     const char* value = std::getenv("L2_TEST_SCENARIO");
     return value ? value : "normal";
 }
@@ -55,6 +65,11 @@ public:
             {0, std::numeric_limits<float>::infinity(), 0, 0, 0, 1},
             {20, 20, 20, 0, 0, 1}, {0, 0, -5, 0, 0, 1}
         };
+        if (scenario() == "max") {
+            cloud.points.clear();
+            for (int i = 0; i < 12000; ++i) cloud.points.push_back({(i % 30) + 0.25f, 0, 0, 0, 0, 1});
+        }
+        if (scenario() == "recovered") { cloud.id = 43; cloud.points[0].x = 2; cloud.points[0].y = 3; cloud.points[0].z = 4; }
         if (scenario() == "oversize") cloud.points.resize(12001);
         if (scenario() == "invalid_stamp") cloud.stamp = std::numeric_limits<double>::infinity();
         if (scenario() == "empty") cloud.points.clear();

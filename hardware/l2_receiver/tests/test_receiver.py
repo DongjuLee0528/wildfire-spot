@@ -139,6 +139,16 @@ class ReceiverTests(unittest.TestCase):
                 else:
                     self.assertIn(b'FAKE_UDP_CLOSED', error)
 
+    def test_unknown_control_file_scenario_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            control = Path(directory) / 'scenario'
+            control.write_text('maxx', encoding='ascii')
+            env = dict(os.environ, L2_TEST_CONTROL_FILE=str(control), L2_TEST_SCENARIO='normal')
+            result = subprocess.run([str(self.binary)], env=env, capture_output=True, timeout=3)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, b'')
+            self.assertIn(b'Unknown test control scenario', result.stderr)
+
     def test_help_and_invalid_arguments_do_not_initialize_sdk(self):
         for args, code in [(['--help'], 0), (['bad', '192.168.1.62'], 2), (['extra'], 2)]:
             result = subprocess.run([str(self.binary), *args], capture_output=True, timeout=3)

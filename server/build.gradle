@@ -31,7 +31,32 @@ dependencies {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    useJUnitPlatform { excludeTags "point-cloud-e2e" }
 }
 
 sourceSets.test.resources.srcDir('../tests/fixtures')
+
+
+tasks.register('pointCloudE2e', Test) {
+    description = 'Runs the hardware-free C++/Python/Spring/browser point cloud pipeline.'
+    group = 'verification'
+    ignoreFailures = false
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'point-cloud-e2e' }
+    doNotTrackState('The pipeline exercises external processes and sources outside the server project.')
+    timeout = java.time.Duration.ofSeconds(420)
+    systemProperty 'pointCloud.repository', rootDir.parentFile.canonicalPath
+    doFirst {
+        ['UNITREE_LIDAR_SDK_ROOT', 'POINT_CLOUD_TEST_PYTHON', 'POINT_CLOUD_TEST_NODE',
+         'POINT_CLOUD_PLAYWRIGHT_MODULE', 'POINT_CLOUD_CHROME'].each { name ->
+            if (!System.getenv(name)) throw new GradleException("Missing required E2E environment variable: ${name}")
+        }
+    }
+    afterSuite { descriptor, result ->
+        if (!descriptor.parent && (result.testCount < 1 || result.skippedTestCount != 0)) {
+            throw new GradleException('Point cloud E2E requires executed tests with zero failures and zero skips.')
+        }
+    }
+    testLogging { events 'passed', 'failed', 'skipped'; showStandardStreams = true; exceptionFormat = 'full' }
+}
