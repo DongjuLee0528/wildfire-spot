@@ -104,8 +104,8 @@ clouds and invalid timestamps cause an error rather than silent truncation.
 - The SDK binary's internal blocking/thread behavior is not source-verified.
   The five-second watchdog and signal handling cannot interrupt an indefinitely
   blocked SDK call. Target testing is required before claiming bounded shutdown.
-- This step has no automatic reconnect, process supervision, or `main.py`
-  integration. Restart after diagnosing a runtime failure.
+- The standalone executable has no automatic reconnect or supervision. The
+  Python integration below owns restart and shutdown behavior.
 
 ## Hardware-free verification
 
@@ -125,3 +125,82 @@ runtime exceptions, cleanup failure/exception, and simultaneous runtime/cleanup
 exceptions.
 This verifies application logic, not the real SDK library, Linux linking, sensor
 parsing accuracy, Jetson performance, or hardware behavior.
+
+
+## Python runtime integration (step 2)
+
+`RobotRuntimeContext`, constructed by `main.py`, owns a
+`hardware.point_cloud_manager.PointCloudManager`. It starts the receiver in a
+background worker without delaying camera/fire startup. The existing 2D
+`lidar_manager` remains uninitialized; no second UDP receiver is added. L2
+point-cloud state is not yet exposed through FastAPI, Spring, or the web UI.
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| L2_POINT_CLOUD_ENABLED | true | Set false to disable the receiver |
+| L2_RECEIVER_PATH | ~/workspace/wildfire-l2-build/l2_receiver | Compiled executable path |
+| WILDFIRE_LIDAR_HOST_IP | 192.168.1.2 | Existing host address setting |
+| WILDFIRE_LIDAR_IP | 192.168.1.62 | Existing sensor address setting |
+
+Build the receiver first using the pinned SDK instructions above. `main.py`
+then starts it automatically when enabled. No binary, SDK, or interface
+configuration is installed automatically. Missing/non-executable binaries,
+invalid IPv4 configuration, or process-spawn errors are reported without
+preventing other runtime managers from initializing. Do not execute `main.py`
+for software-only verification: it also initializes robot hardware.
+
+`runtime.point_cloud_manager.get_status()` returns state, error, local receipt
+age, restart count, and child PID. States are STOPPED, STARTING, STREAMING,
+STALE, RESTARTING, STOPPING, or ERROR. `get_latest_frame()` returns an immutable
+`PointCloudFrame`, or None if no fresh data exists. `frame.data` preserves the
+complete v1 binary frame. Empty clouds are valid fresh frames. This API does
+not imply obstacle avoidance or safe navigation, and does not change existing
+sensor/health API response schemas.
+
+The decoder checks magic, version, size/count consistency, the 12000-point
+limit, timestamps, finite XYZ values, and the inclusive 30m Euclidean range.
+Malformed data terminates that receive attempt. Partial frames are not carried
+across process restarts. Only the latest complete frame is retained, receive
+chunks are bounded to 65536 bytes, and stderr is continuously drained with a
+4096-byte diagnostic tail. There is no unlimited frame/log queue.
+
+Freshness uses the parent's monotonic receipt time, independent of the SDK's
+wall-clock timestamp. After two seconds without an updated frame, get_status
+reports STALE and get_latest_frame returns None. After six seconds without a
+complete frame (including during SDK initialization), the worker terminates the
+child. Exit, malformed frames, and timeouts clear the cached frame. Restart
+waits are 1, 2, 4, 8, and 16 seconds: at most five restarts per start() call.
+A stable connection does not reset this budget. Exit code 2 and executable/spawn
+configuration errors are permanent until the configuration is fixed and start()
+is invoked again. Call start only from the owner, never from a read/status API.
+
+close() interrupts a restart delay, requests termination, waits up to three
+seconds, then kills and waits up to one more second. Cleanup failure is logged,
+keeps the original error context, and disables further automatic restarts. A
+child that cannot be reaped remains an error and blocks another start. Repeated
+start while running and repeated close are idempotent. main.py explicitly
+closes this manager before unrelated hardware cleanup; RuntimeContext.close()
+also closes it safely. Normal q/Ctrl+C shutdown paths are covered; SIGKILL,
+parent crashes, OS/kernel stalls, and a child that cannot be killed/reaped
+cannot be guaranteed clean shutdown. No physical sensor reset/reconfiguration
+is attempted for recovery.
+
+Hardware-free Python tests, using temporary child programs and mocked runtime
+hardware managers:
+
+```bash
+python3 -m unittest tests.test_point_cloud_manager -v
+```
+
+To verify the actual step-1 C++ receiver feeding the Python manager, using the
+real official headers and the hardware-free fake SDK implementation:
+
+```bash
+UNITREE_LIDAR_SDK_ROOT="$HOME/workspace/unilidar_sdk2/unitree_lidar_sdk" \
+  python3 hardware/l2_receiver/tests/test_python_bridge.py
+```
+
+Tests do not run main.py or the real SDK library. They cover framing, invalid input,
+staleness, bounded restart/recovery, stderr backpressure, process termination,
+and runtime ownership/shutdown ordering. Actual Jetson integration and workload
+performance remain unverified until hardware testing.

@@ -801,6 +801,11 @@ def main():
         logger.log_error("Main.init", str(e))
         print(f"Failed to initialize: {e}")
     finally:
+        if runtime is not None and runtime.point_cloud_manager is not None:
+            try:
+                runtime.point_cloud_manager.close()
+            except Exception as error:
+                logger.log_error("Main.point_cloud_shutdown", str(error))
         if fire_detection_stop_event is not None:
             fire_detection_stop_event.set()
         if fire_detection_thread is not None:
