@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import PointCloudPanel from './components/PointCloudPanel.jsx';
 
 const JWT_KEY = 'jwt_token';
 const getToken = () => localStorage.getItem(JWT_KEY);
@@ -786,6 +787,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                             </div>
                         </div>
                     </div>
+                    <PointCloudPanel key={activeDevice?.id ?? "no-device"} deviceId={activeDevice?.id} />
                 </section>
 
                 <section className="grid-column col-right">

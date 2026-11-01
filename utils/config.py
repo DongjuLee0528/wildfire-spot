@@ -152,6 +152,8 @@ GPS_UART_PORT = os.environ.get("WILDFIRE_GPS_UART_PORT", "/dev/ttyTHS1")
 GPS_BAUDRATE = _env_int("WILDFIRE_GPS_BAUDRATE", 9600)
 
 LIDAR_TRANSPORT = "ethernet"
+L2_POINT_CLOUD_ENABLED = _env_bool("L2_POINT_CLOUD_ENABLED", True)
+L2_RECEIVER_PATH = _env_path("L2_RECEIVER_PATH", "~/workspace/wildfire-l2-build/l2_receiver")
 
 LIDAR_ETHERNET_LIDAR_IP = os.environ.get("WILDFIRE_LIDAR_IP", "192.168.1.62")
 LIDAR_ETHERNET_HOST_IP = os.environ.get("WILDFIRE_LIDAR_HOST_IP", "192.168.1.2")

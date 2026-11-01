@@ -19,6 +19,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
+import jakarta.servlet.DispatcherType;
 
 @Configuration
 @EnableWebSecurity
@@ -45,6 +46,9 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/api/device/point-cloud", "POST")).hasRole("DEVICE")
+                        .requestMatchers(new AntPathRequestMatcher("/api/devices/*/point-cloud/stream", "GET")).hasAnyRole("USER", "ADMIN")
                         // Public: login and signup
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/login", "POST")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/signup", "POST")).permitAll()

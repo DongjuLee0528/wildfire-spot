@@ -14,6 +14,11 @@ lidar_manager : None
     Telemetry will report lidar_status=UNAVAILABLE and skip no uploads
     because lidar data is not a telemetry upload channel.
 
+point_cloud_manager
+    Owns the standalone 3D L2 receiver process when enabled. Missing executables
+    and receiver errors do not prevent the other managers from initializing.
+    This is separate from the legacy 2D obstacle manager above.
+
 camera_vision : None
     CameraControlManager / CameraVision is created separately and wired
     into robot_api.  FireDetector accepts it as an optional argument; when
@@ -45,17 +50,35 @@ class RobotRuntimeContext:
         2. GPSManager   — UART/USB GPS device
         3. SensorManager — I2C/GPIO sensors (DHT11, KY026)
         4. FireDetector — requires sensor_manager and gps_manager
+        5. PointCloudManager — independent, optional L2 receiver process
         """
         self.gps_manager = None
         self.sensor_manager = None
         self.lidar_manager = None    # Not initialised here; see module docstring
         self.state_machine = None
         self.fire_detector = None
+        self.point_cloud_manager = None
 
         self._init_state_machine()
         self._init_gps()
         self._init_sensors()
         self._init_fire_detector()
+        self._init_point_cloud()
+
+    def _init_point_cloud(self):
+        try:
+            from utils.config import (L2_POINT_CLOUD_ENABLED, L2_RECEIVER_PATH,
+                                      LIDAR_ETHERNET_HOST_IP, LIDAR_ETHERNET_LIDAR_IP)
+            if not L2_POINT_CLOUD_ENABLED:
+                logger.info("L2 point-cloud receiver disabled")
+                return
+            from hardware.point_cloud_manager import PointCloudManager
+            self.point_cloud_manager = PointCloudManager(
+                L2_RECEIVER_PATH, LIDAR_ETHERNET_HOST_IP, LIDAR_ETHERNET_LIDAR_IP)
+            self.point_cloud_manager.start()
+            logger.info("L2 point-cloud manager state=%s", self.point_cloud_manager.get_status()['state'])
+        except Exception as error:
+            logger.error("L2 point-cloud initialization failed: %s", error)
 
     def _init_state_machine(self):
         """Instantiate StateMachine; sets self.state_machine or logs and leaves it None."""
@@ -114,6 +137,7 @@ class RobotRuntimeContext:
     def close(self):
         """Release all hardware resources owned by this context."""
         for name, mgr in [
+            ("point_cloud_manager", self.point_cloud_manager),
             ("gps_manager", self.gps_manager),
             ("sensor_manager", self.sensor_manager),
             ("lidar_manager", self.lidar_manager),

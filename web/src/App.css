@@ -33,7 +33,8 @@ body {
 .dashboard-container {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    min-height: 100vh;
+    height: auto;
     padding: 12px;
     gap: 10px;
     width: 100%;
@@ -129,7 +130,7 @@ body {
 }
 
 .col-center {
-    height: 100%;
+    height: auto;
     min-height: 0;
 }
 
@@ -166,6 +167,7 @@ body {
 
 /* --- 2. Live Camera Viewport --- */
 .main-camera-panel {
+    flex-shrink: 0;
     flex-grow: 1;
     min-height: 0;
 }
@@ -194,7 +196,7 @@ body {
     background-color: #07090c;
     position: relative;
     flex-grow: 1;
-    min-height: 0;
+    min-height: 260px;
     padding: 0;
     overflow: hidden;
 }
@@ -1731,4 +1733,31 @@ body {
     .log-terminal {
         max-height: 160px;
     }
+}
+
+.point-cloud-panel { flex-shrink: 0; }
+.point-cloud-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--bg-panel-header); border-bottom: 1px solid var(--border-color); flex-wrap: wrap; padding-right: 14px; }
+.point-cloud-heading .panel-title { border: 0; }
+.point-cloud-state { font-size: 0.75rem; padding: 8px 0 8px 14px; }
+.point-cloud-info { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 14px; font-size: 0.75rem; color: #a2b4c7; }
+.point-cloud-axis b:nth-child(1) { color: #f24c4c; }
+.point-cloud-axis b:nth-child(2) { color: #4de680; }
+.point-cloud-axis b:nth-child(3) { color: #5999ff; }
+.point-cloud-viewport { position: relative; height: clamp(260px, 32vw, 380px); background: #07090c; overflow: hidden; }
+.point-cloud-surface, .point-cloud-canvas { width: 100%; height: 100%; display: block; }
+.point-cloud-canvas { touch-action: none; cursor: grab; }
+.point-cloud-canvas:active { cursor: grabbing; }
+.point-cloud-message { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; text-align: center; color: #b8c7d8; pointer-events: none; background: rgba(7, 9, 12, 0.35); font-size: 0.85rem; }
+.point-cloud-controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; padding: 10px 14px 4px; }
+.point-cloud-view-buttons { display: flex; flex-wrap: wrap; gap: 5px; }
+.point-cloud-controls button { min-width: 36px; min-height: 36px; padding: 5px 9px; border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-main); background: var(--bg-panel-header); cursor: pointer; }
+.point-cloud-controls button:hover:not(:disabled), .point-cloud-controls button:focus-visible { border-color: var(--accent-color); outline: 2px solid var(--accent-glow); }
+.point-cloud-controls button:disabled { opacity: 0.45; cursor: default; }
+.point-cloud-hint { padding: 8px 14px 12px; color: #9cabbc; font-size: 0.75rem; }
+@media (max-width: 1199px) {
+    .point-cloud-panel { order: 10; grid-column: 1 / -1; }
+}
+@media (max-width: 767px) {
+    .camera-viewport { min-height: 200px; }
+    .point-cloud-controls { gap: 12px; }
 }
