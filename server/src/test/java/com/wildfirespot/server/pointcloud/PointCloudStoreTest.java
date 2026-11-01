@@ -110,12 +110,13 @@ class PointCloudStoreTest {
         boolean ready = true, fail;
         int pauseAfter = Integer.MAX_VALUE;
         WriteListener listener;
+        Runnable onByte = () -> {};
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         @Override public boolean isReady() { return ready; }
         @Override public void setWriteListener(WriteListener value) { listener = value; }
         @Override public void write(int value) throws java.io.IOException {
             if (fail) throw new java.io.IOException("injected");
-            bytes.write(value);
+            bytes.write(value); onByte.run();
             if (bytes.size() >= pauseAfter) ready = false;
         }
     }
@@ -175,18 +176,79 @@ class PointCloudStoreTest {
                 clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(100));
                 byte[] next = original.clone(); java.nio.ByteBuffer.wrap(next).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(24, 2);
                 store.accept("d", next); when(jwt.validate(anyString())).thenReturn(false); streams.tick();
-                clock.set(TimeUnit.SECONDS.toNanos(12)); streams.tick();
+                clock.set(TimeUnit.MILLISECONDS.toNanos(11100));
+                opened.output.pauseAfter = 8192; opened.output.ready = true; opened.output.listener.onWritePossible();
+                clock.set(TimeUnit.MILLISECONDS.toNanos(12100)); streams.tick();
                 assertThat(streams.activeCount()).isEqualTo(1); verify(opened.context, never()).complete();
                 if (resume) {
                     opened.output.pauseAfter = Integer.MAX_VALUE; opened.output.ready = true;
                     opened.output.listener.onWritePossible();
                     assertThat(opened.output.bytes.toByteArray()).isEqualTo(original);
                 } else {
-                    clock.incrementAndGet(); streams.tick(); assertThat(opened.output.bytes.size()).isEqualTo(4096);
+                    clock.incrementAndGet(); streams.tick(); assertThat(opened.output.bytes.size()).isEqualTo(8192);
                 }
                 assertThat(streams.activeCount()).isZero(); verify(opened.context, times(1)).complete();
             } finally { streams.close(); }
         }
+    }
+
+    @Test void progressingFrameCanExceedTwoSecondsButStallAndAbsoluteAgeStayBounded() throws Exception {
+        for (boolean progress : new boolean[]{true, false}) {
+            DeviceRepository repo = mock(DeviceRepository.class); when(repo.findOwnerIdByDeviceId("d")).thenReturn(Optional.of("owner"));
+            AtomicLong clock = new AtomicLong(TimeUnit.SECONDS.toNanos(10));
+            PointCloudStore store = new PointCloudStore(repo, clock::get);
+            java.nio.ByteBuffer data = java.nio.ByteBuffer.allocate(60032).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            data.put(new byte[]{'L','2','P','C'}).putInt(1).putInt(60000).putInt(5000).putDouble(1).putInt(1).putInt(18);
+            for (int i=0;i<5000;i++) data.putFloat(1).putFloat(2).putFloat(3);
+            store.accept("d", data.array());
+            JwtProvider jwt = mock(JwtProvider.class); when(jwt.validate(anyString())).thenReturn(true); when(jwt.isUserToken(anyString())).thenReturn(true);
+            PointCloudStreams streams = new PointCloudStreams(store, jwt, 60000);
+            try {
+                Opened opened = open(streams, "one"); opened.output.pauseAfter = 4096;
+                opened.output.listener.onWritePossible();
+                for (int i=1;i<=4;i++) {
+                    clock.set(TimeUnit.SECONDS.toNanos(10+i)); store.accept("d", data.array());
+                    if (progress) {
+                        opened.output.pauseAfter = opened.output.bytes.size() + 4096; opened.output.ready = true;
+                        opened.output.listener.onWritePossible();
+                    } else streams.tick();
+                    if (progress || i<=2) assertThat(streams.activeCount()).isEqualTo(1);
+                    else assertThat(streams.activeCount()).isZero();
+                }
+                clock.incrementAndGet(); streams.tick();
+                assertThat(streams.activeCount()).isZero(); verify(opened.context, times(1)).complete();
+                assertThat(opened.output.bytes.size()).isLessThan(data.array().length);
+            } finally { streams.close(); }
+        }
+    }
+
+    @Test void selectionPacingIgnoresWriteDurationAndHandlesJitterWithoutBurst() throws Exception {
+        DeviceRepository repo = mock(DeviceRepository.class); when(repo.findOwnerIdByDeviceId("d")).thenReturn(Optional.of("owner"));
+        AtomicLong clock = new AtomicLong(TimeUnit.SECONDS.toNanos(10));
+        PointCloudStore store = new PointCloudStore(repo, clock::get); store.accept("d", fixture());
+        JwtProvider jwt = mock(JwtProvider.class); when(jwt.validate(anyString())).thenReturn(true); when(jwt.isUserToken(anyString())).thenReturn(true);
+        PointCloudStreams streams = new PointCloudStreams(store, jwt, 60000);
+        try {
+            Opened opened = open(streams, "one");
+            opened.output.onByte = () -> clock.incrementAndGet();
+            opened.output.listener.onWritePossible();
+            int size = fixture().length;
+            for (int i=1;i<10;i++) {
+                clock.set(TimeUnit.SECONDS.toNanos(10) + TimeUnit.MILLISECONDS.toNanos(i*100));
+                store.accept("d", fixture()); streams.tick();
+                assertThat(opened.output.bytes.size()).isEqualTo((i+1)*size);
+                streams.tick(); assertThat(opened.output.bytes.size()).isEqualTo((i+1)*size);
+            }
+            long previous = clock.get();
+            for (int i=0;i<6;i++) {
+                long next = previous + TimeUnit.MILLISECONDS.toNanos(97);
+                clock.set(next); store.accept("d", fixture()); streams.tick();
+                int before = opened.output.bytes.size();
+                clock.set(next + TimeUnit.MILLISECONDS.toNanos(20)); streams.tick();
+                assertThat(opened.output.bytes.size()).isEqualTo(before + size);
+                previous = clock.get();
+            }
+        } finally { streams.close(); }
     }
 
     @Test void lifetimeExpiryAndSetupFailureReleaseSlotsAndTickSurvivesErrors() throws Exception {

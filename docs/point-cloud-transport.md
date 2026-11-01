@@ -1,15 +1,15 @@
-# Point-cloud transport (step 3)
+# Point-cloud transport and web viewer (steps 3–4)
 
 ## Data path
 
 L2 -> standalone C++ receiver -> Python PointCloudManager -> dedicated
 PointCloudUploader -> Spring latest-frame cache -> authenticated HTTP binary
-stream -> browser transport module. No ROS2, WebSocket dependency, base64, raw
-point-cloud database persistence, or 3D renderer is added by this step.
+stream -> browser transport module -> WebGL viewer. No ROS2, WebSocket
+dependency, base64, or raw point-cloud database persistence is added.
 
 The existing camera, robot controls, and fire telemetry remain separate. The
-legacy 2D lidar-status API is unchanged. Step 4 must connect the transport to a
-3D panel below keyboard controls and implement visible reconnect handling.
+legacy 2D lidar-status API is unchanged. The 3D panel sits below keyboard
+controls and provides visible connection status and a Reconnect button.
 
 ## Python configuration and lifecycle
 
@@ -88,17 +88,16 @@ per hop, not proof of end-to-end age or synchronized sensor clocks.
 
 There are at most8 active browser streams globally and2 per username. Reads
 and writes are nonblocking Servlet I/O, started only after the first container
-write-ready callback. One scheduler polls at100ms. Each stream holds one frame
+write-ready callback. One scheduler polls at20ms; each client selects at most one frame per100ms, measured from selection rather than write completion. Scheduling jitter and slow links can reduce the achieved rate. Each stream holds one frame
 in progress and then selects only the latest, without a frame task queue.
-Writes are4096-byte slices. Continuous not-ready or an unfinished frame for2s
-closes the stream; a blocked viewer cannot retain an application slot indefinitely.
+Writes are4096-byte slices. Continuous not-ready or no successful write/flush progress for2s closes the stream. Independently, an unfinished frame older than4s from server receipt closes even if progress continues; a blocked viewer cannot retain an application slot indefinitely.
 Slots are released exactly once when close is decided, before AsyncContext
 completion; context completion/error/timeout is also idempotent. Underlying OS
 socket teardown and container-buffer reclamation are not promised within2s.
 
 Streams rotate after60s and check captured JWT validity during ticks. Planned
 lifetime/stale/auth closure finishes the current frame boundary if possible,
-with at most2s grace and no new frame after invalid auth. Ownership is checked
+with at most2s grace from the first close decision (progress does not reset it) and no new frame after invalid auth. The absolute4s frame age cap still applies. Ownership is checked
 on every new connection; owner changes can take up to the stream lifetime to
 be noticed, and upload device deletion can take up to metadata TTL. Shutdown
 may truncate because Boot can stop connectors before @PreDestroy. Parent/OS
@@ -113,8 +112,9 @@ is no new signup policy, durable rejection cache or per-IP gate in this step.
 ## Browser integration contract
 
 `web/src/transport/pointCloudTransport.js` exports PointCloudDecoder and
-connectPointCloud({deviceId,getToken,onFrame,onState}). It is not yet called by
-App.jsx. Callbacks must be synchronous. onFrame receives the latest complete
+connectPointCloud({deviceId,getToken,onFrame,onState}). App.jsx mounts
+PointCloudPanel, which calls it through pointCloudViewerSession.js. Callbacks
+must be synchronous. onFrame receives the latest complete
 frame per read batch, or null to clear stale/disconnected data; frame.data
 contains the full binary header+XYZ bytes. onState receives state/error.
 
@@ -127,8 +127,8 @@ A clean EOF after55s is normal rotation and reconnects promptly without clearing
 a still-fresh frame. The existing stale deadline continues across reconnect;
 only a new complete frame resets it, so a failed/slow reconnect still clears
 the display after2s. An exhausted
-budget is EXHAUSTED with no live reader/timers: step4 must allow creating a new
-transport to reconnect. stop() aborts/cancels reads and waits, suppresses late
+budget is EXHAUSTED with no live reader/timers. The panel Reconnect button
+creates a new session and transport. stop() aborts/cancels reads and waits, suppresses late
 callbacks, and disposes the connection. Caller must stop on unmount/logout or
 device change; getToken should return the current stored token on reconnect.
 
@@ -141,7 +141,7 @@ the later target test, not asserted from software-only checks.
 
 ```bash
 python3 -m unittest tests.test_point_cloud_manager tests.test_point_cloud_uploader -v
-node --test web/tests/pointCloudTransport.test.js
+node --test web/tests/*.test.js
 ./server/gradlew -p server --no-daemon test
 npm --prefix web ci --ignore-scripts
 npm --prefix web run build
@@ -152,3 +152,48 @@ contains a pre-existing machine-specific Java path; adapt the local environment
 when building elsewhere rather than committing another personal path. Tests
 use temporary fake processes, shared fixtures, H2 and loopback-only HTTP/Tomcat.
 They never run real main.py/SDK, connect to a Jetson, or access physical devices.
+
+
+## Web 3D viewer
+
+The dashboard places a live point-cloud panel below manual keyboard control,
+including tablet and mobile layouts. It draws the latest validated frame only,
+up to12000 points, using native WebGL with fixed GPU buffers. No production
+package is added.30m is the fixed sensor data filter, not a display range slider
+or a guarantee of detection on every surface. This is individual-frame point
+visualization, not meshing, mapping, SLAM or fire detection from LiDAR.
+
+Raw sensor XYZ is unchanged and Z is shown up; physical mounting alignment is
+not calibrated here. The grid spacing is5m, the colored short axes mark XYZ at
+the sensor origin, and point color represents sensor Z height, from blue at
+-3m to amber at+5m, clamped beyond that interval. Default and Reset view fit
+the30m sphere with a65m camera distance; the narrower viewport dimension
+sets the field of view so portrait canvases also fit it. User zoom can crop
+points without changing the received count. There is no
+intensity channel or invented data. Drag to orbit, scroll to zoom, or use the
+labeled orbit/zoom/reset buttons. These controls never send robot commands.
+Existing dashboard WASD/Escape robot shortcuts remain unchanged.
+
+Only a new frame or a view/size change schedules a draw; there is no idle render
+loop. CPU staging capacity and GPU cloud buffer are fixed at12000 XYZ triples;
+the latest update replaces previous points. Device pixel ratio is capped at2,
+and drawing dimensions at2048px per axis. A valid zero-point frame clears old
+points and says no points; stale, retry and terminal failure clear the cloud.
+A healthy connection rotation preserves a still-fresh cloud while showing
+Reconnecting. Only onFrame(null), not CONNECTING by itself, clears the cloud.
+
+Every session creates its own canvas. Device switch, reconnect, unmount and
+React StrictMode cleanup stop the old stream, cancel pending render work,
+remove event/resize listeners, delete GL resources and discard its context.
+Graphics initialization or context loss reports an error and stops that stream;
+Reconnect creates a new canvas/context and retries with the current token.
+No automatic context restoration or simulated fallback cloud is used.
+
+Freshness in the browser means2s since a complete local frame receipt, not2s
+since acquisition. Sensor timestamps are not synchronized clocks. Server frame
+transfer age is capped at4s from server receipt, but network/proxy buffering
+can add delay. The browser aborts after6s without a complete frame, so links
+unable to transfer a frame within that limit eventually exhaust retries. This
+is a known limitation, not a real-time acquisition-age guarantee. Real Jetson,
+production proxy buffering, sensor-axis alignment and achieved rate require
+step6 hardware/network validation.

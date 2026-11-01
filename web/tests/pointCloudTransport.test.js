@@ -134,6 +134,7 @@ test('stop resolves pending fetch and late body is canceled without callbacks', 
     const transport = connectPointCloud(options(() => new Promise(resolve => { resolveFetch = resolve; }), {
         onFrame: value => frames.push(value),
     }));
+    await until(() => resolveFetch);
     transport.stop(); await transport.done;
     resolveFetch(new Response(new ReadableStream({ cancel() { canceled = true; } }),
         { headers: { 'Content-Type': 'application/octet-stream' } }));
@@ -181,4 +182,43 @@ test('stale callback failure during rotation wait stops before another request',
         onFrame: frame => { if (frame == null) throw new Error('injected'); } }));
     await transport.done;
     assert.equal(calls, 1); assert.equal(transport.getStatus().state, 'ERROR');
+});
+
+test('immediate stop starts no token lookup or fetch', async () => {
+    let calls = 0;
+    const transport = connectPointCloud(options(async () => { calls++; return response([]); }, {
+        getToken: () => { calls++; return 'test-token'; },
+    }));
+    transport.stop(); await transport.done;
+    assert.equal(calls, 0); assert.equal(transport.getStatus().state, 'CLOSED');
+});
+
+test('reentrant stop preserves CLOSED from frame, null frame and state callbacks', async () => {
+    for (const where of ['frame', 'null', 'first-state', 'retry-state', 'token']) {
+        let transport, calls = 0, tokens = 0, connecting = 0, callbacksAfterStop = 0, stopped = false;
+        const close = () => { transport.stop(); stopped = true; };
+        transport = connectPointCloud(options(async () => {
+            calls++;
+            return where === 'retry-state' ? response([], 503) : response([valid], 200, true);
+        }, {
+            getToken: () => { tokens++; if (where === 'token') close(); return 'test-token'; },
+            onFrame: frame => {
+                if (stopped) callbacksAfterStop++;
+                if ((where === 'frame' && frame) || (where === 'null' && !frame)) close();
+            },
+            onState: value => {
+                if (stopped) callbacksAfterStop++;
+                if (value.state === 'CONNECTING') {
+                    connecting++;
+                    if (where === 'first-state' || (where === 'retry-state' && connecting === 2)) close();
+                }
+            },
+        }));
+        await transport.done;
+        assert.equal(transport.getStatus().state, 'CLOSED', where);
+        assert.equal(callbacksAfterStop, 0, where);
+        assert.equal(calls, where === 'first-state' || where === 'token' ? 0 : 1, where);
+        if (where === 'first-state') assert.equal(tokens, 0);
+        if (where === 'retry-state') assert.equal(tokens, 1);
+    }
 });

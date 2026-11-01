@@ -42,7 +42,7 @@ public class PointCloudStreams {
     }
 
     @PostConstruct
-    public void start() { scheduler.scheduleAtFixedRate(this::tick, 100, 100, TimeUnit.MILLISECONDS); }
+    public void start() { scheduler.scheduleAtFixedRate(this::tick, 20, 20, TimeUnit.MILLISECONDS); }
 
     public void open(String username, String deviceId, String token,
                      HttpServletRequest request, HttpServletResponse response) throws IOException {
@@ -103,8 +103,8 @@ public class PointCloudStreams {
         boolean callbackSeen, closing, flushPending;
         PointCloudStore.Frame pending, lastSent;
         int offset;
-        long pendingAt, lastSentAt = openedAt - TimeUnit.MILLISECONDS.toNanos(100);
-        Long notReadyAt;
+        long progressAt, lastSentAt = openedAt - TimeUnit.MILLISECONDS.toNanos(100);
+        Long notReadyAt, closingAt;
 
         Client(String username, String deviceId, String token) {
             this.username = username; this.deviceId = deviceId; this.token = token;
@@ -123,7 +123,10 @@ public class PointCloudStreams {
             long now = store.clock.getAsLong();
             if (now - openedAt >= lifetimeNs || !jwt.validate(token) || !jwt.isUserToken(token) || store.latest(deviceId) == null)
                 closing = true;
-            if (pending != null && now - pendingAt > PointCloudStore.FRESH_NS) { close(); return; }
+            if (closing && closingAt == null) closingAt = now;
+            if ((closingAt != null && now - closingAt > PointCloudStore.FRESH_NS) ||
+                (pending != null && (now - progressAt > PointCloudStore.FRESH_NS ||
+                    now - pending.receivedAt() > TimeUnit.SECONDS.toNanos(4)))) { close(); return; }
             if (!callbackSeen || output == null) {
                 if (closing) close();
                 return;
@@ -138,7 +141,7 @@ public class PointCloudStreams {
             if (!closing && pending == null && now - lastSentAt >= TimeUnit.MILLISECONDS.toNanos(100)) {
                 PointCloudStore.Frame latest = store.latest(deviceId);
                 if (latest != null && latest != lastSent) {
-                    pending = latest; pendingAt = now; offset = 0; flushPending = true;
+                    pending = latest; progressAt = now; lastSentAt = now; offset = 0; flushPending = true;
                 }
             }
             drain();
@@ -149,12 +152,12 @@ public class PointCloudStreams {
             while (active.get() && output.isReady() && offset < pending.data().length) {
                 int count = Math.min(4096, pending.data().length - offset);
                 output.write(pending.data(), offset, count);
-                offset += count;
+                offset += count; progressAt = store.clock.getAsLong();
             }
             if (active.get() && offset == pending.data().length && output.isReady()) {
-                if (flushPending) { output.flush(); flushPending = false; }
+                if (flushPending) { output.flush(); flushPending = false; progressAt = store.clock.getAsLong(); }
                 if (output.isReady()) {
-                    lastSent = pending; pending = null; lastSentAt = store.clock.getAsLong();
+                    lastSent = pending; pending = null;
                     if (closing) close();
                 }
             }

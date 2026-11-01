@@ -63,6 +63,7 @@ export function connectPointCloud({ deviceId, getToken, onFrame, onState,
     let currentState = 'CONNECTING', failure = null, lastPublishedAt = null, consumerFailed = false;
     const timers = new Set();
     const emitState = (state) => {
+        if (stopped) return;
         currentState = state;
         if (!stopped) onState({ state, error: failure });
     };
@@ -124,6 +125,7 @@ export function connectPointCloud({ deviceId, getToken, onFrame, onState,
     };
 
     const done = (async () => {
+        await Promise.resolve();
         let failures = 0;
         while (!stopped) {
             if (consumerFailed) { failure = 'Point-cloud consumer callback failed'; emitState('ERROR'); return; }
@@ -135,9 +137,11 @@ export function connectPointCloud({ deviceId, getToken, onFrame, onState,
             try {
                 failure = null;
                 emitState('CONNECTING');
+                if (stopped) break;
                 let token;
                 try { token = getToken(); }
                 catch { permanent = true; failure = 'Authentication callback failed'; throw new Error(failure); }
+                if (stopped) break;
                 if (typeof token !== 'string' || !token) { permanent = true; failure = 'Authentication required'; throw new Error(failure); }
                 const attempt = controller;
                 const response = await timed(Promise.resolve(fetchImpl(`/api/devices/${encodeURIComponent(deviceId)}/point-cloud/stream`, {
