@@ -622,6 +622,7 @@ def main():
     camera_control_manager = None
     camera_vision = None
     spring_telemetry = None
+    point_cloud_uploader = None
     manual_control_manager = None
     mode_control_manager = None
     patrol_zone_manager = None
@@ -763,6 +764,15 @@ def main():
         else:
             print("SpringTelemetry: disabled (set SPRING_TELEMETRY_ENABLED=true to enable)")
 
+        if SPRING_TELEMETRY_ENABLED and runtime.point_cloud_manager is not None:
+            try:
+                from robot.point_cloud_uploader import start_point_cloud_uploader
+                point_cloud_uploader = start_point_cloud_uploader(
+                    runtime.point_cloud_manager, True,
+                    DEVICE_SERIAL_NUMBER, DEVICE_KEY, SPRING_API_BASE_URL)
+            except Exception as error:
+                logger.log_error("Main.point_cloud_upload_init", type(error).__name__)
+
         # Display control instructions
         print("Robot Control Interface")
         print("Press 'c' to start patrol zone calibration")
@@ -801,54 +811,68 @@ def main():
         logger.log_error("Main.init", str(e))
         print(f"Failed to initialize: {e}")
     finally:
-        if runtime is not None and runtime.point_cloud_manager is not None:
+        if point_cloud_uploader is not None:
             try:
-                runtime.point_cloud_manager.close()
+                point_cloud_uploader.request_stop()
             except Exception as error:
-                logger.log_error("Main.point_cloud_shutdown", str(error))
-        if fire_detection_stop_event is not None:
-            fire_detection_stop_event.set()
-        if fire_detection_thread is not None:
+                logger.log_error("Main.point_cloud_upload_stop", str(error))
+        try:
+            if runtime is not None and runtime.point_cloud_manager is not None:
+                try:
+                    runtime.point_cloud_manager.close()
+                except Exception as error:
+                    logger.log_error("Main.point_cloud_shutdown", str(error))
+            if fire_detection_stop_event is not None:
+                fire_detection_stop_event.set()
+            if fire_detection_thread is not None:
+                try:
+                    fire_detection_thread.join(timeout=FIRE_DETECTION_INTERVAL_SECONDS + 1.0)
+                except Exception:
+                    pass
+            # Clean up resources in reverse initialization order.
+            # camera_control_manager.close() must precede _servo_manager.shutdown_servos()
+            # because the camera uses the shared front PCA9685 driver owned by servo_manager.
+            if camera_control_manager is not None:
+                camera_control_manager.close()
+            if _servo_manager is not None:
+                try:
+                    _servo_manager.shutdown_servos()
+                except Exception:
+                    pass
+            if _kb_controller is not None:
+                try:
+                    _kb_controller.stop()
+                    _kb_controller.cleanup()
+                except Exception:
+                    pass
+            if spring_telemetry is not None:
+                try:
+                    spring_telemetry.stop()
+                except Exception:
+                    pass
+            if keyboard_input is not None:
+                keyboard_input.restore()
+            if camera_vision is not None:
+                try:
+                    camera_vision.release()
+                except Exception:
+                    pass
+            if runtime is not None:
+                try:
+                    runtime.close()
+                except Exception:
+                    pass
+        finally:
             try:
-                fire_detection_thread.join(timeout=FIRE_DETECTION_INTERVAL_SECONDS + 1.0)
-            except Exception:
-                pass
-        # Clean up resources in reverse initialization order.
-        # camera_control_manager.close() must precede _servo_manager.shutdown_servos()
-        # because the camera uses the shared front PCA9685 driver owned by servo_manager.
-        if camera_control_manager is not None:
-            camera_control_manager.close()
-        if _servo_manager is not None:
-            try:
-                _servo_manager.shutdown_servos()
-            except Exception:
-                pass
-        if _kb_controller is not None:
-            try:
-                _kb_controller.stop()
-                _kb_controller.cleanup()
-            except Exception:
-                pass
-        if spring_telemetry is not None:
-            try:
-                spring_telemetry.stop()
-            except Exception:
-                pass
-        if keyboard_input is not None:
-            keyboard_input.restore()
-        if camera_vision is not None:
-            try:
-                camera_vision.release()
-            except Exception:
-                pass
-        if runtime is not None:
-            try:
-                runtime.close()
-            except Exception:
-                pass
-        if logger is not None:
-            logger.log_system_state("STOPPED")
-            logger.close()
+                if point_cloud_uploader is not None:
+                    try:
+                        point_cloud_uploader.close()
+                    except Exception as error:
+                        logger.log_error("Main.point_cloud_upload_shutdown", str(error))
+            finally:
+                if logger is not None:
+                    logger.log_system_state("STOPPED")
+                    logger.close()
 
 if __name__ == "__main__":
     main()

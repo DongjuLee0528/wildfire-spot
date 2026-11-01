@@ -287,10 +287,37 @@ class MainCleanupTests(unittest.TestCase):
                        '<main cleanup only>', 'exec')
 
     def environment(self):
-        env = dict.fromkeys(('fire_detection_stop_event', 'fire_detection_thread', 'camera_control_manager',
+        env = dict.fromkeys(('point_cloud_uploader', 'fire_detection_stop_event', 'fire_detection_thread', 'camera_control_manager',
                              '_servo_manager', '_kb_controller', 'spring_telemetry', 'keyboard_input', 'camera_vision'))
         env.update(runtime=mock.Mock(), logger=mock.Mock())
         return env
+
+    def test_upload_stop_is_first_but_network_join_is_after_hardware(self):
+        env = self.environment()
+        order = []
+        env['point_cloud_uploader'] = mock.Mock()
+        env['point_cloud_uploader'].request_stop.side_effect = lambda: order.append('upload-stop')
+        def join_upload():
+            order.append('upload-join')
+            raise RuntimeError('upload cleanup failed')
+        env['point_cloud_uploader'].close.side_effect = join_upload
+        env['runtime'].point_cloud_manager.close.side_effect = lambda: order.append('receiver')
+        env['camera_control_manager'] = mock.Mock()
+        env['camera_control_manager'].close.side_effect = lambda: order.append('camera')
+        exec(self.cleanup_body(), env)
+        self.assertEqual(order, ['upload-stop', 'receiver', 'camera', 'upload-join'])
+        env['logger'].log_error.assert_called_once_with('Main.point_cloud_upload_shutdown', 'upload cleanup failed')
+
+    def test_upload_join_is_guaranteed_when_other_cleanup_raises(self):
+        env = self.environment()
+        env['point_cloud_uploader'] = mock.Mock()
+        env['camera_control_manager'] = mock.Mock()
+        env['camera_control_manager'].close.side_effect = RuntimeError('camera failure')
+        with self.assertRaisesRegex(RuntimeError, 'camera failure'):
+            exec(self.cleanup_body(), env)
+        env['point_cloud_uploader'].request_stop.assert_called_once()
+        env['point_cloud_uploader'].close.assert_called_once()
+        env['logger'].close.assert_called_once()
 
     def test_point_cloud_stops_before_unrelated_cleanup_failure(self):
         env = self.environment()
