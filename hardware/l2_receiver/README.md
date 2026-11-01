@@ -133,7 +133,8 @@ parsing accuracy, Jetson performance, or hardware behavior.
 `hardware.point_cloud_manager.PointCloudManager`. It starts the receiver in a
 background worker without delaying camera/fire startup. The existing 2D
 `lidar_manager` remains uninitialized; no second UDP receiver is added. L2
-point-cloud state is not yet exposed through FastAPI, Spring, or the web UI.
+frames now reach Spring and the web panel through the dedicated uploader;
+manager restart/error state is not exposed through the HTTP status APIs.
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
@@ -180,7 +181,8 @@ keeps the original error context, and disables further automatic restarts. A
 child that cannot be reaped remains an error and blocks another start. Repeated
 start while running and repeated close are idempotent. main.py explicitly
 closes this manager before unrelated hardware cleanup; RuntimeContext.close()
-also closes it safely. Normal q/Ctrl+C shutdown paths are covered; SIGKILL,
+also closes it safely. Main normally enters cleanup on q; Ctrl-C only interrupts when the terminal
+is not in raw mode. q is not an immediate motion stop. SIGKILL,
 parent crashes, OS/kernel stalls, and a child that cannot be killed/reaped
 cannot be guaranteed clean shutdown. No physical sensor reset/reconfiguration
 is attempted for recovery.
@@ -204,3 +206,6 @@ Tests do not run main.py or the real SDK library. They cover framing, invalid in
 staleness, bounded restart/recovery, stderr backpressure, process termination,
 and runtime ownership/shutdown ordering. Actual Jetson integration and workload
 performance remain unverified until hardware testing.
+
+For target trials use [Jetson validation](../../docs/jetson-validation.md).
+For configuration, terminal sessions and recovery use [operations](../../docs/operations.md).

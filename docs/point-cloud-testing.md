@@ -111,7 +111,8 @@ external services.
 
 Helper failure regressions use stub managers, uploaders, SDK headers and a fake
 compiler; they perform no network or sensor access. They assert that malformed
-commands, compiler errors and manager/uploader cleanup failures after stdin EOF
+commands (including a deterministically synchronized post-compile reader error),
+compiler errors and manager/uploader cleanup failures after stdin EOF
 exit nonzero. Cleanup errors are retained across repeated cleanup calls, rather
 than being treated as requested cancellation. The fake SDK also rejects unknown
 control-file words instead of silently emitting normal frames.
@@ -151,5 +152,6 @@ conditions fail the task; they are not successful cleanup evidence.
 Passing software tests does not verify Jetson ABI/linking with the real SDK,
 L2 data timing, physical sensor alignment, real GPU/touch behavior, production
 proxy buffering, bandwidth, actual frame rate or AI/video coexistence. Those
-belong to step 6. Include the 20ms Spring stream scheduler's JWT work in the
-load measurement. Operator startup/deployment instructions remain step 7.
+belong to [step 6 validation](jetson-validation.md), currently NOT RUN. Include
+the 20ms Spring stream scheduler's JWT work in the load measurement. See the
+[step 7 operations runbook](operations.md) for startup/deployment instructions.

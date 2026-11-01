@@ -45,6 +45,55 @@ class PipelineHelperFailureTests(unittest.TestCase):
             finally:
                 self.finish(process)
 
+    def test_malformed_command_after_compile_is_not_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, env = self.setup_files(directory)
+            driver = '''import sys, runpy, json, threading, subprocess, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+gate, error_seen = Path(sys.argv[3]), Path(sys.argv[4])
+original_set, original_poll = threading.Event.set, subprocess.Popen.poll
+armed = False
+def observed_set(event):
+    original_set(event)
+    if isinstance(sys.exc_info()[1], json.JSONDecodeError) and threading.current_thread().name == 'pipeline-commands':
+        error_seen.touch()
+def gated_poll(process):
+    global armed
+    result = original_poll(process)
+    if result == 0 and not armed:
+        armed = True
+        gate.touch()
+        deadline = time.monotonic() + 5
+        while not error_seen.exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Reader-error synchronization failed')
+            time.sleep(0.01)
+    return result
+threading.Event.set = observed_set
+subprocess.Popen.poll = gated_poll
+runpy.run_path(sys.argv[2], run_name='__main__')
+'''
+            gate, error_seen = Path(directory) / 'compiled', Path(directory) / 'reader-error'
+            process = subprocess.Popen([sys.executable, '-c', driver, str(ROOT), str(HELPER), str(gate), str(error_seen)],
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+            try:
+                process.stdin.write(json.dumps(config).encode() + b'\n'); process.stdin.flush()
+                deadline = time.monotonic() + 5
+                while not gate.exists():
+                    self.assertIsNone(process.poll(), 'Helper exited before compile gate')
+                    self.assertLess(time.monotonic(), deadline, 'Compile gate timed out')
+                    time.sleep(0.01)
+                process.stdin.write(b'{bad json}\n'); process.stdin.flush()
+                process.wait(timeout=5)
+                self.assertTrue(error_seen.exists(), 'Reader error was not synchronized')
+                output, diagnostic = process.stdout.read(), process.stderr.read()
+                replies = [json.loads(line) for line in output.splitlines()]
+                self.assertEqual(process.returncode, 1, (process.returncode, replies, diagnostic.decode()))
+                self.assertTrue(any(reply['event'] == 'error' and 'JSONDecodeError' in reply['message'] for reply in replies), replies)
+            finally:
+                self.finish(process)
+
     def cleanup_failure_on_eof(self, failing):
         with tempfile.TemporaryDirectory() as directory:
             config, env = self.setup_files(directory)

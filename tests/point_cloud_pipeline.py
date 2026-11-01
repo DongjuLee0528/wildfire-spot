@@ -189,6 +189,8 @@ def main():
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=2)
         if stopping():
+            if reader_error:
+                raise ValueError('Command reader failed: ' + ','.join(reader_error))
             return 0
         control = directory / 'scenario'
 

@@ -383,6 +383,14 @@ Start TensorBoard with:
 tensorboard --logdir /workspace/runs
 ```
 
+## L2 Point-Cloud Viewer
+
+The dashboard receives current 3D L2 frames below the keyboard controls without ROS2.
+This is a live view, not accumulated mapping or validated obstacle avoidance.
+See [hardware-free tests](docs/point-cloud-testing.md),
+[Jetson validation (not yet run)](docs/jetson-validation.md), and
+[deployment and operations](docs/operations.md).
+
 ## Testing
 
 The repository contains tests for robot-control and server-integration behaviour, including:

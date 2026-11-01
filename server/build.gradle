@@ -55,7 +55,7 @@ tasks.register('pointCloudE2e', Test) {
     }
     afterSuite { descriptor, result ->
         if (!descriptor.parent && (result.testCount < 1 || result.skippedTestCount != 0)) {
-            throw new GradleException('Point cloud E2E requires executed tests with zero failures and zero skips.')
+            throw new GradleException('Point cloud E2E requires at least one test and zero skipped tests; failures are enforced by ignoreFailures=false.')
         }
     }
     testLogging { events 'passed', 'failed', 'skipped'; showStandardStreams = true; exceptionFormat = 'full' }
