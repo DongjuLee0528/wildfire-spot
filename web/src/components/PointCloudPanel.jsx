@@ -48,9 +48,9 @@ export default function PointCloudPanel({ deviceId }) {
             <div className="point-cloud-viewport">
                 <div className="point-cloud-surface" ref={viewport} />
                 {deviceId && !unavailable && <div className="point-cloud-view-info">
-                    <strong>{sensorView ? 'Sensor view · origin (0, 0, 0) m' : 'Overview · outside the cloud'}</strong>
+                    <strong>{sensorView ? 'Sensor view · origin (0, 0, 0) m' : 'Overview · orbit around target'}</strong>
                     <span>{sensorView ? `Looking: ${direction} · Heading ${heading.toFixed(0)}° · Elevation ${(status.view?.elevation ?? 0).toFixed(0)}° · FOV ${(status.view?.fov ?? 75).toFixed(0)}°` :
-                        `Camera to target: ${(status.view?.distance ?? 65).toFixed(1)} m`}</span>
+                        `Camera to target: ${(status.view?.distance ?? 65).toPrecision(3)} m`}</span>
                 </div>}
                 {(!deviceId || !live || status.pointCount === 0) && (
                     <div className="point-cloud-message">

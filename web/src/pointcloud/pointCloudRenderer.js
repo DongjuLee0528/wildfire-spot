@@ -200,7 +200,10 @@ export function createPointCloudRenderer(canvas, onError, { accumulate = false, 
         const zoom = factor => {
             if (!Number.isFinite(factor) || factor <= 0) return;
             if (mode === 'sensor') fov = Math.max(30, Math.min(110, fov * factor));
-            else distance = Math.max(2, Math.min(100, distance * factor));
+            else {
+                const nextDistance = distance * factor;
+                if (nextDistance >= 2 ** -1022) distance = Math.min(100, nextDistance);
+            }
             schedule();
         };
         listen(canvas, 'pointerdown', event => {

@@ -183,12 +183,19 @@ The narrower viewport dimension sets that field of view. The HUD reports sensor
 heading/elevation/FOV, not geographic compass bearing. +X/front, -X/rear,
 +Y/left, -Y/right and +Z/up follow the sensor axes and mounting.
 
-Overview restores the external orbit camera and fits the displayed bounds.
+Overview uses an orbit camera targeting the displayed bounds, fitted on entry.
+Manual zoom can move this camera inside the cloud.
 Fit scene switches to overview and refits while preserving the viewing angle;
 Reset view restores the selected mode's starting angle and zoom. New frames do
 not continually move either camera. A65m origin-centered external camera is the
 fallback before a nonempty frame. Sensor view never recenters on cloud bounds.
 Changing view mode does not reconnect or change the received point count.
+Manual Overview zoom has no user-facing minimum target distance. Products
+below the normal Float64 range are ignored so ordinary button zoom-out remains
+numerically reversible. Repeated deep zoom requires proportional zoom-out;
+Reset view restores a fitted distance immediately. Automatic fit/reset
+still starts from a scene-fitting distance. The existing0.1m near clipping plane
+can hide points extremely close to the camera; this is distinct from a zoom stop.
 
 Point color represents sensor Z height using blue, cyan, yellow and red. Its
 range is set from the fitted frame's minimum/maximum Z, with a minimum0.5m span

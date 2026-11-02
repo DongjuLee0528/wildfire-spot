@@ -68,7 +68,7 @@ test('on-demand orbit/zoom/reset, size cap, zero-size and input cleanup', () => 
     const env = environment(), renderer = createPointCloudRenderer(env.canvas, assert.fail);
     env.flush(); assert.equal(env.callbacks.size, 0);
     renderer.orbit(100, 100); renderer.zoom(0.0001); env.flush();
-    assert.equal(env.calls.filter(call => call[0] === 'uniform1f' && call[1] === 'distance').at(-1)[2], 2);
+    assert.equal(env.calls.filter(call => call[0] === 'uniform1f' && call[1] === 'distance').at(-1)[2], DEFAULT_VIEW_DISTANCE * 0.0001);
     assert.deepEqual(env.calls.filter(call => call[0] === 'uniform3fv' && call[1] === 'eye').at(-1)[2], cameraBasis((-Math.PI / 4 + 100) % (Math.PI * 2), 1.45).eye);
     renderer.reset(); renderer.zoom(10000);
     env.canvas.getBoundingClientRect = () => ({ width: 10000, height: 10000 }); env.flush();
@@ -389,4 +389,29 @@ test('sensor pointer drag turns right/down without moving origin and cancellatio
     const before = views.length;
     env.events.get('pointermove')({ pointerId: 1, clientX: 80, clientY: 50 }); env.flush();
     assert.equal(views.length, before); renderer.destroy();
+});
+
+
+test('Overview zoom crosses two meters and continues to numeric precision limits with ordinary zoom-out recovery', () => {
+    const env = environment(), renderer = createPointCloudRenderer(env.canvas, assert.fail);
+    renderer.setFrame(cloudFrame([[0, 0, 0], [1, 1, 1]]));
+    for (let i = 0; i < 100; i++) renderer.zoom(0.8);
+    env.flush();
+    let distance = lastUniform(env, 'uniform1f', 'distance');
+    assert.ok(distance > 0 && distance < 1e-8);
+    renderer.zoom(Number.MIN_VALUE); env.flush();
+    assert.equal(lastUniform(env, 'uniform1f', 'distance'), distance);
+    for (let i = 0; i < 4000; i++) renderer.zoom(0.8);
+    env.flush(); distance = lastUniform(env, 'uniform1f', 'distance');
+    assert.ok(distance >= 2 ** -1022 && distance < 1e-300);
+    renderer.zoom(1.25); env.flush();
+    assert.ok(lastUniform(env, 'uniform1f', 'distance') > distance);
+    renderer.zoom(1e308); env.flush();
+    renderer.zoom(100); env.flush();
+    assert.equal(lastUniform(env, 'uniform1f', 'distance'), 100);
+    for (const invalid of [0, -1, NaN, Infinity]) renderer.zoom(invalid);
+    env.flush(); assert.equal(lastUniform(env, 'uniform1f', 'distance'), 100);
+    renderer.reset(); env.flush();
+    assert.ok(lastUniform(env, 'uniform1f', 'distance') >= 2);
+    renderer.destroy();
 });
