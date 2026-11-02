@@ -436,7 +436,7 @@ async def get_camera_stream():
 
     Each frame has bounding boxes drawn from the latest fire/smoke detection
     results via draw_overlay_on_frame(). Returns a multipart/x-mixed-replace
-    response at ~30 fps. Stops automatically after 30 consecutive frame-read failures.
+    response at ~30 fps. Waits through temporary frame gaps until camera shutdown.
     """
     try:
         import cv2 as _cv2
@@ -448,16 +448,13 @@ async def get_camera_stream():
 
     async def _generate():
         """Async generator that yields MJPEG boundary-delimited JPEG frames."""
-        consecutive_failures = 0
-        _MAX_FAILURES = 30
-        while True:
+        while _camera_vision is not None and _camera_vision.is_camera_available():
             try:
                 frame = _camera_vision.draw_overlay_on_frame(_camera_vision.read_frame())
             except Exception as e:
                 logger.warning("camera stream read_frame failed: %s", e)
                 break
             if frame is not None:
-                consecutive_failures = 0
                 try:
                     ok, buf = _cv2.imencode(".jpg", frame)
                     if ok:
@@ -470,11 +467,6 @@ async def get_camera_stream():
                         )
                 except Exception as e:
                     logger.warning("camera stream encode failed: %s", e)
-            else:
-                consecutive_failures += 1
-                if consecutive_failures >= _MAX_FAILURES:
-                    logger.warning("camera stream stopping: %d consecutive None frames", consecutive_failures)
-                    break
             await asyncio.sleep(0.033)  # ~30 fps target frame rate
 
     return StreamingResponse(

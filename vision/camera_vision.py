@@ -16,7 +16,7 @@ from utils.config import (
     CAMERA_IOU_THRESHOLD,
     CAMERA_FIRE_CLASSES,
 )
-import threading
+from vision.frame_capture import SharedFrameCapture
 from utils.logger import WildfireLogger
 
 try:
@@ -93,12 +93,10 @@ class CameraVision:
         usable so callers can check is_available() before proceeding.
         """
         self.logger = WildfireLogger("CameraVision")
-        self._cap = None
         self._model = None
         self._latest_result = _empty_result()
-        self._latest_frame = None
 
-        self._camera_lock = threading.Lock()
+        self._capture = None
         self._latest_overlay_frame = None
         self._camera_available = False  # True after VideoCapture is successfully opened
         self._model_available = False    # True after YOLO model is loaded from MODEL_PATH
@@ -106,6 +104,7 @@ class CameraVision:
         if cv2 is None:
             self.logger.log_error("CameraVision.__init__", "opencv-python (cv2) is not installed")
         else:
+            cap = None
             try:
                 cap = cv2.VideoCapture(CAMERA_DEVICE)
                 if cap.isOpened():
@@ -113,13 +112,24 @@ class CameraVision:
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
                     cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
-                    self._cap = cap
+                    self._capture = SharedFrameCapture(cap, fps=CAMERA_FPS)
+                    self._capture.start()
                     self._camera_available = True
                 else:
-                    cap.release()
+                    unopened, cap = cap, None
+                    unopened.release()
                     self.logger.log_error("CameraVision.__init__", f"Cannot open camera device: {CAMERA_DEVICE}")
             except Exception as e:
+                if self._capture is None and cap is not None:
+                    try:
+                        cap.release()
+                    except Exception as release_error:
+                        self.logger.log_error("CameraVision.__init__", f"Camera release error: {release_error}")
+                self._camera_available = False
                 self.logger.log_error("CameraVision.__init__", f"Camera init error: {e}")
+            except BaseException:
+                self._release_interrupted_initialization(cap)
+                raise
 
         if YOLO is None:
             self.logger.log_error("CameraVision.__init__", "ultralytics is not installed")
@@ -129,48 +139,50 @@ class CameraVision:
                 self._model_available = True
             except Exception as e:
                 self.logger.log_error("CameraVision.__init__", f"Model load error ({MODEL_PATH}): {e}")
+            except BaseException:
+                self._release_interrupted_initialization()
+                raise
+
+    def _release_interrupted_initialization(self, capture=None):
+        self._camera_available = False
+        try:
+            if self._capture is not None:
+                self._capture.close()
+            elif capture is not None:
+                capture.release()
+        except Exception as error:
+            self.logger.log_error("CameraVision.init_cleanup", type(error).__name__)
 
     def is_available(self) -> bool:
         """Return True only if both camera and model are ready for inference."""
-        return self._camera_available and self._model_available
+        return self.is_camera_available() and self._model_available
 
     def is_camera_available(self) -> bool:
         """Return True if the camera device is open and ready to capture frames."""
-        return self._camera_available and self._cap is not None
+        return (self._camera_available and self._capture is not None and
+                self._capture.get_status()['state'] not in ('STOPPED', 'ERROR'))
 
     def get_latest_frame(self):
         """
-        Return the most recently captured frame, or None if no frame has been captured.
+        Return a copy of the latest fresh shared frame, or None.
 
         Returns:
             numpy ndarray (BGR) or None.
         """
-        return self._latest_frame
+        snapshot = self.get_frame_snapshot()
+        return None if snapshot is None else snapshot.frame
+
+    def get_frame_snapshot(self, after_sequence=None):
+        if self._capture is None or not self._camera_available:
+            return None
+        return self._capture.get_latest(after_sequence)
 
     def read_frame(self):
-        """
-        Capture a single frame from the camera.
-
-        Returns:
-            numpy ndarray (BGR) on success, None if the camera is unavailable
-            or the read fails.
-        """
-        with self._camera_lock:
-            if not self._camera_available or self._cap is None:
-                return None
-            try:
-                ret, frame = self._cap.read()
-                if not ret or frame is None:
-                    return None
-                self._latest_frame = frame
-                return frame
-            except Exception as e:
-                self.logger.log_error("CameraVision.read_frame", str(e))
-                return None
+        return self.get_latest_frame()
 
     def detect(self) -> dict:
         """
-        Capture a frame from the camera and run fire/smoke detection.
+        Use the latest fresh shared camera frame for fire/smoke detection.
 
         Returns:
             Detection result dict. If camera or model is unavailable, or
@@ -178,7 +190,7 @@ class CameraVision:
         """
         frame = self.read_frame()
         if frame is None:
-            result = _empty_result(self._camera_available, self._model_available)
+            result = _empty_result(self.is_camera_available(), self._model_available)
             self._latest_result = _copy_result(result)
             return result
         return self.detect_from_frame(frame)
@@ -201,7 +213,7 @@ class CameraVision:
             - detections (list[dict]): per-detection details
         """
         result = {
-            "camera_available": self._camera_available,
+            "camera_available": self.is_camera_available(),
             "model_available": self._model_available,
             "detected": False,
             "fire_detected": False,
@@ -330,7 +342,7 @@ class CameraVision:
         if cv2 is None:
             self.logger.log_error("CameraVision.save_evidence_image", "cv2 not available")
             return None
-        frame = self._latest_overlay_frame if self._latest_overlay_frame is not None else self._latest_frame
+        frame = self._latest_overlay_frame if self._latest_overlay_frame is not None else self.get_latest_frame()
         if frame is None:
             self.logger.log_error("CameraVision.save_evidence_image", "no frame available")
             return None
@@ -376,15 +388,13 @@ class CameraVision:
         """
         Release the camera device.
 
-        Should be called during system shutdown. Safe to call if the camera
-        was never successfully opened.
+        Call during system shutdown, including after failed initialization.
+        Raises RuntimeError for capture, release or shutdown-timeout failures.
         """
-        with self._camera_lock:
-            if self._cap is not None:
-                try:
-                    self._cap.release()
-                except Exception as e:
-                    self.logger.log_error("CameraVision.release", str(e))
-                finally:
-                    self._cap = None
-                    self._camera_available = False
+        self._camera_available = False
+        if self._capture is not None:
+            try:
+                self._capture.close()
+            except Exception as error:
+                self.logger.log_error("CameraVision.release", str(error))
+                raise
