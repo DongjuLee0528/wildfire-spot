@@ -13,7 +13,7 @@
 
 namespace {
 volatile std::sig_atomic_t stopped = 0;
-void on_signal(int) { stopped = 1; }
+void on_signal(int number) { stopped = number; }
 using Clock = std::chrono::steady_clock;
 
 void install_signals() {
@@ -75,6 +75,7 @@ int main(int argc, char** argv) {
     unilidar_sdk2::UnitreeLidarReader* reader = nullptr;
     bool initialized = false;
     int result = 0;
+    std::uint64_t zero_timestamp_frames = 0;
     try {
         install_signals();
         std::fflush(stdout);
@@ -95,15 +96,21 @@ int main(int argc, char** argv) {
         unilidar_sdk2::PointCloudUnitree cloud;
         while (!stopped) {
             const int packet_type = reader->runParse();
+            if (stopped) break;
             if (packet_type == LIDAR_POINT_DATA_PACKET_TYPE && reader->getPointCloud(cloud)) {
-                const auto frame = wildfire::encode_frame(cloud);
-                write_frame(output, frame);
-                last_cloud = Clock::now();
+                if (cloud.stamp == 0) {
+                    if (++zero_timestamp_frames == 1)
+                        std::fprintf(stderr, "l2_receiver: Skipping cloud with unset SDK timestamp (0)\n");
+                } else {
+                    const auto frame = wildfire::encode_frame(cloud);
+                    write_frame(output, frame);
+                    last_cloud = Clock::now();
+                }
             } else {
-                if (Clock::now() - last_cloud > std::chrono::seconds(5))
-                    throw std::runtime_error("No complete 3D cloud received for 5 seconds");
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
+            if (!stopped && Clock::now() - last_cloud > std::chrono::seconds(5))
+                throw std::runtime_error("No complete 3D cloud with a valid timestamp received for 5 seconds");
         }
     } catch (const std::exception& error) {
         std::fprintf(stderr, "l2_receiver: %s\n", error.what());
@@ -112,11 +119,16 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "l2_receiver: Unknown SDK/runtime exception\n");
         result = 1;
     }
+    std::fprintf(stderr, "l2_receiver: Receive loop finished; signal=%d; skipped_zero_timestamps=%llu; result=%d\n",
+                 static_cast<int>(stopped), static_cast<unsigned long long>(zero_timestamp_frames), result);
     if (initialized) {
+        std::fprintf(stderr, "l2_receiver: SDK closeUDP begin\n");
         try {
             if (!reader->closeUDP()) {
                 std::fprintf(stderr, "l2_receiver: SDK closeUDP failed\n");
                 result = 1;
+            } else {
+                std::fprintf(stderr, "l2_receiver: SDK closeUDP complete\n");
             }
         } catch (const std::exception& error) {
             std::fprintf(stderr, "l2_receiver: SDK closeUDP exception: %s\n", error.what());
@@ -127,5 +139,8 @@ int main(int argc, char** argv) {
         }
     }
     if (output >= 0) close(output);
+    std::fflush(stdout);
+    std::fprintf(stderr, "l2_receiver: Exit result=%d; signal=%d; skipped_zero_timestamps=%llu\n",
+                 result, static_cast<int>(stopped), static_cast<unsigned long long>(zero_timestamp_frames));
     return result;
 }

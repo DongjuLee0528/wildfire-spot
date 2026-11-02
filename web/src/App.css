@@ -195,8 +195,10 @@ body {
 .camera-viewport {
     background-color: #07090c;
     position: relative;
-    flex-grow: 1;
-    min-height: 260px;
+    flex-grow: 0;
+    flex-shrink: 0;
+    min-height: 0;
+    aspect-ratio: 4 / 3;
     padding: 0;
     overflow: hidden;
 }
@@ -228,7 +230,7 @@ body {
 .camera-stream-img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
 }
 
@@ -1459,10 +1461,6 @@ body {
         order: 9;
     }
 
-    .camera-viewport {
-        max-height: 260px;
-    }
-
     .log-terminal {
         height: auto;
         min-height: 120px;
@@ -1704,10 +1702,6 @@ body {
         margin: 0 14px 10px;
     }
 
-    .camera-viewport {
-        max-height: 200px;
-    }
-
     .command-layout {
         flex-direction: column;
         gap: 14px;
@@ -1753,11 +1747,17 @@ body {
 .point-cloud-controls button { min-width: 36px; min-height: 36px; padding: 5px 9px; border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-main); background: var(--bg-panel-header); cursor: pointer; }
 .point-cloud-controls button:hover:not(:disabled), .point-cloud-controls button:focus-visible { border-color: var(--accent-color); outline: 2px solid var(--accent-glow); }
 .point-cloud-controls button:disabled { opacity: 0.45; cursor: default; }
+.point-cloud-accumulation { display: inline-flex; align-items: center; gap: 8px; color: #b8c7d8; font-size: 0.75rem; }
+.point-cloud-accumulation input { accent-color: var(--accent-color); }
 .point-cloud-hint { padding: 8px 14px 12px; color: #9cabbc; font-size: 0.75rem; }
 @media (max-width: 1199px) {
     .point-cloud-panel { order: 10; grid-column: 1 / -1; }
 }
 @media (max-width: 767px) {
-    .camera-viewport { min-height: 200px; }
     .point-cloud-controls { gap: 12px; }
 }
+
+.point-cloud-view-info { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; color: #c6d7e8; font-size: 0.75rem; text-shadow: 0 1px 3px #000; }
+.point-cloud-view-info strong { color: #d6edf5; }
+.point-cloud-controls button[aria-pressed="true"] { border-color: var(--accent-color); color: var(--accent-color); }
+.point-cloud-accumulation select { background: var(--bg-panel-header); color: var(--text-main); border: 1px solid var(--border-color); min-height: 36px; padding: 4px 8px; }

@@ -133,8 +133,11 @@ behavior. Record inferred retries and confirm warning visibility on the target;
 absence of a visible warning is not proof of zero retries.
 
 In the owning user's dashboard, select the registered device. The point-cloud
-panel below keyboard controls must show fresh changing scene data. Orbit, zoom
-and reset affect the view only. There is no range slider; filtering is fixed at
+panel below keyboard controls must show fresh changing scene data. Sensor view
+starts at the L2 origin looking +X; confirm physical mounting against a known
+front/rear object. Look/zoom/reset and Overview affect only the view. For a
+stationary sensor compare0.5s and1s accumulation, moving-person trails, scene
+visibility and CPU/GPU load; raw coordinates are not motion-compensated. There is no range slider; filtering is fixed at
 30m. Green generic system-health indicators do not prove L2 reception. The
 legacy 2D LiDAR status may be unavailable because its manager is intentionally
 not initialized. The live 3D feature is not SLAM, mapping accumulation or an

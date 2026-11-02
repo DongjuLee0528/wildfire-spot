@@ -30,8 +30,18 @@ still wait up to its own timeout before legacy servo shutdown; physical shutdown
 behavior needs its separate hardware review/testing before deployment. No import starts a network worker.
 
 The uploader owns one requests.Session (not shared with SpringTelemetry), selects
-only the latest fresh frame before every send, and sends at most 10Hz. A frame
-is not resent solely because its SDK ID is repeated; object identity tracks
+only the latest fresh frame before every send, and spaces frame POST attempts
+at least 100ms apart by monotonic start deadlines, including an authentication
+refresh retry. Request duration counts toward that interval. After a response,
+the next deadline also stays at least 50ms ahead of the current monotonic time
+to respect the server's 50ms receive-admission spacing when upload latency varies;
+successful requests no longer incur an additional fixed 100ms wait. Missed deadlines do not queue or
+create catch-up bursts. Each request reselects the current fresh frame after the
+cadence wait and after authentication. Healthy cadence waits retain STREAMING;
+CONNECTING denotes login or an actual frame POST. The worker polls an unchanged fresh source
+at 10ms intervals, and an absent/stale source at 100ms intervals; waits remain
+stop-interruptible. A frame is not resent solely because its SDK ID is repeated;
+object identity tracks
 already-sent frames. The server returns exact HTTP204 with no body, consumed so
 the connection is reused. Redirects are disabled. Login JSON is bounded to8192
 bytes. Keys/tokens/raw frames/response bodies are not logged.
@@ -157,30 +167,93 @@ They never run real main.py/SDK, connect to a Jetson, or access physical devices
 ## Web 3D viewer
 
 The dashboard places a live point-cloud panel below manual keyboard control,
-including tablet and mobile layouts. It draws the latest validated frame only,
-up to12000 points, using native WebGL with fixed GPU buffers. No production
+including tablet and mobile layouts. By default it draws only the latest validated
+frame, up to12000 points, using native WebGL with fixed GPU buffers. No production
 package is added.30m is the fixed sensor data filter, not a display range slider
 or a guarantee of detection on every surface. This is individual-frame point
 visualization, not meshing, mapping, SLAM or fire detection from LiDAR.
 
 Raw sensor XYZ is unchanged and Z is shown up; physical mounting alignment is
-not calibrated here. The grid spacing is5m, the colored short axes mark XYZ at
-the sensor origin, and point color represents sensor Z height, from blue at
--3m to amber at+5m, clamped beyond that interval. Default and Reset view fit
-the30m sphere with a65m camera distance; the narrower viewport dimension
-sets the field of view so portrait canvases also fit it. User zoom can crop
-points without changing the received count. There is no
-intensity channel or invented data. Drag to orbit, scroll to zoom, or use the
-labeled orbit/zoom/reset buttons. These controls never send robot commands.
+not calibrated here. Overview grid spacing is5m; colored short axes mark XYZ at the
+sensor origin. Sensor view is the dashboard default: the camera stays at
+(0,0,0), initially looking along +X with +Z up and -Y to screen right. Dragging
+looks around; arrow buttons turn left/right/up/down. Scroll and +/- change the
+field of view from30 to110 degrees (default75) without moving the camera.
+The narrower viewport dimension sets that field of view. The HUD reports sensor
+heading/elevation/FOV, not geographic compass bearing. +X/front, -X/rear,
++Y/left, -Y/right and +Z/up follow the sensor axes and mounting.
+
+Overview uses an orbit camera targeting the displayed bounds, fitted on entry.
+Manual zoom can move this camera inside the cloud.
+Fit scene switches to overview and refits while preserving the viewing angle;
+Reset view restores the selected mode's starting angle and zoom. New frames do
+not continually move either camera. A65m origin-centered external camera is the
+fallback before a nonempty frame. Sensor view never recenters on cloud bounds.
+Changing view mode does not reconnect or change the received point count.
+Manual Overview zoom has no user-facing minimum target distance. Products
+below the normal Float64 range are ignored so ordinary button zoom-out remains
+numerically reversible. Repeated deep zoom requires proportional zoom-out;
+Reset view restores a fitted distance immediately. Automatic fit/reset
+still starts from a scene-fitting distance. The existing0.1m near clipping plane
+can hide points extremely close to the camera; this is distinct from a zoom stop.
+
+Point color represents sensor Z height using blue, cyan, yellow and red. Its
+range is set from the fitted frame's minimum/maximum Z, with a minimum0.5m span
+for flat clouds; subsequent values outside that range are clamped. Fitting or
+resetting updates this color range, not the underlying XYZ coordinates. Colors
+are relative to the fitted scene, not a fixed absolute-height legend. Point
+sprites target2 CSS pixels, bounded by the WebGL device's supported size.
+There is no intensity channel or invented data. Overview drag/scroll orbit and
+change target distance; sensor-view controls look around and change FOV. These controls never send robot commands.
 Existing dashboard WASD/Escape robot shortcuts remain unchanged.
 
-Only a new frame or a view/size change schedules a draw; there is no idle render
-loop. CPU staging capacity and GPU cloud buffer are fixed at12000 XYZ triples;
-the latest update replaces previous points. Device pixel ratio is capped at2,
-and drawing dimensions at2048px per axis. A valid zero-point frame clears old
+A new frame, view/size change, or accumulation-expiration timer schedules a draw.
+Single-frame mode has no idle render loop. Accumulation schedules animation frames
+while unexpired points need fading, using receipt age in a shader without
+re-uploading XYZ on each animation frame. No draw loop remains after clearing. In single-frame mode CPU staging capacity and GPU cloud buffer are fixed
+at12000 XYZ triples; the latest update replaces previous points. Device pixel ratio is capped at2,
+and drawing dimensions at2048px per axis with a shared scale to preserve aspect. A valid zero-point frame clears old
 points and says no points; stale, retry and terminal failure clear the cloud.
 A healthy connection rotation preserves a still-fresh cloud while showing
 Reconnecting. Only onFrame(null), not CONNECTING by itself, clears the cloud.
+
+Accumulation is an optional, off-by-default browser display mode for a stationary
+sensor. Trail window selects500ms/5 distinct frames/60000 points or
+1000ms/10 distinct frames/120000 points; the dashboard defaults to1s when enabled.
+The library default remains500ms for existing callers. Retention uses browser
+monotonic receipt time, not sensor timestamps. Point brightness fades linearly
+toward the background over the selected window; expiration removes points.
+History frames draw oldest to newest with depth cleared between frames, so
+latest observations take precedence over old trails while each frame retains
+its own depth ordering. Overlap between frames is temporal priority, not a
+physically occlusion-correct merged map. In accumulated Overview, grid/axes are
+background reference guides: clearing depth for history also lets points cover
+those guides irrespective of their relative depth. They are not occluding
+geometry. Single-frame Overview retains its ordinary depth ordering.
+Sensor view hides the origin-plane grid,
+which cannot provide distance cues from a camera on that plane.
+Each source frame still obeys the12000-point wire limit. Raw XYZ is not transformed,
+and no points are interpolated. Source cloud ID plus timestamp identifies repeated
+frames: duplicates neither inflate the count nor renew their retention time.
+Clearing points on an automatic retry retains the last identity, so the same
+last cloud cannot revive the window. A new viewer session starts a new identity
+check; manual Reconnect and device/mode changes intentionally create that session.
+An empty frame immediately removes previous points. Expiration also runs without
+new input using one scheduled timer per viewer; browser timer throttling or a
+blocked event loop can delay cleanup, so this is not a hard real-time guarantee.
+
+Accumulation uses fixed CPU/GPU staging sized for the selected limit: up to120000
+XYZ triples and120000 receipt-age floats each, plus at most10 source-frame buffers
+(at most1440320 source bytes including headers). Switching accumulation/window
+recreates the viewer, resets its camera within the selected view mode, and clears history. Stale/retry/error,
+manual reconnect, device changes and unmount discard history and cancel the
+expiration timer. Healthy stream rotation can keep only the still-unexpired
+history, never extend its window. The latest source point count and combined
+displayed count are shown separately; coincident points can still overlap.
+This mode has no motion/pose compensation and can leave trails when the sensor
+or scene moves. It is not a persistent map or SLAM. Fit scene uses the currently
+displayed window; use it after the window fills if the initial fit was sparse.
+No server or receiver settings change when selecting this mode.
 
 Every session creates its own canvas. Device switch, reconnect, unmount and
 React StrictMode cleanup stop the old stream, cancel pending render work,
@@ -189,8 +262,11 @@ Graphics initialization or context loss reports an error and stops that stream;
 Reconnect creates a new canvas/context and retries with the current token.
 No automatic context restoration or simulated fallback cloud is used.
 
-Freshness in the browser means2s since a complete local frame receipt, not2s
-since acquisition. Sensor timestamps are not synchronized clocks. Server frame
+Single-frame browser freshness means2s since a complete local frame receipt, not2s
+since acquisition. Accumulation instead clears its visible window after the selected500ms/1000ms
+without a distinct frame and reports No fresh data even if the transport has not
+yet reached its2s stale deadline. A link slower than the selected window can alternate between
+Live and No fresh data in accumulation mode; use single-frame mode on such links. Sensor timestamps are not synchronized clocks. Server frame
 transfer age is capped at4s from server receipt, but network/proxy buffering
 can add delay. The browser aborts after6s without a complete frame, so links
 unable to transfer a frame within that limit eventually exhaust retries. This
@@ -201,3 +277,131 @@ step6 hardware/network validation.
 For the opt-in hardware-free C++/Python/Spring/browser pipeline, prerequisites,
 negative checks and exact cleanup limits, see
 [point-cloud integration tests](point-cloud-testing.md).
+
+
+## Pipeline measurement (diagnostic step 1)
+
+No binary protocol, backend endpoint, SDK setting, delivery cadence, or history
+limit changes are made. Deploy the updated Python files on Jetson and rebuild
+and deploy the frontend. No receiver rebuild or backend JAR update is required.
+Do not start main.py solely to inspect metrics: it initializes physical hardware.
+Use the existing separately approved hardware startup and shutdown procedure.
+
+Jetson prints `POINT_CLOUD_METRICS` JSON lines to stdout (independent of root
+logging configuration). Follow the [approved runtime procedure](operations.md#start-and-keep-running-after-ssh-disconnect)
+first, including physical support/clearance, power-cut readiness, and verification
+of the actual repository root and configuration. This section does not grant
+hardware startup approval. Use the existing `wildfire-robot` tmux session
+(inspect/attach if it already exists); do not launch a second main.py instance.
+In that session, verify the working directory, load the environment as described
+in the runbook, and replace only its final Python launch line with:
+
+```bash
+.venv/bin/python -u main.py 2>&1 | tee "main-debug-$(date +%Y%m%d-%H%M%S).log"
+```
+
+Do not close/kill that pane or type diagnostic/search commands into it. Follow
+the runbook's confirmed-idle and shutdown procedure, then press `q` in the robot
+session for software exit and verify both parent and receiver exit/port release.
+`q` is not an immediate motion stop, and Ctrl-C is not a reliable raw-mode exit.
+Inspect the exact log filename for that run from a second terminal using:
+
+```bash
+grep 'POINT_CLOUD_METRICS' /path/to/main-debug-YYYYMMDD-HHMMSS.log
+```
+
+Stages are `receiver_decoded` (all complete
+validated Python-decoded frames after C++/SDK filters) and `upload_accepted`
+(exact HTTP 204 accepted by the existing uploader, including an auth retry's
+actual selected frame, never failed or merely attempted requests).
+
+The browser developer console prints `POINT_CLOUD_METRICS` objects with stages
+`browser_decoded` (all complete validated binary frames, including coalesced
+frames) and `viewer_delivered` (the latest frame per read passed to the viewer
+callback; not GPU completion or screen presentation). Enable Info-level console
+messages. Reload/open a single viewer after Jetson starts, leave it open for at
+least 30 seconds, then save the metrics before closing the tab. Console output
+may be lost when navigating away. Mode changes and Reconnect create a new
+measurement session. Automatic HTTP rotation/retries retain that session.
+
+Each stage has its own session ID. Browser IDs are page-local diagnostic labels,
+not globally unique identifiers or authentication tokens; keep separate browser
+logs separate. Their generation does not require a secure browser context. Summaries are cumulative within that session,
+not independent 5-second windows: a report is emitted on the first frame after
+5 seconds since the previous report, plus one final report when the worker or
+browser transport settles. No frames means no periodic reports; a zero-count
+final report is possible. Hard process/tab termination cannot guarantee final
+output. Summary output errors are warned and do not abort frame processing.
+
+Fields include elapsed seconds since session start (including idle/setup time),
+frames, total points/bytes (32-byte headers included), minimum/maximum points,
+first/last cloud IDs, zero SDK timestamps, ID discontinuities, and local arrival
+interval count/minimum/mean/maximum in milliseconds. Timing uses monotonic local
+clocks; rates may be derived as 1000 / interval_mean_ms only when positive.
+These are cumulative arrival rates, not hardware scan rates or end-to-end delay.
+Browser batch decoding can produce zero intervals. No raw coordinates, device
+keys, tokens, URLs, or account information are included in summaries.
+
+Compare overlapping cloud-ID spans during one receiver run, not totals from
+independently started sessions. A discontinuity means only that adjacent IDs
+were not consecutive modulo uint32; repeats, SDK restart, latest-only selection,
+network batching, and reconnect can cause it. It is not proof or a count of UDP
+packet loss. A restarted receiver reuses IDs; split analysis at restart boundaries.
+This instrumentation does not count raw SDK points before filtering, rejected
+UDP packets, server-side arrivals, or actual GPU/display frames. The accepted
+upload and browser counts only bound the uninstrumented backend/proxy path;
+they do not locate a loss within that path. Original latest-only semantics and
+0.5-second/5-frame accumulation remain unchanged for a comparable baseline.
+
+
+The hardware-free pipeline helper reserves its original stdout for JSON command
+replies. It redirects diagnostic stdout to stderr for the entire main lifecycle,
+including worker shutdown, so periodic/final metrics cannot corrupt the Java
+consumer's response channel. Production main.py stdout capture is unchanged.
+
+
+Step 2's receiver readiness policy is documented in the
+[receiver timestamp/shutdown diagnostics](../hardware/l2_receiver/README.md#timestamp-and-shutdown-diagnostics-step-2).
+Zero SDK timestamps are now counted at the C++ producer's skip diagnostic and
+forwarded in the manager's `L2_RECEIVER_EXIT` text-log event on reaping (including
+normal exit 0), not in Python/browser frame metrics, because those clouds are
+not exported. A missing native summary is null, not evidence of zero skips. This does not
+change the v1 consumer contract or replace monotonic interval measurement.
+
+
+## Upload cadence improvement (step 3)
+
+The measured run had consecutive receiver IDs and about 2% of the overlapping
+ID span absent from successful uploads. Browser decoded/delivered counts were
+equal in that observed window, so this step changes only Python upload cadence.
+Latest-only selection is retained at all hops; no frame queue, protocol change,
+backend rate change, browser history change, or sensor configuration is added.
+HTTP/network delays can still reduce achieved rate. The 10ms source poll is a
+bounded latency/worker-wakeup tradeoff, not a measured Jetson CPU improvement.
+
+Deterministic clock tests cover a 30-second 9.15Hz source with 13ms simulated
+HTTP responses, slower 180ms responses plus the 50ms server guard, variable
+upload delays against modeled server admission, fast-source rate/status behavior,
+retry pacing/fresh re-selection, and stop/staleness during cadence waits. These are scheduling models, not actual
+Jetson/network throughput measurements. Re-run the existing stage metrics after
+deployment to measure the real change. This step requires Jetson Python update
+only; no receiver rebuild, frontend deployment or backend JAR update is needed.
+
+
+## Sensor-view display improvement (step 4)
+
+This step changes only frontend display code and tests/documentation. Deploy the
+rebuilt frontend; no Jetson Python pull, native rebuild or backend JAR change is
+required for these display features. No physical control command is added.
+
+Hardware-free verification covers +X/-X view direction, fixed camera origin,
+bounded FOV, overview fitting, selected history limits, duplicate/stale clearing,
+fade clock/GPU bounds and cleanup. During this implementation, one-off local
+synthetic-browser checks exercised mouse/buttons, mobile layout, context
+loss/reconnect and actual pixel fading. Those local checks are not retained
+as repository regression fixtures; the committed browser pipeline test does
+not cover those new interaction/pixel cases. Synthetic checks do not
+prove real sensor mounting alignment, human recognition, display latency or
+performance with real video/AI. Compare0.5s and1s using the stationary L2 at the
+venue; a longer window increases density and moving-object trails, not sensor
+resolution. Existing server-to-browser latest-frame selection remains unchanged.

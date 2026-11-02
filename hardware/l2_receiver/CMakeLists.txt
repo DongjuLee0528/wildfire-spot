@@ -15,7 +15,17 @@ if(NOT EXISTS "${UNITREE_LIDAR_SDK_ROOT}/include/unitree_lidar_sdk.h" OR NOT EXI
     message(FATAL_ERROR "Set UNITREE_LIDAR_SDK_ROOT to the SDK directory documented in README.md")
 endif()
 find_package(Threads REQUIRED)
+find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+set(REPAIRED_SDK_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/libunilidar_sdk2_shutdown_fixed.a")
+add_custom_command(
+    OUTPUT "${REPAIRED_SDK_LIBRARY}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/repair_sdk_shutdown.py"
+            "${SDK_LIBRARY}" "${REPAIRED_SDK_LIBRARY}" "${CMAKE_SYSTEM_PROCESSOR}"
+    DEPENDS "${SDK_LIBRARY}" "${CMAKE_CURRENT_SOURCE_DIR}/repair_sdk_shutdown.py"
+    VERBATIM)
+add_custom_target(l2_sdk_shutdown_repair DEPENDS "${REPAIRED_SDK_LIBRARY}")
 add_executable(l2_receiver main.cpp)
+add_dependencies(l2_receiver l2_sdk_shutdown_repair)
 target_include_directories(l2_receiver SYSTEM PRIVATE "${UNITREE_LIDAR_SDK_ROOT}/include")
 target_compile_options(l2_receiver PRIVATE -Wall -Wextra -Wpedantic)
-target_link_libraries(l2_receiver PRIVATE "${SDK_LIBRARY}" Threads::Threads)
+target_link_libraries(l2_receiver PRIVATE "${REPAIRED_SDK_LIBRARY}" Threads::Threads)

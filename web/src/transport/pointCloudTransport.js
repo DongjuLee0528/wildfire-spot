@@ -1,10 +1,13 @@
+import { PointCloudMetrics } from '../pointcloud/pointCloudMetrics.js';
+
 const MAX_FRAME = 144032;
 
 export class TruncatedFrameError extends Error {}
 export class PointCloudProtocolError extends Error {}
 
 export class PointCloudDecoder {
-    constructor() {
+    constructor(metrics = null) {
+        this.metrics = metrics;
         this.buffer = new Uint8Array(MAX_FRAME);
         this.offset = 0;
         this.total = 32;
@@ -40,6 +43,7 @@ export class PointCloudDecoder {
                     pointCount: view.getUint32(12, true), timestamp: view.getFloat64(16, true),
                     cloudId: view.getUint32(24, true), ringCount: view.getUint32(28, true),
                 };
+                this.metrics?.record(latest);
                 this.offset = 0;
                 this.total = 32;
             }
@@ -59,6 +63,8 @@ export function connectPointCloud({ deviceId, getToken, onFrame, onState,
         retryDelays.length > 5 || retryDelays.some(value => !Number.isFinite(value) || value < 0) ||
         ![staleMs, timeoutMs, stableMs, rotationMs].every(value => Number.isFinite(value) && value > 0) || timeoutMs <= staleMs)
         throw new TypeError('Invalid point-cloud transport settings');
+    const decodedMetrics = new PointCloudMetrics('browser_decoded');
+    const deliveredMetrics = new PointCloudMetrics('viewer_delivered');
     let stopped = false, controller = null, reader = null, staleTimer = null, waitTimer = null, finishWait = null;
     let currentState = 'CONNECTING', failure = null, lastPublishedAt = null, consumerFailed = false;
     const timers = new Set();
@@ -133,7 +139,7 @@ export function connectPointCloud({ deviceId, getToken, onFrame, onState,
             const started = performance.now();
             let firstFrame = null, lastFrame = started;
             controller = new AbortController();
-            const decoder = new PointCloudDecoder();
+            const decoder = new PointCloudDecoder(decodedMetrics);
             try {
                 failure = null;
                 emitState('CONNECTING');
@@ -181,7 +187,7 @@ export function connectPointCloud({ deviceId, getToken, onFrame, onState,
                         lastFrame = performance.now();
                         if (firstFrame == null) firstFrame = lastFrame;
                         lastPublishedAt = lastFrame;
-                        try { onFrame(frame); emitState('STREAMING'); }
+                        try { onFrame(frame); deliveredMetrics.record(frame); emitState('STREAMING'); }
                         catch { consumerFailed = true; throw new Error('Point-cloud consumer callback failed'); }
                         armStale();
                         if (lastFrame - firstFrame >= stableMs) failures = 0;
@@ -216,6 +222,6 @@ export function connectPointCloud({ deviceId, getToken, onFrame, onState,
         currentState = 'ERROR';
         stop();
         currentState = 'ERROR';
-    });
+    }).finally(() => { decodedMetrics.finish(); deliveredMetrics.finish(); });
     return { stop, done, getStatus: () => ({ state: currentState, error: failure }) };
 }

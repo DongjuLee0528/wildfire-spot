@@ -1,4 +1,6 @@
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
 import os
 import selectors
 from pathlib import Path
@@ -145,6 +147,64 @@ runpy.run_path(sys.argv[2], run_name='__main__')
 
     def test_uploader_cleanup_failure_after_eof_is_not_success(self):
         self.cleanup_failure_on_eof('uploader')
+
+    def test_real_workers_keep_periodic_and_final_metrics_out_of_json_stdout(self):
+        receiver = """import os, struct, time
+sequence = 0
+while True:
+    data = struct.pack('<4sIIIdIIfff', b'L2PC', 1, 12, 1, 1234.5, sequence, 18, 1, 2, 3)
+    os.write(1, data)
+    sequence += 1
+    time.sleep(0.05)
+"""
+        compiler = "import sys\nfrom pathlib import Path\np=Path(sys.argv[sys.argv.index('-o')+1])\np.write_text(" + repr('#!' + sys.executable + '\n' + receiver) + ")\np.chmod(0o700)\n"
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                body = b'{"accessToken":"fixture-only-token"}' if self.path == '/api/device-auth/login' else b''
+                self.send_response(200 if body else 204)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                if body:
+                    self.wfile.write(body)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                config, env = self.setup_files(directory, compiler)
+                config['baseUrl'] = 'http://127.0.0.1:' + str(server.server_port)
+                process = subprocess.Popen([sys.executable, str(HELPER)], stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                try:
+                    process.stdin.write(json.dumps(config).encode() + b'\n'); process.stdin.flush()
+                    self.assertEqual(self.receive(process)['event'], 'ready')
+                    time.sleep(5.3)
+                    process.stdin.write(b'{"command":"status"}\n'); process.stdin.flush()
+                    self.assertEqual(self.receive(process)['event'], 'status')
+                    process.stdin.write(b'{"command":"stop"}\n'); process.stdin.flush()
+                    self.assertEqual(self.receive(process)['event'], 'stopped')
+                    process.wait(timeout=5)
+                    self.assertEqual(process.returncode, 0)
+                    self.assertEqual(process.stdout.read(), b'')
+                    diagnostics = process.stderr.read().decode()
+                    metrics = [json.loads(line.split(' ', 1)[1]) for line in diagnostics.splitlines()
+                               if line.startswith('POINT_CLOUD_METRICS ')]
+                    for stage in ('receiver_decoded', 'upload_accepted'):
+                        entries = [v for v in metrics if v['stage'] == stage]
+                        self.assertTrue(any(not v['final'] and v['frames'] > 0 for v in entries))
+                        self.assertEqual(sum(v['final'] for v in entries), 1)
+                finally:
+                    self.finish(process)
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=2)
 
     def receive(self, process):
         pending = bytearray()

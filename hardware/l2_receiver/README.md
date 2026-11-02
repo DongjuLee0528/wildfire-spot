@@ -16,7 +16,7 @@ as native macOS libraries. SDK files and binaries are not vendored in this repo.
 Retain the upstream BSD-3-Clause license when distributing the SDK or linked
 executables. This repository's existing license is unchanged.
 
-On the Jetson/Linux build host, install CMake, a C++17 compiler, and Git. Fetch
+On the Jetson/Linux build host, install CMake, Python 3.8 or newer, a C++17 compiler, and Git. Fetch
 the dependency outside this repository and build outside the source tree:
 
 ```bash
@@ -80,13 +80,20 @@ Coordinates preserve the SDK LiDAR frame: +X opposite the bottom cable outlet,
 +Y 90 degrees counterclockwise from +X, and +Z perpendicular to the bottom.
 No pose compensation, SLAM, accumulation, or web-axis transformation is applied.
 An empty filtered cloud is a valid header with zero payload. Oversized input
-clouds and invalid timestamps cause an error rather than silent truncation.
+clouds and non-finite/negative timestamps cause an error rather than silent truncation.
+When this system-timestamp-configured producer receives a cloud with timestamp 0,
+it skips that cloud without changing its SDK time, coordinates, or ID. The first
+such observation is warned once; the total is included in the final diagnostic.
+Only an emitted cloud with a positive SDK timestamp refreshes the five-second
+watchdog. Persistent zero timestamps therefore fail rather than keeping a
+non-ready source alive. Consumers still accept timestamp 0 in v1 for backwards
+compatibility; no wire-format or backend/web validation change is required.
 
 ### Failure and shutdown
 
 - SIGINT/SIGTERM requests termination; the program closes the UDP reader and
   output descriptor. It does not stop the physical LiDAR rotation.
-- Five seconds without a complete SDK 3D cloud causes an error when control
+- Five seconds without a complete SDK 3D cloud with a positive timestamp causes an error when control
   returns from `runParse()`. IMU packets alone do not refresh that deadline.
 - A stalled output consumer causes an error after two seconds. A disconnected
   output consumer causes an error without SIGPIPE terminating cleanup.
@@ -121,8 +128,8 @@ implementation. The fake does not open sockets or access devices. It fails if
 control/configuration methods are called. Tests cover binary framing, 30m
 boundaries, invalid points/timestamps, frame limits, SDK initialization failure,
 empty clouds, missing data, blocked/disconnected consumers, SIGINT/SIGTERM,
-runtime exceptions, cleanup failure/exception, and simultaneous runtime/cleanup
-exceptions.
+runtime exceptions, cleanup failure/exception, simultaneous runtime/cleanup
+exceptions, initial-zero recovery and persistent-zero timeout.
 This verifies application logic, not the real SDK library, Linux linking, sensor
 parsing accuracy, Jetson performance, or hardware behavior.
 
@@ -151,7 +158,8 @@ preventing other runtime managers from initializing. Do not execute `main.py`
 for software-only verification: it also initializes robot hardware.
 
 `runtime.point_cloud_manager.get_status()` returns state, error, local receipt
-age, restart count, and child PID. States are STOPPED, STARTING, STREAMING,
+age, restart count, child PID, and last reaped child exit code (`last_exit_code`).
+States are STOPPED, STARTING, STREAMING,
 STALE, RESTARTING, STOPPING, or ERROR. `get_latest_frame()` returns an immutable
 `PointCloudFrame`, or None if no fresh data exists. `frame.data` preserves the
 complete v1 binary frame. Empty clouds are valid fresh frames. This API does
@@ -179,7 +187,9 @@ close() interrupts a restart delay, requests termination, waits up to three
 seconds, then kills and waits up to one more second. Cleanup failure is logged,
 keeps the original error context, and disables further automatic restarts. A
 child that cannot be reaped remains an error and blocks another start. Repeated
-start while running and repeated close are idempotent. main.py explicitly
+start while running is idempotent. Repeated normal close is idempotent; a retained
+shutdown failure is raised again on repeated close until a new explicit start.
+main.py explicitly
 closes this manager before unrelated hardware cleanup; RuntimeContext.close()
 also closes it safely. Main normally enters cleanup on q; Ctrl-C only interrupts when the terminal
 is not in raw mode. q is not an immediate motion stop. SIGKILL,
@@ -209,3 +219,125 @@ performance remain unverified until hardware testing.
 
 For target trials use [Jetson validation](../../docs/jetson-validation.md).
 For configuration, terminal sessions and recovery use [operations](../../docs/operations.md).
+
+
+## Timestamp and shutdown diagnostics (step 2)
+
+A Jetson capture observed the first SDK cloud timestamp as 0 and subsequent
+clouds with positive epoch timestamps. The wrapper previously exported 0 as-is;
+it never computed that timestamp. The pinned public SDK utilities select system
+time when requested, but the aggregate reader implementation is supplied as a
+Linux static library. This work does not establish why that first aggregate
+cloud was unset, nor does it modify, sync, reset or otherwise command the sensor.
+Skipping unset timestamps is a producer readiness policy, not a diagnosis of
+sensor failure or a replacement timestamp.
+
+The receiver writes bounded lifecycle diagnostics to stderr, outside the binary
+stream: receive-loop completion with the actual SIGINT/SIGTERM number (or 0),
+zero-timestamp skip total, `SDK closeUDP begin`, `SDK closeUDP complete` on success,
+and a final `Exit result=N; signal=N; skipped_zero_timestamps=N` summary before return. C++ and unknown exceptions retain their
+existing error diagnostics. Markers identify the last reached stage; they are
+not a stack trace or proof of where earlier memory corruption originated. A
+fatal OS signal cannot be caught by the C++ exception handler. A final marker
+also cannot prove that destructors/SDK process teardown later completed.
+
+The subsequent Jetson GDB trace confirmed a recursive UDP destructor chain:
+D0 calls D1 (aliased to D2), and D2 branches back to D0. The pinned upstream
+archive contains that same relocation; it is not introduced by the receiver's
+link configuration. The build-copy repair below fixes this confirmed cause.
+Actual Jetson streaming/shutdown verification of the rebuilt binary remains
+required. Do not automatically repeat a physical trial. No SDK upgrade, cleanup
+bypass, crash handler, sensor reset, or rotation command is added.
+
+Python retains `last_exit_code` after reaping, including negative POSIX signal
+codes, and logs the bounded stderr tail for nonzero exits during requested
+shutdown. Runtime/SDK failure codes or unexpected fatal signals during shutdown
+are retained as ERROR; `close()` raises the same error on repeat calls until a
+new explicit start resets the run. A cleanup exception during requested stop is
+also preserved. Existing requested SIGINT/SIGTERM and forced SIGKILL fallback
+remain reaped STOPPED outcomes (and are logged when nonzero); STOPPED certifies
+process removal, not that SDK cleanup or physical rotation stopped. Normal
+exit 0 stays idempotent. Startup/runtime retries and all shutdown deadlines stay
+unchanged. This Python change does not add actuator or GPIO operations.
+
+Deploy this step by updating the Jetson repository and rebuilding the standalone
+receiver using the existing commands above. No frontend or backend JAR update
+is needed. Building is hardware-free; running the rebuilt receiver or main.py
+requires a separately described and approved physical trial.
+
+
+The Python manager emits one `L2_RECEIVER_EXIT` JSON line to its text stdout for
+each reaped child, including normal exit 0. It contains the PID, actual exit
+code, and parsed numeric native result/signal/zero-skip count from the bounded
+stderr tail. Missing native summaries (old executable, forced termination or
+crash before final summary) use null, never an invented zero. The event uses
+the same tee text log as the existing Python metrics; inspect it from the second
+terminal with `grep 'L2_RECEIVER_EXIT' /path/to/the-run.log`. In the test pipeline
+helper it goes to diagnostic stderr, leaving JSON protocol stdout unchanged.
+This is how a normal first-zero skip stays observable even when the Python
+frame metric correctly reports `zero_timestamps: 0` for exported frames.
+
+
+## Pinned SDK destructor relocation repair
+
+The original aarch64 SDK's `UDPHandler` D2 destructor branches to D0, while D0
+calls D1 at D2's address. Jetson GDB confirmed that exact cycle in the linked
+receiver. The x86_64 archive has the same defective symbol reference. D0's
+operator-delete call is never reached on this path before stack exhaustion.
+
+`repair_sdk_shutdown.py` changes the D2 tail-call relocation target from
+`_ZN10UDPHandlerD0Ev` to `_ZN10UDPHandler5CloseEv`. The existing `Close()` closes
+an open descriptor and clears its fields; calling it again after SDK
+`closeUDP()` already closed the descriptor is safe for this pinned implementation.
+D0 then returns from D1/D2 and reaches its original operator-delete operation.
+The class layout, vtable, socket I/O methods, sensor API and receiver framing
+are unchanged. The repair replaces one symbol index byte inside the existing
+8-byte ELF relocation information field, preserving archive length and index.
+It does not suppress `closeUDP()` or skip object deallocation.
+
+The input is accepted only when its full SHA-256 matches the pinned revision.
+The exact original relocation bytes must also match. Metadata is:
+
+| Architecture | Original archive SHA-256 | Archive byte offset of relocation info | Original bytes | Repaired bytes |
+| --- | --- | --- | --- | --- |
+| aarch64 | `4e334b67c1a92152c89363d8014a6e361d7bf590e58484d7d6ddc8541389de28` | 71070 | `1a0100001f000000` | `1a01000029000000` |
+| x86_64 | `a8530545cbd435e3a96b9a099cd57921202aed3d690066f55ea0ade4310212d3` | 77346 | `040000001e000000` | `0400000029000000` |
+
+CMake generates `libunilidar_sdk2_shutdown_fixed.a` in the build directory and
+links that copy. The source SDK archive is not overwritten. Unknown, modified,
+wrong-architecture or already-repaired input fails the build; do not disable the
+check or silently link the original. SDK upgrades require a new investigation
+and updated verified metadata, or removal of this repair after upstream fixes.
+Generated copies and linked executables remain subject to the upstream license
+requirements described above. No SDK binary is committed to this repository.
+
+After pulling this change, rerun the existing CMake configure/build commands.
+CMakeLists changes also trigger regeneration during a normal incremental build.
+The build log must show `Repaired pinned SDK shutdown relocation`; the link
+command must use `libunilidar_sdk2_shutdown_fixed.a`. No frontend/JAR rebuild is
+needed. Rebuilding does not execute the sensor driver.
+
+Hardware-free archive checks run on macOS or Linux:
+
+```bash
+UNITREE_LIDAR_SDK_ROOT="$HOME/workspace/unilidar_sdk2/unitree_lidar_sdk" \
+  python3 hardware/l2_receiver/tests/test_sdk_archive_repair.py
+```
+
+The separate `test_sdk_shutdown_linux.py` must run in a nonprivileged,
+network-isolated Linux container, with only active loopback and no external
+routes, source/SDK mounts read-only, and a writable executable temporary folder.
+It builds the actual production receiver using the real pinned SDK. A
+constructor/destructor-only harness reproduces the original SIGSEGV with core
+files disabled and checks repeated cleanup with the repaired archive. Production
+SIGINT/SIGTERM tests use container loopback addresses only and no sensor. The
+Linux tests refuse an ordinary networked host. Example inside that container:
+
+```bash
+UNITREE_LIDAR_SDK_ROOT=/sdk PYTHONDONTWRITEBYTECODE=1 \
+  python3 /receiver/tests/test_sdk_shutdown_linux.py
+```
+
+ARM64 Linux execution verifies the actual SDK cleanup without physical hardware.
+The x86_64 repair has archive/hash verification; its native runtime remains
+unverified here. Fake-SDK tests alone do not verify this vendor-binary repair.
