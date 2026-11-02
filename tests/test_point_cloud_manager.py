@@ -1,6 +1,8 @@
 import ast
+import json
 import math
 import os
+import signal
 from pathlib import Path
 import struct
 import sys
@@ -148,13 +150,15 @@ class ManagerTests(unittest.TestCase):
         self.assertTrue(manager._metrics.finished)
 
     def test_stale_frame_not_exposed_then_timeout(self):
-        manager = self.manager('once')
+        manager = self.manager('once', frame_timeout=3)
         manager.start()
         self.until(lambda: manager.get_latest_frame() is not None)
+        manager._frame_timeout = 0.5
         self.until(lambda: manager.get_status()['state'] == 'STALE')
         self.assertIsNone(manager.get_latest_frame())
         self.until(lambda: manager.get_status()['state'] == 'ERROR')
         self.assertIn('timeout', manager.get_status()['error'])
+        self.until(lambda: manager.get_status()['pid'] is None)
         self.assertIsNone(manager.get_status()['pid'])
 
     def test_restart_budget_and_recovery(self):
@@ -217,7 +221,7 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(self.counter.read_text(), '1')
 
     def test_configuration_exit_is_not_retried(self):
-        manager = self.manager('exit2', restart_delays=(0.01,))
+        manager = self.manager('exit2', frame_timeout=3, restart_delays=(0.01,))
         manager.start()
         self.until(lambda: manager.get_status()['state'] == 'ERROR' and manager.get_status()['pid'] is None)
         self.assertEqual(self.counter.read_text(), '1')
@@ -270,6 +274,88 @@ class ManagerTests(unittest.TestCase):
         with self.assertRaises(ChildProcessError):
             os.waitpid(pid, os.WNOHANG)
         self.assertIsNone(manager.get_status()['pid'])
+        self.assertEqual(manager.get_status()['state'], 'STOPPED')
+        self.assertEqual(manager.get_status()['last_exit_code'], -signal.SIGKILL)
+
+    def test_requested_shutdown_preserves_crash_or_sdk_failure_after_reaping(self):
+        for code in (-signal.SIGABRT, -signal.SIGSEGV, 1):
+            with self.subTest(code=code):
+                manager = PointCloudManager('/not-executed')
+                process = mock.Mock(pid=123, returncode=code)
+                process.poll.return_value = code
+                process.wait.return_value = code
+                def stop(_process, _tail):
+                    manager._stop.set()
+                def diagnostic(_process, tail):
+                    tail.extend(b'SDK closeUDP begin')
+                with mock.patch('hardware.point_cloud_manager.subprocess.Popen', return_value=process) as spawn, \
+                     mock.patch.object(manager, '_consume', side_effect=stop), \
+                     mock.patch.object(manager, '_drain_stderr', side_effect=diagnostic):
+                    manager._run_receiver()
+                self.assertEqual(manager.get_status()['state'], 'ERROR')
+                self.assertIsNone(manager.get_status()['pid'])
+                self.assertEqual(manager.get_status()['last_exit_code'], code)
+                self.assertIn('SDK closeUDP begin', manager.get_status()['error'])
+                self.assertIn('exit ' + str(code), manager.get_status()['error'])
+                spawn.assert_called_once()
+                for _ in range(2):
+                    with self.assertRaisesRegex(RuntimeError, 'exit ' + str(code)):
+                        manager.close()
+                self.assertEqual(manager.get_status()['state'], 'ERROR')
+
+    def test_requested_shutdown_cleanup_error_cannot_be_overwritten_by_close(self):
+        manager = PointCloudManager('/not-executed')
+        process = mock.Mock(pid=123, returncode=0)
+        def stop(_process, _tail):
+            manager._stop.set()
+        def fail_cleanup(_process, _tail):
+            manager._pid = None
+            raise RuntimeError('injected shutdown cleanup error')
+        with mock.patch('hardware.point_cloud_manager.subprocess.Popen', return_value=process), \
+             mock.patch.object(manager, '_consume', side_effect=stop), \
+             mock.patch.object(manager, '_cleanup', side_effect=fail_cleanup):
+            manager._run_receiver()
+        with self.assertRaisesRegex(RuntimeError, 'injected shutdown cleanup error'):
+            manager.close()
+        self.assertEqual(manager.get_status()['state'], 'ERROR')
+
+    def test_explicit_new_start_resets_prior_shutdown_error_and_exit_code(self):
+        manager = self.manager()
+        manager._shutdown_error = 'previous SDK shutdown failed'
+        manager._last_exit_code = -signal.SIGABRT
+        manager._set_state('ERROR', manager._shutdown_error)
+        manager.start()
+        self.until(lambda: manager.get_latest_frame() is not None)
+        self.assertEqual(manager.get_status()['state'], 'STREAMING')
+        self.assertIsNone(manager.get_status()['error'])
+        self.assertIsNone(manager.get_status()['last_exit_code'])
+        self.assertIsNone(manager._shutdown_error)
+        manager.close()
+        self.assertEqual(manager.get_status()['state'], 'STOPPED')
+
+    def test_exit_diagnostic_with_no_native_summary_reports_unknown_not_zero(self):
+        manager = PointCloudManager('/not-executed')
+        process = mock.Mock(pid=123, returncode=-signal.SIGKILL)
+        with mock.patch('hardware.point_cloud_manager.emit_line') as output:
+            manager._report_exit(process, bytearray(b'partial native output'))
+        report = json.loads(output.call_args.args[0].split(' ', 1)[1])
+        self.assertEqual(report['exit_code'], -signal.SIGKILL)
+        self.assertIsNone(report['skipped_zero_timestamps'])
+        self.assertIsNone(report['native_result'])
+
+    def test_exit_summary_output_failure_does_not_prevent_descriptor_cleanup(self):
+        manager = PointCloudManager('/not-executed')
+        process = mock.Mock(pid=123, returncode=0)
+        process.poll.return_value = 0
+        with mock.patch.object(manager, '_drain_stderr'), \
+             mock.patch('hardware.point_cloud_manager.emit_line', side_effect=OSError('injected')), \
+             mock.patch('hardware.point_cloud_manager.logger.warning') as warning:
+            manager._cleanup(process, bytearray())
+        process.stdout.close.assert_called_once()
+        process.stderr.close.assert_called_once()
+        warning.assert_called_once()
+        self.assertIsNone(manager.get_status()['pid'])
+        self.assertEqual(manager.get_status()['last_exit_code'], 0)
 
     def test_close_interrupts_restart_wait(self):
         manager = self.manager('fail', restart_delays=(10,))

@@ -319,3 +319,12 @@ The hardware-free pipeline helper reserves its original stdout for JSON command
 replies. It redirects diagnostic stdout to stderr for the entire main lifecycle,
 including worker shutdown, so periodic/final metrics cannot corrupt the Java
 consumer's response channel. Production main.py stdout capture is unchanged.
+
+
+Step 2's receiver readiness policy is documented in the
+[receiver timestamp/shutdown diagnostics](../hardware/l2_receiver/README.md#timestamp-and-shutdown-diagnostics-step-2).
+Zero SDK timestamps are now counted at the C++ producer's skip diagnostic and
+forwarded in the manager's `L2_RECEIVER_EXIT` text-log event on reaping (including
+normal exit 0), not in Python/browser frame metrics, because those clouds are
+not exported. A missing native summary is null, not evidence of zero skips. This does not
+change the v1 consumer contract or replace monotonic interval measurement.

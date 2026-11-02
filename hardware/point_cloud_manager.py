@@ -1,15 +1,18 @@
 import ipaddress
+import json
 import logging
 import math
 import os
 from pathlib import Path
 import selectors
+import re
+import signal
 import struct
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from utils.point_cloud_metrics import PointCloudMetrics
+from utils.point_cloud_metrics import PointCloudMetrics, emit_line
 
 logger = logging.getLogger(__name__)
 _HEADER = struct.Struct('<4sIIIdII')
@@ -85,6 +88,8 @@ class PointCloudManager:
         self._received_at = None
         self._restart_count = 0
         self._pid = None
+        self._last_exit_code = None
+        self._shutdown_error = None
         self._metrics = PointCloudMetrics('receiver_decoded')
 
     def _set_state(self, state, error=None):
@@ -101,6 +106,8 @@ class PointCloudManager:
                 if self._pid is not None:
                     raise RuntimeError('Previous receiver has not been reaped; refusing another start')
                 self._restart_count = 0
+                self._last_exit_code = None
+                self._shutdown_error = None
             self._stop.clear()
             self._metrics.reset()
             self._set_state('STARTING')
@@ -124,7 +131,8 @@ class PointCloudManager:
             if state == 'STREAMING' and age is not None and age > self._stale_after:
                 state = 'STALE'
             return {'state': state, 'error': self._error, 'age_seconds': age,
-                    'restart_count': self._restart_count, 'pid': self._pid}
+                    'restart_count': self._restart_count, 'pid': self._pid,
+                    'last_exit_code': self._last_exit_code}
 
     def get_latest_frame(self):
         with self._lock:
@@ -181,6 +189,20 @@ class PointCloudManager:
             stderr_tail.extend(chunk)
             del stderr_tail[:-4096]
 
+    def _report_exit(self, process, stderr_tail):
+        if not isinstance(process.returncode, int):
+            return
+        result = dict(pid=process.pid, exit_code=process.returncode, native_result=None,
+                      signal=None, skipped_zero_timestamps=None)
+        for line in stderr_tail.decode('utf-8', errors='replace').splitlines():
+            match = re.fullmatch(r'l2_receiver: Exit result=(-?\d+); signal=(\d+); skipped_zero_timestamps=(\d+)', line)
+            if match:
+                result.update(zip(('native_result', 'signal', 'skipped_zero_timestamps'), map(int, match.groups())))
+        try:
+            emit_line('L2_RECEIVER_EXIT ' + json.dumps(result, separators=(',', ':')), flush=True)
+        except Exception as error:
+            logger.warning('L2 receiver exit diagnostic output failed (%s)', type(error).__name__)
+
     def _cleanup(self, process, stderr_tail):
         try:
             if process.poll() is None:
@@ -201,14 +223,18 @@ class PointCloudManager:
                 process.wait()
             with self._lock:
                 self._pid = None
+                self._last_exit_code = process.returncode
         finally:
             try:
                 self._drain_stderr(process, stderr_tail)
             finally:
                 try:
-                    process.stdout.close()
+                    self._report_exit(process, stderr_tail)
                 finally:
-                    process.stderr.close()
+                    try:
+                        process.stdout.close()
+                    finally:
+                        process.stderr.close()
 
     def _run(self):
         try:
@@ -246,10 +272,22 @@ class PointCloudManager:
                 except Exception as error:
                     message = '{}; L2 receiver cleanup failed: {}'.format(
                         error_message or 'Receiver shutdown', error)
+                    if self._stop.is_set():
+                        with self._lock:
+                            self._shutdown_error = message
                     self._set_state('ERROR', message)
                     logger.exception('%s', message)
                     return
             if self._stop.is_set():
+                if process.returncode != 0:
+                    message = 'L2 receiver exit during shutdown (exit {}); stderr: {}'.format(
+                        process.returncode, stderr_tail.decode('utf-8', errors='replace'))
+                    logger.warning('%s', message)
+                    if process.returncode not in (-signal.SIGINT, -signal.SIGTERM, -signal.SIGKILL):
+                        with self._lock:
+                            self._shutdown_error = message
+                        self._set_state('ERROR', message)
+                        return
                 break
             message = '{} (exit {}); stderr: {}'.format(
                 error_message or 'L2 receiver stopped unexpectedly', process.returncode,
@@ -277,4 +315,7 @@ class PointCloudManager:
                     self._state = 'ERROR'
                     self._error = 'L2 receiver cleanup failed; child process may still exist'
                     raise RuntimeError(self._error)
+            if self._shutdown_error is not None:
+                self._set_state('ERROR', self._shutdown_error)
+                raise RuntimeError(self._shutdown_error)
             self._set_state('STOPPED')

@@ -80,13 +80,20 @@ Coordinates preserve the SDK LiDAR frame: +X opposite the bottom cable outlet,
 +Y 90 degrees counterclockwise from +X, and +Z perpendicular to the bottom.
 No pose compensation, SLAM, accumulation, or web-axis transformation is applied.
 An empty filtered cloud is a valid header with zero payload. Oversized input
-clouds and invalid timestamps cause an error rather than silent truncation.
+clouds and non-finite/negative timestamps cause an error rather than silent truncation.
+When this system-timestamp-configured producer receives a cloud with timestamp 0,
+it skips that cloud without changing its SDK time, coordinates, or ID. The first
+such observation is warned once; the total is included in the final diagnostic.
+Only an emitted cloud with a positive SDK timestamp refreshes the five-second
+watchdog. Persistent zero timestamps therefore fail rather than keeping a
+non-ready source alive. Consumers still accept timestamp 0 in v1 for backwards
+compatibility; no wire-format or backend/web validation change is required.
 
 ### Failure and shutdown
 
 - SIGINT/SIGTERM requests termination; the program closes the UDP reader and
   output descriptor. It does not stop the physical LiDAR rotation.
-- Five seconds without a complete SDK 3D cloud causes an error when control
+- Five seconds without a complete SDK 3D cloud with a positive timestamp causes an error when control
   returns from `runParse()`. IMU packets alone do not refresh that deadline.
 - A stalled output consumer causes an error after two seconds. A disconnected
   output consumer causes an error without SIGPIPE terminating cleanup.
@@ -121,8 +128,8 @@ implementation. The fake does not open sockets or access devices. It fails if
 control/configuration methods are called. Tests cover binary framing, 30m
 boundaries, invalid points/timestamps, frame limits, SDK initialization failure,
 empty clouds, missing data, blocked/disconnected consumers, SIGINT/SIGTERM,
-runtime exceptions, cleanup failure/exception, and simultaneous runtime/cleanup
-exceptions.
+runtime exceptions, cleanup failure/exception, simultaneous runtime/cleanup
+exceptions, initial-zero recovery and persistent-zero timeout.
 This verifies application logic, not the real SDK library, Linux linking, sensor
 parsing accuracy, Jetson performance, or hardware behavior.
 
@@ -151,7 +158,8 @@ preventing other runtime managers from initializing. Do not execute `main.py`
 for software-only verification: it also initializes robot hardware.
 
 `runtime.point_cloud_manager.get_status()` returns state, error, local receipt
-age, restart count, and child PID. States are STOPPED, STARTING, STREAMING,
+age, restart count, child PID, and last reaped child exit code (`last_exit_code`).
+States are STOPPED, STARTING, STREAMING,
 STALE, RESTARTING, STOPPING, or ERROR. `get_latest_frame()` returns an immutable
 `PointCloudFrame`, or None if no fresh data exists. `frame.data` preserves the
 complete v1 binary frame. Empty clouds are valid fresh frames. This API does
@@ -179,7 +187,9 @@ close() interrupts a restart delay, requests termination, waits up to three
 seconds, then kills and waits up to one more second. Cleanup failure is logged,
 keeps the original error context, and disables further automatic restarts. A
 child that cannot be reaped remains an error and blocks another start. Repeated
-start while running and repeated close are idempotent. main.py explicitly
+start while running is idempotent. Repeated normal close is idempotent; a retained
+shutdown failure is raised again on repeated close until a new explicit start.
+main.py explicitly
 closes this manager before unrelated hardware cleanup; RuntimeContext.close()
 also closes it safely. Main normally enters cleanup on q; Ctrl-C only interrupts when the terminal
 is not in raw mode. q is not an immediate motion stop. SIGKILL,
@@ -209,3 +219,58 @@ performance remain unverified until hardware testing.
 
 For target trials use [Jetson validation](../../docs/jetson-validation.md).
 For configuration, terminal sessions and recovery use [operations](../../docs/operations.md).
+
+
+## Timestamp and shutdown diagnostics (step 2)
+
+A Jetson capture observed the first SDK cloud timestamp as 0 and subsequent
+clouds with positive epoch timestamps. The wrapper previously exported 0 as-is;
+it never computed that timestamp. The pinned public SDK utilities select system
+time when requested, but the aggregate reader implementation is supplied as a
+Linux static library. This work does not establish why that first aggregate
+cloud was unset, nor does it modify, sync, reset or otherwise command the sensor.
+Skipping unset timestamps is a producer readiness policy, not a diagnosis of
+sensor failure or a replacement timestamp.
+
+The receiver writes bounded lifecycle diagnostics to stderr, outside the binary
+stream: receive-loop completion with the actual SIGINT/SIGTERM number (or 0),
+zero-timestamp skip total, `SDK closeUDP begin`, `SDK closeUDP complete` on success,
+and a final `Exit result=N; signal=N; skipped_zero_timestamps=N` summary before return. C++ and unknown exceptions retain their
+existing error diagnostics. Markers identify the last reached stage; they are
+not a stack trace or proof of where earlier memory corruption originated. A
+fatal OS signal cannot be caught by the C++ exception handler. A final marker
+also cannot prove that destructors/SDK process teardown later completed.
+
+A previous Jetson signal-based stop produced a core-dump message, but no usable
+crash trace was available. The cause remains UNVERIFIED. No speculative SDK
+upgrade, cleanup bypass, crash handler, or sensor reset is added. Real-SDK crash
+reproduction and a usable crash trace are still required before claiming the
+core-dump cause is fixed. Do not automatically repeat a physical trial.
+
+Python retains `last_exit_code` after reaping, including negative POSIX signal
+codes, and logs the bounded stderr tail for nonzero exits during requested
+shutdown. Runtime/SDK failure codes or unexpected fatal signals during shutdown
+are retained as ERROR; `close()` raises the same error on repeat calls until a
+new explicit start resets the run. A cleanup exception during requested stop is
+also preserved. Existing requested SIGINT/SIGTERM and forced SIGKILL fallback
+remain reaped STOPPED outcomes (and are logged when nonzero); STOPPED certifies
+process removal, not that SDK cleanup or physical rotation stopped. Normal
+exit 0 stays idempotent. Startup/runtime retries and all shutdown deadlines stay
+unchanged. This Python change does not add actuator or GPIO operations.
+
+Deploy this step by updating the Jetson repository and rebuilding the standalone
+receiver using the existing commands above. No frontend or backend JAR update
+is needed. Building is hardware-free; running the rebuilt receiver or main.py
+requires a separately described and approved physical trial.
+
+
+The Python manager emits one `L2_RECEIVER_EXIT` JSON line to its text stdout for
+each reaped child, including normal exit 0. It contains the PID, actual exit
+code, and parsed numeric native result/signal/zero-skip count from the bounded
+stderr tail. Missing native summaries (old executable, forced termination or
+crash before final summary) use null, never an invented zero. The event uses
+the same tee text log as the existing Python metrics; inspect it from the second
+terminal with `grep 'L2_RECEIVER_EXIT' /path/to/the-run.log`. In the test pipeline
+helper it goes to diagnostic stderr, leaving JSON protocol stdout unchanged.
+This is how a normal first-zero skip stays observable even when the Python
+frame metric correctly reports `zero_timestamps: 0` for exported frames.

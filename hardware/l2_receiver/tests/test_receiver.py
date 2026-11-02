@@ -81,6 +81,45 @@ class ReceiverTests(unittest.TestCase):
         _, error = process.communicate(timeout=3)
         self.assertEqual(process.returncode, 0, error)
         self.assertIn(b'FAKE_UDP_CLOSED', error)
+        self.assertIn(b'signal=2', error)
+
+    def test_initial_zero_timestamp_is_skipped_without_rewriting_sdk_time(self):
+        process = self.start('zero_then_valid', stdout=subprocess.PIPE)
+        try:
+            header = process.stdout.read(32)
+            values = struct.unpack('<4sIIIdII', header)
+            self.assertEqual((values[4], values[5]), (1234.5, 1))
+            process.send_signal(signal.SIGTERM)
+            output, error = process.communicate(timeout=3)
+            self.assertEqual(process.returncode, 0, error)
+            self.assertIn(b'Skipping cloud with unset SDK timestamp', error)
+            self.assertIn(b'skipped_zero_timestamps=1', error)
+            self.assertIn(b'signal=15', error)
+            self.assertIn(b'SDK closeUDP begin', error)
+            self.assertIn(b'SDK closeUDP complete', error)
+            self.assertIn(b'Exit result=0', error)
+        finally:
+            if process.poll() is None:
+                process.kill(); process.communicate()
+
+    def test_stop_during_run_parse_does_not_fetch_or_emit_another_cloud(self):
+        process = self.start('signal_in_parse', stdout=subprocess.PIPE)
+        output, error = process.communicate(timeout=3)
+        self.assertEqual(output, b'')
+        self.assertEqual(process.returncode, 0, error)
+        self.assertIn(b'signal=15', error)
+        self.assertIn(b'SDK closeUDP complete', error)
+        self.assertNotIn(b'Cloud accessed after stop', error)
+
+    def test_repeated_zero_timestamps_do_not_keep_receiver_alive(self):
+        process = self.start('zero_stamp', stdout=subprocess.PIPE)
+        output, error = process.communicate(timeout=8)
+        self.assertEqual(process.returncode, 1, error)
+        self.assertEqual(output, b'')
+        self.assertIn(b'valid timestamp', error)
+        self.assertEqual(error.count(b'Skipping cloud with unset SDK timestamp'), 1)
+        self.assertEqual(error.count(b'FAKE_UDP_CLOSE_ATTEMPT'), 1)
+        self.assertIn(b'SDK closeUDP complete', error)
 
     def test_disconnected_consumer(self):
         process = self.start(stdout=subprocess.PIPE)

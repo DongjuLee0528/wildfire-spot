@@ -1,5 +1,6 @@
 #include "unitree_lidar_sdk.h"
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <limits>
 #include <fstream>
@@ -23,6 +24,7 @@ std::string scenario() {
     return value ? value : "normal";
 }
 class FakeReader final : public UnitreeLidarReader {
+    mutable unsigned int cloud_count_ = 0;
 public:
     int initializeSerial(std::string, uint32_t, uint16_t, bool, float, float) override { throw std::runtime_error("Unexpected serial call"); }
     int initializeUDP(unsigned short lp, std::string li, unsigned short hp, std::string hi,
@@ -47,6 +49,7 @@ public:
             throw std::runtime_error("Injected parse failure");
         if (scenario().find("run_unknown") != std::string::npos) throw 9;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        if (scenario() == "signal_in_parse") std::raise(SIGTERM);
         return scenario() == "idle" ? 0 : LIDAR_POINT_DATA_PACKET_TYPE;
     }
     void clearBuffer() override {}
@@ -55,6 +58,7 @@ public:
     const LidarImuDataPacket& getLidarImuDataPacket() const override { throw std::runtime_error("Unexpected IMU access"); }
     const LidarVersionDataPacket& getLidarVersionDataPacket() const override { throw std::runtime_error("Unexpected version access"); }
     bool getPointCloud(PointCloudUnitree& cloud) const override {
+        if (scenario() == "signal_in_parse") throw std::runtime_error("Cloud accessed after stop");
         cloud.stamp = 1234.5;
         cloud.id = 42;
         cloud.ringNum = 18;
@@ -73,6 +77,10 @@ public:
         if (scenario() == "oversize") cloud.points.resize(12001);
         if (scenario() == "invalid_stamp") cloud.stamp = std::numeric_limits<double>::infinity();
         if (scenario() == "empty") cloud.points.clear();
+        if (scenario() == "zero_stamp" || scenario() == "zero_then_valid") {
+            cloud.id = cloud_count_++;
+            if (scenario() == "zero_stamp" || cloud.id == 0) cloud.stamp = 0;
+        }
         return true;
     }
     bool getImuData(LidarImuData&) const override { return false; }
