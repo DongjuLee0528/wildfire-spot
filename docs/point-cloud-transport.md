@@ -30,8 +30,18 @@ still wait up to its own timeout before legacy servo shutdown; physical shutdown
 behavior needs its separate hardware review/testing before deployment. No import starts a network worker.
 
 The uploader owns one requests.Session (not shared with SpringTelemetry), selects
-only the latest fresh frame before every send, and sends at most 10Hz. A frame
-is not resent solely because its SDK ID is repeated; object identity tracks
+only the latest fresh frame before every send, and spaces frame POST attempts
+at least 100ms apart by monotonic start deadlines, including an authentication
+refresh retry. Request duration counts toward that interval. After a response,
+the next deadline also stays at least 50ms ahead of the current monotonic time
+to respect the server's 50ms receive-admission spacing when upload latency varies;
+successful requests no longer incur an additional fixed 100ms wait. Missed deadlines do not queue or
+create catch-up bursts. Each request reselects the current fresh frame after the
+cadence wait and after authentication. Healthy cadence waits retain STREAMING;
+CONNECTING denotes login or an actual frame POST. The worker polls an unchanged fresh source
+at 10ms intervals, and an absent/stale source at 100ms intervals; waits remain
+stop-interruptible. A frame is not resent solely because its SDK ID is repeated;
+object identity tracks
 already-sent frames. The server returns exact HTTP204 with no body, consumed so
 the connection is reused. Redirects are disabled. Login JSON is bounded to8192
 bytes. Keys/tokens/raw frames/response bodies are not logged.
@@ -328,3 +338,22 @@ forwarded in the manager's `L2_RECEIVER_EXIT` text-log event on reaping (includi
 normal exit 0), not in Python/browser frame metrics, because those clouds are
 not exported. A missing native summary is null, not evidence of zero skips. This does not
 change the v1 consumer contract or replace monotonic interval measurement.
+
+
+## Upload cadence improvement (step 3)
+
+The measured run had consecutive receiver IDs and about 2% of the overlapping
+ID span absent from successful uploads. Browser decoded/delivered counts were
+equal in that observed window, so this step changes only Python upload cadence.
+Latest-only selection is retained at all hops; no frame queue, protocol change,
+backend rate change, browser history change, or sensor configuration is added.
+HTTP/network delays can still reduce achieved rate. The 10ms source poll is a
+bounded latency/worker-wakeup tradeoff, not a measured Jetson CPU improvement.
+
+Deterministic clock tests cover a 30-second 9.15Hz source with 13ms simulated
+HTTP responses, slower 180ms responses plus the 50ms server guard, variable
+upload delays against modeled server admission, fast-source rate/status behavior,
+retry pacing/fresh re-selection, and stop/staleness during cadence waits. These are scheduling models, not actual
+Jetson/network throughput measurements. Re-run the existing stage metrics after
+deployment to measure the real change. This step requires Jetson Python update
+only; no receiver rebuild, frontend deployment or backend JAR update is needed.

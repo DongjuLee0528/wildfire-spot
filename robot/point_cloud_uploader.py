@@ -11,6 +11,9 @@ from utils.point_cloud_metrics import PointCloudMetrics
 
 logger = logging.getLogger(__name__)
 _UNSET = object()
+_POST_INTERVAL = 0.1
+_RESPONSE_INTERVAL = 0.05
+_SOURCE_POLL_INTERVAL = 0.01
 
 
 class UploadProtocolError(Exception):
@@ -50,6 +53,7 @@ class PointCloudUploader:
         self._failures = 0
         self._token = None
         self._last_sent = None
+        self._next_post_at = 0.0
         self._cleanup_error = None
         self._metrics = PointCloudMetrics('upload_accepted')
 
@@ -70,6 +74,7 @@ class PointCloudUploader:
             self._stop.clear()
             self._metrics.reset()
             self._token = self._last_sent = None
+            self._next_post_at = 0.0
             self._cleanup_error = None
             with self._lock:
                 self._failures = 0
@@ -83,6 +88,7 @@ class PointCloudUploader:
                 logger.error('Cannot start point-cloud upload worker')
 
     def _login(self, session):
+        self._set_state('CONNECTING')
         with session.post(self._base + '/api/device-auth/login',
                           json={'serialNumber': self._serial, 'deviceKey': self._key},
                           timeout=(1, 2), stream=True, allow_redirects=False) as response:
@@ -114,20 +120,33 @@ class PointCloudUploader:
     def _post_frame(self, session, frame):
         if not 32 <= len(frame.data) <= 144032:
             raise UploadProtocolError('Invalid outgoing point-cloud size')
+        self._set_state('CONNECTING')
+        self._next_post_at = time.monotonic() + _POST_INTERVAL
         with session.post(self._base + '/api/device/point-cloud', data=frame.data,
                           headers={'Content-Type': 'application/octet-stream',
                                    'Authorization': 'Bearer ' + self._token},
                           timeout=(1, 2), stream=True, allow_redirects=False) as response:
             if response.status_code == 204 and response.content:
                 raise UploadProtocolError('Unexpected point-cloud response body')
+            self._next_post_at = max(self._next_post_at, time.monotonic() + _RESPONSE_INTERVAL)
             return response.status_code
+
+    def _latest_for_post(self):
+        while not self._stop.is_set():
+            remaining = self._next_post_at - time.monotonic()
+            if remaining <= 0:
+                frame = self._manager.get_latest_frame()
+                return None if frame is self._last_sent else frame
+            if self._stop.wait(remaining):
+                return None
+        return None
 
     def _deliver(self, session, frame):
         if not self._token:
             self._login(session)
         if self._stop.is_set():
             return None
-        frame = self._manager.get_latest_frame()
+        frame = self._latest_for_post()
         if frame is None:
             return None
         status = self._post_frame(session, frame)
@@ -136,7 +155,7 @@ class PointCloudUploader:
             self._login(session)
             if self._stop.is_set():
                 return None
-            frame = self._manager.get_latest_frame()
+            frame = self._latest_for_post()
             if frame is None:
                 return None
             status = self._post_frame(session, frame)
@@ -158,10 +177,9 @@ class PointCloudUploader:
                 if frame is None or frame is self._last_sent:
                     if frame is None:
                         self._set_state('WAITING')
-                    self._stop.wait(0.1)
+                    self._stop.wait(0.1 if frame is None else _SOURCE_POLL_INTERVAL)
                     continue
                 try:
-                    self._set_state('CONNECTING')
                     sent = self._deliver(session, frame)
                     if self._stop.is_set():
                         break
@@ -170,7 +188,6 @@ class PointCloudUploader:
                         with self._lock:
                             self._failures = 0
                         self._set_state('STREAMING', None)
-                    self._stop.wait(0.1)
                 except UploadProtocolError as error:
                     self._set_state('ERROR', str(error))
                     logger.error('Point-cloud upload stopped: %s', error)
