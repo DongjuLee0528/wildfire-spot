@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPointCloudViewerSession } from '../src/pointcloud/pointCloudViewerSession.js';
 
-function setup({ startupError = false, frameError = false, synchronousFailure = false, destroyError = false, accumulate = false, clock, onUpdateExtra } = {}) {
+function setup({ startupError = false, frameError = false, synchronousFailure = false, destroyError = false, accumulate = false, historyWindowMs = 500, clock, onUpdateExtra } = {}) {
     let callbacks, fail, stopped = 0, destroyed = 0, token = 'first-token', connections = 0, fits = 0;
     const canvases = [], updates = [], frames = [], batches = [];
     const container = { ownerDocument: { createElement() {
         const canvas = { setAttribute() {}, remove() { this.removed = true; } }; canvases.push(canvas); return canvas;
     } }, append() {} };
     const create = () => createPointCloudViewerSession({ container, deviceId: 'test-device', getToken: () => token,
-        onUpdate: value => { updates.push(value); onUpdateExtra?.(value); }, accumulate,
+        onUpdate: value => { updates.push(value); onUpdateExtra?.(value); }, accumulate, historyWindowMs,
         now: clock?.now, setTimer: clock?.setTimer, clearTimer: clock?.clearTimer,
         createRenderer: (_canvas, onError) => {
             fail = onError;
@@ -207,4 +207,16 @@ test('automatic retries cannot revive the expired last cloud; a new viewer can r
     assert.equal(session.getStatus().pointCount, 3); assert.equal(session.getStatus().state, 'STREAMING');
     session.stop(); const next = env.create(); env.callbacks.onFrame(historyFrame(1));
     assert.equal(next.getStatus().pointCount, 2); next.stop(); assert.equal(clock.size(), 0);
+});
+
+
+test('one-second session expires receipt history at the selected window and clears its timer on stop', () => {
+    const clock = clockFixture(), env = setup({ accumulate: true, historyWindowMs: 1000, clock }), session = env.create();
+    env.callbacks.onFrame(historyFrame(1)); env.callbacks.onState({ state: 'STREAMING', error: null });
+    clock.advance(500); assert.equal(session.getStatus().pointCount, 2);
+    clock.advance(499); assert.equal(session.getStatus().pointCount, 2);
+    clock.advance(1); assert.equal(session.getStatus().pointCount, 0);
+    assert.equal(session.getStatus().state, 'STALE'); assert.equal(clock.size(), 0);
+    env.callbacks.onFrame(historyFrame(2)); assert.equal(clock.size(), 1);
+    session.stop(); assert.equal(clock.size(), 0);
 });

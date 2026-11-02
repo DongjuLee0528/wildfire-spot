@@ -1,10 +1,18 @@
 export const MAX_FRAME_POINTS = 12000;
-export const MAX_HISTORY_FRAMES = 5;
+export const DEFAULT_HISTORY_FRAMES = 5;
+export const MAX_HISTORY_FRAMES = 10;
 export const MAX_HISTORY_POINTS = MAX_FRAME_POINTS * MAX_HISTORY_FRAMES;
 export const HISTORY_WINDOW_MS = 500;
 
+export function historyFrameLimit(windowMs) {
+    if (![500, 1000].includes(windowMs)) throw new Error('Invalid accumulation window');
+    return windowMs / 100;
+}
+
 export class PointCloudHistory {
-    constructor(now = () => performance.now()) {
+    constructor(now = () => performance.now(), windowMs = HISTORY_WINDOW_MS) {
+        this.frameLimit = historyFrameLimit(windowMs);
+        this.windowMs = windowMs;
         this.now = now;
         this.entries = [];
         this.lastIdentity = null;
@@ -19,21 +27,21 @@ export class PointCloudHistory {
             !Number.isFinite(frame.timestamp) || frame.timestamp < 0)
             throw new Error('Invalid point-cloud history frame');
         const at = this.now();
-        this.entries = this.entries.filter(entry => at - entry.at < HISTORY_WINDOW_MS);
+        this.entries = this.entries.filter(entry => at - entry.at < this.windowMs);
         const identity = `${frame.cloudId}:${frame.timestamp}`;
         if (identity === this.lastIdentity || this.entries.some(entry => entry.identity === identity)) return;
         if (frame.pointCount === 0) this.clear();
         this.entries.push({ frame, at, identity });
-        if (this.entries.length > MAX_HISTORY_FRAMES) this.entries.shift();
+        if (this.entries.length > this.frameLimit) this.entries.shift();
         this.lastIdentity = identity;
     }
 
     snapshot() {
         const at = this.now();
-        this.entries = this.entries.filter(entry => at - entry.at < HISTORY_WINDOW_MS);
+        this.entries = this.entries.filter(entry => at - entry.at < this.windowMs);
         const frames = this.entries.map(entry => entry.frame);
-        return { frames, pointCount: frames.reduce((sum, frame) => sum + frame.pointCount, 0),
+        return { frames, receivedAt: this.entries.map(entry => entry.at), pointCount: frames.reduce((sum, frame) => sum + frame.pointCount, 0),
             latestPointCount: frames.at(-1)?.pointCount ?? 0,
-            expiresAt: this.entries.length ? this.entries[0].at + HISTORY_WINDOW_MS : null };
+            expiresAt: this.entries.length ? this.entries[0].at + this.windowMs : null };
     }
 }

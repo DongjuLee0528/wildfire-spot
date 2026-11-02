@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PointCloudHistory, HISTORY_WINDOW_MS, MAX_HISTORY_FRAMES, MAX_HISTORY_POINTS } from '../src/pointcloud/pointCloudHistory.js';
+import { PointCloudHistory, HISTORY_WINDOW_MS, DEFAULT_HISTORY_FRAMES, MAX_HISTORY_FRAMES, MAX_HISTORY_POINTS } from '../src/pointcloud/pointCloudHistory.js';
 
 function frame(id, count = 2) {
     return { cloudId: id, timestamp: id + 100, pointCount: count, data: new Uint8Array(32 + count * 12) };
@@ -12,7 +12,7 @@ test('history retains at most five original frames and60000 points under a long 
     for (let i = 0; i < 2000; i++) {
         const original = frame(i, 12000); history.push(original);
         const current = history.snapshot();
-        assert.ok(current.frames.length <= MAX_HISTORY_FRAMES);
+        assert.ok(current.frames.length <= DEFAULT_HISTORY_FRAMES);
         assert.ok(current.pointCount <= MAX_HISTORY_POINTS);
         assert.equal(current.frames.at(-1), original);
         assert.ok(current.frames.reduce((sum, item) => sum + item.data.byteLength, 0) <= 720160);
@@ -62,4 +62,17 @@ test('invalid history frame bounds and metadata fail instead of retaining unboun
         { ...valid, data: new Uint8Array(1) }, { ...valid, cloudId: -1 },
         { ...valid, timestamp: NaN }, { ...valid, timestamp: -1 }]) assert.throws(() => history.push(bad));
     assert.equal(history.snapshot().pointCount, 0);
+});
+
+
+test('one-second history retains ten distinct frames and exact receipt times then expires', () => {
+    let time = 0;
+    const history = new PointCloudHistory(() => time, 1000);
+    for (let i = 0; i < 11; i++) { history.push(frame(i, 12000)); time += 90; }
+    let current = history.snapshot();
+    assert.equal(current.pointCount, 120000); assert.equal(current.frames.length, 10);
+    assert.deepEqual(current.receivedAt, Array.from({ length: 10 }, (_, i) => (i + 1) * 90));
+    time = 1090; current = history.snapshot(); assert.equal(current.frames.length, 9);
+    time = 1900; assert.equal(history.snapshot().frames.length, 0);
+    assert.throws(() => new PointCloudHistory(() => 0, 2000), /Invalid accumulation window/);
 });

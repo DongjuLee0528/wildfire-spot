@@ -174,14 +174,21 @@ or a guarantee of detection on every surface. This is individual-frame point
 visualization, not meshing, mapping, SLAM or fire detection from LiDAR.
 
 Raw sensor XYZ is unchanged and Z is shown up; physical mounting alignment is
-not calibrated here. The grid spacing is5m, the colored short axes mark XYZ at
-the sensor origin. The first nonempty frame centers the view on its XYZ bounds
-and fits its bounding sphere with a margin. New frames do not continually move
-the view. Fit scene repeats this operation on the latest frame while preserving
-the viewing angle; Reset view also restores the default oblique angle. A65m
-origin-centered view remains the fallback before any nonempty frame. The narrower
-viewport dimension sets the field of view so portrait canvases also fit.
-User zoom can crop points without changing the received count.
+not calibrated here. Overview grid spacing is5m; colored short axes mark XYZ at the
+sensor origin. Sensor view is the dashboard default: the camera stays at
+(0,0,0), initially looking along +X with +Z up and -Y to screen right. Dragging
+looks around; arrow buttons turn left/right/up/down. Scroll and +/- change the
+field of view from30 to110 degrees (default75) without moving the camera.
+The narrower viewport dimension sets that field of view. The HUD reports sensor
+heading/elevation/FOV, not geographic compass bearing. +X/front, -X/rear,
++Y/left, -Y/right and +Z/up follow the sensor axes and mounting.
+
+Overview restores the external orbit camera and fits the displayed bounds.
+Fit scene switches to overview and refits while preserving the viewing angle;
+Reset view restores the selected mode's starting angle and zoom. New frames do
+not continually move either camera. A65m origin-centered external camera is the
+fallback before a nonempty frame. Sensor view never recenters on cloud bounds.
+Changing view mode does not reconnect or change the received point count.
 
 Point color represents sensor Z height using blue, cyan, yellow and red. Its
 range is set from the fitted frame's minimum/maximum Z, with a minimum0.5m span
@@ -189,12 +196,14 @@ for flat clouds; subsequent values outside that range are clamped. Fitting or
 resetting updates this color range, not the underlying XYZ coordinates. Colors
 are relative to the fitted scene, not a fixed absolute-height legend. Point
 sprites target2 CSS pixels, bounded by the WebGL device's supported size.
-There is no intensity channel or invented data. Drag to orbit, scroll to zoom,
-or use the labeled orbit/zoom/fit/reset buttons. These controls never send robot commands.
+There is no intensity channel or invented data. Overview drag/scroll orbit and
+change target distance; sensor-view controls look around and change FOV. These controls never send robot commands.
 Existing dashboard WASD/Escape robot shortcuts remain unchanged.
 
-A new frame, view/size change, or accumulation-expiration timer schedules a draw;
-there is no idle render loop. In single-frame mode CPU staging capacity and GPU cloud buffer are fixed
+A new frame, view/size change, or accumulation-expiration timer schedules a draw.
+Single-frame mode has no idle render loop. Accumulation schedules animation frames
+while unexpired points need fading, using receipt age in a shader without
+re-uploading XYZ on each animation frame. No draw loop remains after clearing. In single-frame mode CPU staging capacity and GPU cloud buffer are fixed
 at12000 XYZ triples; the latest update replaces previous points. Device pixel ratio is capped at2,
 and drawing dimensions at2048px per axis with a shared scale to preserve aspect. A valid zero-point frame clears old
 points and says no points; stale, retry and terminal failure clear the cloud.
@@ -202,8 +211,20 @@ A healthy connection rotation preserves a still-fresh cloud while showing
 Reconnecting. Only onFrame(null), not CONNECTING by itself, clears the cloud.
 
 Accumulation is an optional, off-by-default browser display mode for a stationary
-sensor. It retains at most5 distinct frames from the last500ms of browser
-monotonic receipt time, not sensor timestamps, with at most60000 displayed points.
+sensor. Trail window selects500ms/5 distinct frames/60000 points or
+1000ms/10 distinct frames/120000 points; the dashboard defaults to1s when enabled.
+The library default remains500ms for existing callers. Retention uses browser
+monotonic receipt time, not sensor timestamps. Point brightness fades linearly
+toward the background over the selected window; expiration removes points.
+History frames draw oldest to newest with depth cleared between frames, so
+latest observations take precedence over old trails while each frame retains
+its own depth ordering. Overlap between frames is temporal priority, not a
+physically occlusion-correct merged map. In accumulated Overview, grid/axes are
+background reference guides: clearing depth for history also lets points cover
+those guides irrespective of their relative depth. They are not occluding
+geometry. Single-frame Overview retains its ordinary depth ordering.
+Sensor view hides the origin-plane grid,
+which cannot provide distance cues from a camera on that plane.
 Each source frame still obeys the12000-point wire limit. Raw XYZ is not transformed,
 and no points are interpolated. Source cloud ID plus timestamp identifies repeated
 frames: duplicates neither inflate the count nor renew their retention time.
@@ -214,9 +235,10 @@ An empty frame immediately removes previous points. Expiration also runs without
 new input using one scheduled timer per viewer; browser timer throttling or a
 blocked event loop can delay cleanup, so this is not a hard real-time guarantee.
 
-Accumulation uses fixed CPU/GPU staging of60000 XYZ triples each and at most5
-source-frame buffers (at most720160 source bytes including headers). Switching
-mode recreates the viewer, resets its view, and clears history. Stale/retry/error,
+Accumulation uses fixed CPU/GPU staging sized for the selected limit: up to120000
+XYZ triples and120000 receipt-age floats each, plus at most10 source-frame buffers
+(at most1440320 source bytes including headers). Switching accumulation/window
+recreates the viewer, resets its camera within the selected view mode, and clears history. Stale/retry/error,
 manual reconnect, device changes and unmount discard history and cancel the
 expiration timer. Healthy stream rotation can keep only the still-unexpired
 history, never extend its window. The latest source point count and combined
@@ -234,9 +256,9 @@ Reconnect creates a new canvas/context and retries with the current token.
 No automatic context restoration or simulated fallback cloud is used.
 
 Single-frame browser freshness means2s since a complete local frame receipt, not2s
-since acquisition. Accumulation instead clears its visible window after500ms
+since acquisition. Accumulation instead clears its visible window after the selected500ms/1000ms
 without a distinct frame and reports No fresh data even if the transport has not
-yet reached its2s stale deadline. A link below2Hz can therefore alternate between
+yet reached its2s stale deadline. A link slower than the selected window can alternate between
 Live and No fresh data in accumulation mode; use single-frame mode on such links. Sensor timestamps are not synchronized clocks. Server frame
 transfer age is capped at4s from server receipt, but network/proxy buffering
 can add delay. The browser aborts after6s without a complete frame, so links
@@ -357,3 +379,22 @@ retry pacing/fresh re-selection, and stop/staleness during cadence waits. These 
 Jetson/network throughput measurements. Re-run the existing stage metrics after
 deployment to measure the real change. This step requires Jetson Python update
 only; no receiver rebuild, frontend deployment or backend JAR update is needed.
+
+
+## Sensor-view display improvement (step 4)
+
+This step changes only frontend display code and tests/documentation. Deploy the
+rebuilt frontend; no Jetson Python pull, native rebuild or backend JAR change is
+required for these display features. No physical control command is added.
+
+Hardware-free verification covers +X/-X view direction, fixed camera origin,
+bounded FOV, overview fitting, selected history limits, duplicate/stale clearing,
+fade clock/GPU bounds and cleanup. During this implementation, one-off local
+synthetic-browser checks exercised mouse/buttons, mobile layout, context
+loss/reconnect and actual pixel fading. Those local checks are not retained
+as repository regression fixtures; the committed browser pipeline test does
+not cover those new interaction/pixel cases. Synthetic checks do not
+prove real sensor mounting alignment, human recognition, display latency or
+performance with real video/AI. Compare0.5s and1s using the stationary L2 at the
+venue; a longer window increases density and moving-object trails, not sensor
+resolution. Existing server-to-browser latest-frame selection remains unchanged.

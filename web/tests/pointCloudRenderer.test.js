@@ -8,10 +8,11 @@ function environment(fault = '') {
     const gl = new Proxy({ NO_ERROR: 0, ALIASED_POINT_SIZE_RANGE: 1, COMPILE_STATUS: 2, LINK_STATUS: 3,
         VERTEX_SHADER: 4, FRAGMENT_SHADER: 5, ARRAY_BUFFER: 6, DYNAMIC_DRAW: 7, STATIC_DRAW: 8,
         DEPTH_TEST: 9, COLOR_BUFFER_BIT: 16, DEPTH_BUFFER_BIT: 32, LINES: 10, POINTS: 11, FLOAT: 12,
+        isContextLost: () => false,
         createShader: () => ({}), getShaderParameter: () => fault !== 'compile',
         createProgram: () => ({}), getProgramParameter: () => fault !== 'link',
         createBuffer: () => fault === 'allocation' ? null : {},
-        getAttribLocation: () => 0, getUniformLocation: (_program, name) => name, getParameter: () => [1, 4],
+        getAttribLocation: (_program, name) => name === 'receivedAt' ? 1 : 0, getUniformLocation: (_program, name) => name, getParameter: () => [1, 4],
         getError: () => fault === 'gl-error' ? 1285 : 0,
         getExtension: () => ({ loseContext: () => calls.push(['loseContext']) }),
     }, { get(target, name) { return target[name] ?? ((...args) => calls.push([name, ...args])); } });
@@ -248,7 +249,7 @@ test('accumulation uses a fixed60000-point buffer, preserves frame XYZ, and reje
     const env = environment(), renderer = createPointCloudRenderer(env.canvas, assert.fail, { accumulate: true });
     assert.equal(env.calls.filter(call => call[0] === 'bufferData' && call[2] === 720000).length, 1);
     renderer.setFrames([frame(12000), frame(12000), frame(12000), frame(12000), frame(12000)]); env.flush();
-    assert.equal(env.calls.filter(c => c[0] === 'drawArrays' && c[1] === env.gl.POINTS).at(-1)[3], 60000);
+    assert.equal(env.calls.filter(c => c[0] === 'drawArrays' && c[1] === env.gl.POINTS).slice(-5).reduce((sum, c) => sum + c[3], 0), 60000);
     renderer.setFrames([cloudFrame([[1, 2, 3]]), cloudFrame([[-1, -2, -3]])]); env.flush();
     assert.deepEqual(Array.from(env.calls.filter(c => c[0] === 'bufferSubData').at(-1)[3]), [1, 2, 3, -1, -2, -3]);
     assert.throws(() => renderer.setFrames(Array.from({ length: 6 }, () => frame(1))), /Invalid 3D frame batch/);
@@ -280,10 +281,112 @@ test('valid empty frame performs a zero-length GPU upload; stale/null clear does
         const before = env.calls.filter(call => call[0] === 'bufferSubData').length;
         renderer.setFrame(frame(0)); env.flush();
         const received = env.calls.filter(call => call[0] === 'bufferSubData');
-        assert.equal(received.length, before + 1); assert.equal(received.at(-1)[3].length, 0);
+        assert.equal(received.length, before + (accumulate ? 2 : 1)); assert.equal(received.at(-1)[3].length, 0);
         renderer.setFrame(null); env.flush();
         assert.equal(env.calls.filter(call => call[0] === 'bufferSubData').length, received.length);
         assert.equal(env.calls.filter(c => c[0] === 'drawArrays' && c[1] === env.gl.POINTS).at(-1)[3], 0);
         renderer.destroy();
     }
+});
+
+
+test('sensor origin looks +X with -Y on the right and Z up, independent of cloud bounds', () => {
+    const env = environment(), views = [];
+    const renderer = createPointCloudRenderer(env.canvas, assert.fail, { viewMode: 'sensor', onView: value => views.push(value) });
+    renderer.setFrame(cloudFrame([[4, -2, -1], [8, 3, 2]])); env.flush();
+    assert.deepEqual(lastUniform(env, 'uniform3fv', 'center'), [0, 0, 0]);
+    assert.equal(lastUniform(env, 'uniform1f', 'distance'), 0);
+    const eye = lastUniform(env, 'uniform3fv', 'eye'), right = lastUniform(env, 'uniform3fv', 'right');
+    assert.ok(Math.abs(eye[0] + 1) < 1e-10); assert.ok(Math.abs(right[1] + 1) < 1e-10);
+    assert.equal(views.at(-1).heading, 0); assert.ok(Math.abs(views.at(-1).elevation) < 1e-10);
+    renderer.zoom(0.001); renderer.orbit(0, 0.15); env.flush();
+    assert.equal(views.at(-1).fov, 30); assert.ok(views.at(-1).elevation > 0);
+    assert.equal(lastUniform(env, 'uniform1f', 'distance'), 0);
+    renderer.reset(); renderer.orbit(-Math.PI, 0); env.flush();
+    assert.equal(Math.round(views.at(-1).heading), 180);
+    assert.ok(lastUniform(env, 'uniform3fv', 'eye')[0] > 0.99);
+    renderer.zoom(1e8); env.flush(); assert.equal(views.at(-1).fov, 110);
+    renderer.setViewMode('overview'); env.flush();
+    assert.ok(lastUniform(env, 'uniform1f', 'distance') >= 2);
+    assert.deepEqual(lastUniform(env, 'uniform3fv', 'center'), [6, 0.5, 0.5]);
+    renderer.setViewMode('sensor'); env.flush(); assert.equal(views.at(-1).heading, 0);
+    assert.throws(() => renderer.setViewMode('bad'), /Invalid view mode/);
+    renderer.destroy();
+});
+
+test('one-second accumulation has bounded ten-frame buffers, receipt ages, fade clock and cancellation', () => {
+    let time = 100;
+    const env = environment(), renderer = createPointCloudRenderer(env.canvas, assert.fail,
+        { accumulate: true, historyWindowMs: 1000, now: () => time, viewMode: 'sensor' });
+    const frames = Array.from({ length: 10 }, () => frame(12000));
+    time = 1000; renderer.setFrames(frames, Array.from({ length: 10 }, (_, i) => 100 + i * 100)); env.flush();
+    assert.equal(env.calls.filter(c => c[0] === 'drawArrays' && c[1] === env.gl.POINTS).slice(-10).reduce((sum, c) => sum + c[3], 0), 120000);
+    assert.ok(env.calls.some(c => c[0] === 'bufferData' && c[2] === 1440000));
+    assert.ok(env.calls.some(c => c[0] === 'bufferData' && c[2] === 480000));
+    assert.equal(lastUniform(env, 'uniform1f', 'fadeWindow'), 1);
+    assert.equal(lastUniform(env, 'uniform1f', 'clock'), 0.9);
+    const uploads = env.calls.filter(c => c[0] === 'bufferSubData');
+    assert.equal(uploads.at(-2)[3].length, 120000); assert.equal(uploads.at(-2)[3][0], 0);
+    assert.ok(Math.abs(uploads.at(-2)[3].at(-1) - 0.9) < 1e-6);
+    assert.equal(env.callbacks.size, 1);
+    time = 1500; env.flush(); assert.equal(lastUniform(env, 'uniform1f', 'clock'), 1.4);
+    assert.equal(env.calls.filter(c => c[0] === 'bufferSubData').length, uploads.length);
+    assert.throws(() => renderer.setFrames([...frames, frame(1)]), /Invalid 3D frame batch/);
+    assert.throws(() => renderer.setFrames([frame(1)], [99]), /Invalid frame receipt times/);
+    assert.throws(() => renderer.setFrames([frame(1)], [Infinity]), /Invalid frame receipt times/);
+    renderer.setFrames([] , []); env.flush(); assert.equal(env.callbacks.size, 0);
+    renderer.destroy(); assert.equal(env.calls.filter(c => c[0] === 'deleteBuffer').length, 3);
+    assert.throws(() => createPointCloudRenderer(environment().canvas, assert.fail, { historyWindowMs: 2000 }));
+});
+
+
+test('overview selected while empty fits resumed data after sensor-mode color fitting', () => {
+    const env = environment(), renderer = createPointCloudRenderer(env.canvas, assert.fail, { viewMode: 'sensor' });
+    renderer.setFrame(cloudFrame([[20, 10, 1], [22, 12, 2]])); env.flush();
+    renderer.setFrame(null); renderer.setViewMode('overview'); env.flush();
+    renderer.setFrame(cloudFrame([[20, 10, 1], [22, 12, 2]])); env.flush();
+    assert.deepEqual(lastUniform(env, 'uniform3fv', 'center'), [21, 11, 1.5]);
+    assert.ok(lastUniform(env, 'uniform1f', 'distance') < 10);
+    renderer.setViewMode('sensor'); renderer.setFrame(null); renderer.fit();
+    renderer.setFrame(cloudFrame([[8, 4, 1], [10, 6, 2]])); env.flush();
+    assert.deepEqual(lastUniform(env, 'uniform3fv', 'center'), [9, 5, 1.5]);
+    renderer.destroy();
+});
+
+test('history is drawn oldest to newest with isolated depth so faded foreground cannot hide fresh points', () => {
+    const env = environment(), renderer = createPointCloudRenderer(env.canvas, assert.fail, { accumulate: true });
+    renderer.setFrames([cloudFrame([[2, 0, 0]]), cloudFrame([[5, 0, 0], [6, 0, 1]])]);
+    const before = env.calls.length; env.flush();
+    const calls = env.calls.slice(before), draws = calls.filter(c => c[0] === 'drawArrays' && c[1] === env.gl.POINTS);
+    assert.deepEqual(draws.map(c => c.slice(2)), [[0, 1], [1, 2]]);
+    for (const draw of draws) assert.deepEqual(calls[calls.indexOf(draw) - 1], ['clear', env.gl.DEPTH_BUFFER_BIT]);
+    renderer.destroy();
+});
+
+
+test('context loss detected during a fade draw reports the same recoverable message before DOM event delivery', () => {
+    const env = environment(), errors = [];
+    const renderer = createPointCloudRenderer(env.canvas, error => errors.push(error), { accumulate: true, now: () => 0 });
+    renderer.setFrames([frame(1)], [0]);
+    env.gl.getError = () => 1285; env.gl.isContextLost = () => true;
+    env.flush();
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].message, '3D graphics context lost. Reconnect to restore the view.');
+    env.events.get('webglcontextlost')({ preventDefault() {} }); assert.equal(errors.length, 1);
+    renderer.destroy(); assert.equal(env.callbacks.size, 0);
+});
+
+
+test('sensor pointer drag turns right/down without moving origin and cancellation stops further look input', () => {
+    const env = environment(), views = [];
+    const renderer = createPointCloudRenderer(env.canvas, assert.fail, { viewMode: 'sensor', onView: view => views.push(view) });
+    env.flush();
+    env.events.get('pointerdown')({ button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+    env.events.get('pointermove')({ pointerId: 1, clientX: 40, clientY: 10 }); env.flush();
+    assert.ok(views.at(-1).heading > 330 && views.at(-1).heading < 350);
+    assert.ok(views.at(-1).elevation < 0); assert.equal(lastUniform(env, 'uniform1f', 'distance'), 0);
+    env.events.get('pointercancel')({ pointerId: 1 });
+    const before = views.length;
+    env.events.get('pointermove')({ pointerId: 1, clientX: 80, clientY: 50 }); env.flush();
+    assert.equal(views.length, before); renderer.destroy();
 });
