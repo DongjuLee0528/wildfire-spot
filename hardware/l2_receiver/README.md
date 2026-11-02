@@ -16,7 +16,7 @@ as native macOS libraries. SDK files and binaries are not vendored in this repo.
 Retain the upstream BSD-3-Clause license when distributing the SDK or linked
 executables. This repository's existing license is unchanged.
 
-On the Jetson/Linux build host, install CMake, a C++17 compiler, and Git. Fetch
+On the Jetson/Linux build host, install CMake, Python 3.8 or newer, a C++17 compiler, and Git. Fetch
 the dependency outside this repository and build outside the source tree:
 
 ```bash
@@ -241,11 +241,13 @@ not a stack trace or proof of where earlier memory corruption originated. A
 fatal OS signal cannot be caught by the C++ exception handler. A final marker
 also cannot prove that destructors/SDK process teardown later completed.
 
-A previous Jetson signal-based stop produced a core-dump message, but no usable
-crash trace was available. The cause remains UNVERIFIED. No speculative SDK
-upgrade, cleanup bypass, crash handler, or sensor reset is added. Real-SDK crash
-reproduction and a usable crash trace are still required before claiming the
-core-dump cause is fixed. Do not automatically repeat a physical trial.
+The subsequent Jetson GDB trace confirmed a recursive UDP destructor chain:
+D0 calls D1 (aliased to D2), and D2 branches back to D0. The pinned upstream
+archive contains that same relocation; it is not introduced by the receiver's
+link configuration. The build-copy repair below fixes this confirmed cause.
+Actual Jetson streaming/shutdown verification of the rebuilt binary remains
+required. Do not automatically repeat a physical trial. No SDK upgrade, cleanup
+bypass, crash handler, sensor reset, or rotation command is added.
 
 Python retains `last_exit_code` after reaping, including negative POSIX signal
 codes, and logs the bounded stderr tail for nonzero exits during requested
@@ -274,3 +276,68 @@ terminal with `grep 'L2_RECEIVER_EXIT' /path/to/the-run.log`. In the test pipeli
 helper it goes to diagnostic stderr, leaving JSON protocol stdout unchanged.
 This is how a normal first-zero skip stays observable even when the Python
 frame metric correctly reports `zero_timestamps: 0` for exported frames.
+
+
+## Pinned SDK destructor relocation repair
+
+The original aarch64 SDK's `UDPHandler` D2 destructor branches to D0, while D0
+calls D1 at D2's address. Jetson GDB confirmed that exact cycle in the linked
+receiver. The x86_64 archive has the same defective symbol reference. D0's
+operator-delete call is never reached on this path before stack exhaustion.
+
+`repair_sdk_shutdown.py` changes the D2 tail-call relocation target from
+`_ZN10UDPHandlerD0Ev` to `_ZN10UDPHandler5CloseEv`. The existing `Close()` closes
+an open descriptor and clears its fields; calling it again after SDK
+`closeUDP()` already closed the descriptor is safe for this pinned implementation.
+D0 then returns from D1/D2 and reaches its original operator-delete operation.
+The class layout, vtable, socket I/O methods, sensor API and receiver framing
+are unchanged. The repair replaces one symbol index byte inside the existing
+8-byte ELF relocation information field, preserving archive length and index.
+It does not suppress `closeUDP()` or skip object deallocation.
+
+The input is accepted only when its full SHA-256 matches the pinned revision.
+The exact original relocation bytes must also match. Metadata is:
+
+| Architecture | Original archive SHA-256 | Archive byte offset of relocation info | Original bytes | Repaired bytes |
+| --- | --- | --- | --- | --- |
+| aarch64 | `4e334b67c1a92152c89363d8014a6e361d7bf590e58484d7d6ddc8541389de28` | 71070 | `1a0100001f000000` | `1a01000029000000` |
+| x86_64 | `a8530545cbd435e3a96b9a099cd57921202aed3d690066f55ea0ade4310212d3` | 77346 | `040000001e000000` | `0400000029000000` |
+
+CMake generates `libunilidar_sdk2_shutdown_fixed.a` in the build directory and
+links that copy. The source SDK archive is not overwritten. Unknown, modified,
+wrong-architecture or already-repaired input fails the build; do not disable the
+check or silently link the original. SDK upgrades require a new investigation
+and updated verified metadata, or removal of this repair after upstream fixes.
+Generated copies and linked executables remain subject to the upstream license
+requirements described above. No SDK binary is committed to this repository.
+
+After pulling this change, rerun the existing CMake configure/build commands.
+CMakeLists changes also trigger regeneration during a normal incremental build.
+The build log must show `Repaired pinned SDK shutdown relocation`; the link
+command must use `libunilidar_sdk2_shutdown_fixed.a`. No frontend/JAR rebuild is
+needed. Rebuilding does not execute the sensor driver.
+
+Hardware-free archive checks run on macOS or Linux:
+
+```bash
+UNITREE_LIDAR_SDK_ROOT="$HOME/workspace/unilidar_sdk2/unitree_lidar_sdk" \
+  python3 hardware/l2_receiver/tests/test_sdk_archive_repair.py
+```
+
+The separate `test_sdk_shutdown_linux.py` must run in a nonprivileged,
+network-isolated Linux container, with only active loopback and no external
+routes, source/SDK mounts read-only, and a writable executable temporary folder.
+It builds the actual production receiver using the real pinned SDK. A
+constructor/destructor-only harness reproduces the original SIGSEGV with core
+files disabled and checks repeated cleanup with the repaired archive. Production
+SIGINT/SIGTERM tests use container loopback addresses only and no sensor. The
+Linux tests refuse an ordinary networked host. Example inside that container:
+
+```bash
+UNITREE_LIDAR_SDK_ROOT=/sdk PYTHONDONTWRITEBYTECODE=1 \
+  python3 /receiver/tests/test_sdk_shutdown_linux.py
+```
+
+ARM64 Linux execution verifies the actual SDK cleanup without physical hardware.
+The x86_64 repair has archive/hash verification; its native runtime remains
+unverified here. Fake-SDK tests alone do not verify this vendor-binary repair.
