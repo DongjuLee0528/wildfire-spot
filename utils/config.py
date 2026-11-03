@@ -192,6 +192,10 @@ CAMERA_IOU_THRESHOLD = _env_float("WILDFIRE_CAMERA_IOU", 0.45)
 CAMERA_FIRE_CLASSES = ["fire", "smoke"]
 
 MODEL_PATH = _env_path("WILDFIRE_MODEL_PATH", "models/wildfire_baseline/weights/best.pt")
+PERSON_DETECTION_ENABLED = _env_bool("PERSON_DETECTION_ENABLED", False)
+PERSON_MODEL_PATH = _env_path("PERSON_MODEL_PATH", str(Path(__file__).resolve().parents[1] / "models/person/yolo11n.pt"))
+PERSON_DETECTION_FPS = _bounded_float("PERSON_DETECTION_FPS", 10.0, 0.1, 10.0)
+PERSON_CONFIDENCE_THRESHOLD = _bounded_float("PERSON_CONFIDENCE_THRESHOLD", 0.5, 0.01, 1.0)
 
 TEMP_THRESHOLD = 60
 HUMIDITY_THRESHOLD = 20

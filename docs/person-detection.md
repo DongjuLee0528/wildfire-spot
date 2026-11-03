@@ -1,19 +1,41 @@
-# Person detection: stage 2
+# Person detection: stages 2 and 3
 
 ## Scope and activation
 
-This stage adds shared camera capture and a separate person-inference worker.
-It does not add person boxes, a person API, device telemetry, environment flags,
-or a person-worker startup/shutdown connection in main.py. Those belong to
-stage 3. Starting the existing main still runs only its existing fire/smoke
-model; the camera is now continuously read by one capture worker rather than
-by each video viewer and fire evaluation. No physical tests were run here.
+Shared capture and a separate person-inference worker are now connected to
+main.py. One main process starts/stops the worker and composes fresh person
+boxes with the existing fire/smoke boxes in the existing MJPEG stream. There is
+no separate person API or telemetry schema, and no frontend or JAR change.
+Person results do not change fire decisions, alerts, evidence or robot movement.
 
-No training, model download, dependency changes, frontend build or JAR change
-is part of this stage. Prepare the official COCO-pretrained yolo11n.pt locally
-before activating the worker in the later integration stage. A missing file
-fails the person worker before importing its model loader; it never downloads
-a replacement. Do not replace the existing fire/smoke best.pt.
+Person detection is opt-in and disabled by default. Prepare the official
+COCO-pretrained yolo11n.pt as models/person/yolo11n.pt, then set these environment
+variables before starting main.py from the project root:
+
+```ini
+PERSON_DETECTION_ENABLED=true
+PERSON_MODEL_PATH=./models/person/yolo11n.pt
+PERSON_DETECTION_FPS=10
+PERSON_CONFIDENCE_THRESHOLD=0.5
+```
+
+Without a PERSON_MODEL_PATH override, the default resolves relative to the
+project directory, independent of the launch directory. An explicit relative
+path resolves from the process working directory. FPS is bounded to 0.1–10 and
+confidence to 0.01–1; invalid/non-finite numbers use defaults. The target of
+10 inference starts/s is not verified Jetson throughput. The model can return
+up to 100 person boxes; this is not a real-world accuracy guarantee.
+
+The existing .env.robot is not loaded automatically: export its values using
+the existing launch procedure. The example keeps person detection disabled.
+No training, model download or dependency changes were performed. Missing local
+weights stop only the person worker and are logged; no automatic download is
+allowed. Do not replace the fire/smoke best.pt. PERSON_DETECTION_START_REQUESTED
+means asynchronous startup was requested, not that model loading succeeded.
+Worker errors use the project logger vision.person_detection.
+
+No physical tests were run. Main still initializes its existing hardware and
+actuator paths; tests use only fake dependencies, not a real main launch.
 
 ## Frame ownership
 
@@ -80,8 +102,9 @@ The source camera is owned separately and must outlive the person worker.
 
 Existing fire/smoke thresholds, result keys, evidence overlay and FireDetector
 rules remain unchanged. Person results are not appended to the fire result.
-The current MJPEG endpoint still draws only existing fire/smoke boxes; it reads
-the shared camera instead of initiating native reads. No inference is added
+The MJPEG endpoint draws existing fire/smoke boxes plus yellow Person labels
+with confidence percentages. Expired, stopped or failed person results have no
+boxes. Rendering reads the shared camera instead of initiating native reads. No inference is added
 inside an HTTP request. Fire evaluation still uses its existing sensor path
 and completion-plus-interval timing. A failed fire model does not prevent
 shared camera capture or a separately started person worker from running.
@@ -91,7 +114,7 @@ shared camera capture or a separately started person worker from running.
 Run only hardware-free mocks from the project root:
 
 ```bash
-python3 -m unittest tests.test_frame_capture tests.test_person_detection tests.test_camera_vision_shared
+python3 -m unittest tests.test_frame_capture tests.test_person_detection tests.test_camera_vision_shared tests.test_person_integration
 ```
 
 Tests use synthetic arrays, fake capture handles and fake models. They cover
@@ -106,8 +129,9 @@ versions need target validation. Do not blindly reinstall open-ended packages.
 Only package metadata was read locally; real camera/model/GPU execution was
 not used to claim compatibility. Source weights and deployment are later work.
 
-Hardware boundary review: no main, actuator, GPIO/PWM, pan/tilt, navigation,
-fire decision/state-machine, backend or L2 control code is changed. Camera read
+Hardware boundary review: main adds only person-worker lifecycle wiring.
+Actuator, GPIO/PWM, pan/tilt, navigation, fire decision/state-machine, backend
+and L2 control code are unchanged. Camera read
 ownership/lifecycle is changed and still needs physical device verification
 with movement power isolated before target deployment.
 
@@ -124,3 +148,18 @@ this backlog. Keep the bounded capture cadence for now; measure acquisition
 latency and driver buffering on Jetson before changing successful-read pacing.
 Long frame gaps can also exceed the existing Spring proxy read timeout (5s),
 which still requires client reconnection. No automatic hardware reopen is added.
+
+On shutdown, main requests person stop without joining, runs its existing
+hardware cleanup, then joins the person worker before releasing the shared
+camera. The person join and camera release also run if unrelated cleanup fails.
+A person close timeout is logged and does not skip camera cleanup. A blocked
+native call cannot be forcibly interrupted. Person boxes are used only by the
+live overlay; fire evidence images and fire/telemetry schemas remain unchanged.
+
+Person labels are placed inside the image bounds, including top/right-edge
+boxes, when the image is large enough for the text. Fire label placement is
+unchanged. Results that already exceed the 500ms receipt-age limit on completion
+are dropped and emit an expiry warning at most once every 5s. Slow inference
+can therefore cause flickering or no person boxes even while inferences run;
+absence of boxes is not proof that no person is present. Target latency must
+be measured with fire inference enabled before changing the freshness policy.

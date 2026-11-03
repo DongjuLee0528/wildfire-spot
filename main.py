@@ -23,6 +23,38 @@ from utils.logger import WildfireLogger
 import robot.robot_api as robot_api
 
 
+def _start_person_detection(logger, camera_vision):
+    from utils.config import (PERSON_DETECTION_ENABLED, PERSON_MODEL_PATH,
+                              PERSON_DETECTION_FPS, PERSON_CONFIDENCE_THRESHOLD)
+    if not PERSON_DETECTION_ENABLED:
+        logger.log_system_state("PERSON_DETECTION_DISABLED")
+        return None
+    detector, started = None, False
+    try:
+        if camera_vision is None or not camera_vision.is_camera_available():
+            logger.log_error("Main.person_detection_init", "Camera unavailable; person detection skipped")
+            return None
+        from vision.person_detection import PersonDetector
+        WildfireLogger("vision.person_detection")
+        detector = PersonDetector(camera_vision, PERSON_MODEL_PATH, fps=PERSON_DETECTION_FPS,
+                                  confidence=PERSON_CONFIDENCE_THRESHOLD)
+        camera_vision.set_person_detector(detector)
+        detector.start()
+        logger.log_system_state(f"PERSON_DETECTION_START_REQUESTED fps={PERSON_DETECTION_FPS}")
+        started = True
+        return detector
+    except Exception as error:
+        logger.log_error("Main.person_detection_init", type(error).__name__)
+        return None
+    finally:
+        if detector is not None and not started:
+            camera_vision.set_person_detector(None)
+            try:
+                detector.close()
+            except Exception as error:
+                logger.log_error("Main.person_detection_cleanup", type(error).__name__)
+
+
 def _start_keyboard_controller(logger):
     """
     Create RobotKeyboardController and return it.
@@ -621,6 +653,7 @@ def main():
     keyboard_input = None
     camera_control_manager = None
     camera_vision = None
+    person_detector = None
     spring_telemetry = None
     point_cloud_uploader = None
     manual_control_manager = None
@@ -674,6 +707,8 @@ def main():
         if runtime.fire_detector is not None:
             runtime.fire_detector.camera_vision = camera_vision
             logger.log_system_state(f"FIRE_DETECTOR_CAMERA_VISION_WIRED camera_vision={camera_vision is not None}")
+
+        person_detector = _start_person_detection(logger, camera_vision)
 
         from robot.robot_core_data_collector import RobotCoreDataCollector
         _collector = RobotCoreDataCollector.from_runtime_context(runtime)
@@ -816,6 +851,11 @@ def main():
                 point_cloud_uploader.request_stop()
             except Exception as error:
                 logger.log_error("Main.point_cloud_upload_stop", str(error))
+        if person_detector is not None:
+            try:
+                person_detector.request_stop()
+            except Exception as error:
+                logger.log_error("Main.person_detection_stop", type(error).__name__)
         try:
             if runtime is not None and runtime.point_cloud_manager is not None:
                 try:
@@ -852,11 +892,6 @@ def main():
                     pass
             if keyboard_input is not None:
                 keyboard_input.restore()
-            if camera_vision is not None:
-                try:
-                    camera_vision.release()
-                except Exception:
-                    pass
             if runtime is not None:
                 try:
                     runtime.close()
@@ -864,6 +899,17 @@ def main():
                     pass
         finally:
             try:
+                if person_detector is not None:
+                    try:
+                        person_detector.close()
+                    except Exception as error:
+                        logger.log_error("Main.person_detection_shutdown", type(error).__name__)
+                if camera_vision is not None:
+                    try:
+                        camera_vision.set_person_detector(None)
+                        camera_vision.release()
+                    except Exception as error:
+                        logger.log_error("Main.camera_vision_shutdown", type(error).__name__)
                 if point_cloud_uploader is not None:
                     try:
                         point_cloud_uploader.close()

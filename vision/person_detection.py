@@ -39,6 +39,7 @@ class PersonDetector:
         self._latest = None
         self._inferences = 0
         self._shutdown_error = None
+        self._last_expiry_warning = None
 
     def _set_state(self, state, error=None):
         with self._lock:
@@ -56,6 +57,7 @@ class PersonDetector:
             with self._lock:
                 self._latest, self._inferences, self._model_available = None, 0, False
                 self._shutdown_error = None
+                self._last_expiry_warning = None
             self._set_state('STARTING')
             try:
                 self._thread = threading.Thread(target=self._run, name='person-detection', daemon=True)
@@ -155,11 +157,18 @@ class PersonDetector:
                     if self._stop.is_set():
                         break
                     self._inferences += 1
-                    if self._clock() - snapshot.received_at < self._max_age:
+                    age = self._clock() - snapshot.received_at
+                    if age < self._max_age:
                         self._latest = (sequence, snapshot.received_at, detections)
                         self._state = 'STREAMING'
                     else:
                         self._latest, self._state = None, 'STALE'
+                now = self._clock()
+                if (age >= self._max_age and not self._stop.is_set() and
+                        (self._last_expiry_warning is None or now - self._last_expiry_warning >= 5)):
+                    logger.warning('Person inference result expired before publication (frame age %.3fs; limit %.3fs)',
+                                   age, self._max_age)
+                    self._last_expiry_warning = now
         except Exception as error:
             message = str(error) if isinstance(error, PersonDetectionError) else 'Person ' + phase + ' failed: ' + type(error).__name__
             self._set_state('ERROR', message)
@@ -186,13 +195,16 @@ class PersonDetector:
                     'person_detected': bool(latest[2]) if fresh else False,
                     'detections': copy.deepcopy(latest[2]) if fresh else [], 'inferences': self._inferences}
 
+    def request_stop(self):
+        self._stop.set()
+        with self._lock:
+            self._latest = None
+
     def close(self, timeout=3):
         if not math.isfinite(timeout) or timeout < 0:
             raise PersonDetectionError('Invalid person close timeout')
         with self._lifecycle:
-            self._stop.set()
-            with self._lock:
-                self._latest = None
+            self.request_stop()
             if self._thread is not None and self._thread.ident is not None:
                 self._thread.join(timeout)
                 if self._thread.is_alive():

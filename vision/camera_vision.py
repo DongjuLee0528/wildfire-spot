@@ -32,6 +32,7 @@ except ImportError:
 _BBOX_COLOR = {
     "fire": (0, 0, 255),
     "smoke": (255, 0, 0),
+    "person": (0, 255, 255),
 }
 _BBOX_COLOR_DEFAULT = (0, 255, 0)
 
@@ -98,6 +99,7 @@ class CameraVision:
 
         self._capture = None
         self._latest_overlay_frame = None
+        self._person_detector = None
         self._camera_available = False  # True after VideoCapture is successfully opened
         self._model_available = False    # True after YOLO model is loaded from MODEL_PATH
 
@@ -304,8 +306,13 @@ class CameraVision:
                     x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
                     color = _BBOX_COLOR.get(cls_name, _BBOX_COLOR_DEFAULT)
                     cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
-                    label = cls_name.capitalize()
-                    cv2.putText(overlay, label, (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+                    label = f"Person {conf:.0%}" if cls_name == "person" else cls_name.capitalize()
+                    label_x, label_y = x1, y1 - 6
+                    if cls_name == "person":
+                        (text_width, text_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                        label_x = max(0, min(x1, overlay.shape[1] - text_width - 1))
+                        label_y = min(max(text_height + 2, label_y), max(0, overlay.shape[0] - baseline - 1))
+                    cv2.putText(overlay, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
                 except Exception as e:
                     self.logger.log_error("CameraVision._draw_overlay", f"Box draw error: {e}")
             return overlay
@@ -367,11 +374,15 @@ class CameraVision:
         """Return the result from the most recent detect() or detect_from_frame() call."""
         return _copy_result(self._latest_result)
 
+    def set_person_detector(self, detector):
+        self._person_detector = detector
+
     def draw_overlay_on_frame(self, frame):
         """
         Draw the most recent detection results onto an externally supplied frame.
 
         Uses the detections list from the last detect() or detect_from_frame() call.
+        Fresh person boxes are added separately from fire results.
         No YOLO inference is performed.
 
         Args:
@@ -382,7 +393,14 @@ class CameraVision:
         """
         if frame is None:
             return None
-        return self._draw_overlay(frame, self._latest_result.get("detections", []))
+        detections = list(self._latest_result.get("detections", []))
+        detector = self._person_detector
+        if detector is not None:
+            try:
+                detections.extend(detector.get_latest_result()["detections"])
+            except Exception as error:
+                self.logger.log_error("CameraVision.person_overlay", type(error).__name__)
+        return self._draw_overlay(frame, detections)
 
     def release(self):
         """
