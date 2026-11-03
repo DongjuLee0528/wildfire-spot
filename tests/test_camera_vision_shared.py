@@ -16,7 +16,8 @@ from tests.test_person_detection import FakeModel, predictions, box
 def load_camera_module(cap, fire_model=None, load_error=False):
     cv2 = SimpleNamespace(VideoCapture=mock.Mock(return_value=cap), CAP_PROP_FRAME_WIDTH=1,
                           CAP_PROP_FRAME_HEIGHT=2, CAP_PROP_FPS=3, FONT_HERSHEY_SIMPLEX=0, LINE_AA=0,
-                          rectangle=mock.Mock(), putText=mock.Mock(), imwrite=mock.Mock(return_value=True))
+                          rectangle=mock.Mock(), putText=mock.Mock(), getTextSize=lambda *_: ((110, 14), 6),
+                          imwrite=mock.Mock(return_value=True))
     fire = mock.Mock(return_value=predictions([box()])) if fire_model is None else fire_model
     loader = mock.Mock(side_effect=RuntimeError('fire load failure')) if load_error else mock.Mock(return_value=fire)
     spec = importlib.util.spec_from_file_location('isolated_camera_vision', Path(__file__).parents[1] / 'vision/camera_vision.py')

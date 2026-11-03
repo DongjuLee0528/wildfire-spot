@@ -434,8 +434,8 @@ async def get_camera_stream():
     """
     Stream MJPEG video from the onboard camera with detection overlay.
 
-    Each frame has bounding boxes drawn from the latest fire/smoke detection
-    results via draw_overlay_on_frame(). Returns a multipart/x-mixed-replace
+    Each frame combines fire/smoke boxes with fresh person boxes and confidence
+    labels via draw_overlay_on_frame(). Returns a multipart/x-mixed-replace
     response at ~30 fps. Waits through temporary frame gaps until camera shutdown.
     """
     try:
