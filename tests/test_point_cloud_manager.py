@@ -377,7 +377,7 @@ class MainCleanupTests(unittest.TestCase):
 
     def environment(self):
         env = dict.fromkeys(('point_cloud_uploader', 'fire_detection_stop_event', 'fire_detection_thread', 'camera_control_manager',
-                             '_servo_manager', '_kb_controller', 'spring_telemetry', 'keyboard_input', 'camera_vision'))
+                             '_servo_manager', '_kb_controller', 'spring_telemetry', 'keyboard_input', 'camera_vision', 'person_detector'))
         env.update(runtime=mock.Mock(), logger=mock.Mock())
         return env
 
