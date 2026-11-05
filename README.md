@@ -564,3 +564,8 @@ No ownership is claimed over upstream open-source assets or third-party datasets
 * Third-party datasets, libraries, models, and assets remain subject to their original licenses and terms
 
 See [LICENSE](LICENSE) for the complete license text.
+
+## Local dashboard without Spring or NAS
+
+See [Local dashboard on Jetson](docs/local-dashboard.md) for the separate local
+mode, launch commands and hardware-independent verification limits.

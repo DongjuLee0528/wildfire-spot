@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import PointCloudPanel from './components/PointCloudPanel.jsx';
+import { normalizeLocalDashboard } from './localDashboard.js';
 
 const JWT_KEY = 'jwt_token';
 const getToken = () => localStorage.getItem(JWT_KEY);
 
-export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevice }) {
+export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevice, localMode = false }) {
     const [currentTime, setCurrentTime] = useState(new Date().toISOString());
     const [currentKeyCommand, setCurrentKeyCommand] = useState('STOP');
     const CAMERA_FALLBACK = { available: false, pan: 'UNKNOWN', tilt: null };
@@ -26,6 +27,12 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     const [sensorData, setSensorData] = useState(SENSOR_FALLBACK);
     const FIRE_FALLBACK = { fireDetected: null, confidence: null, severity: null, source: null };
     const [fireData, setFireData] = useState(FIRE_FALLBACK);
+    const hasSource = localMode || !!activeDevice;
+    const [localHealth, setLocalHealth] = useState({});
+    const [localLogs, setLocalLogs] = useState([]);
+    const [localError, setLocalError] = useState('');
+    const [streamAttempt, setStreamAttempt] = useState(0);
+
 
     const [activeMission, setActiveMission] = useState(null);
     const [missionHistory, setMissionHistory] = useState([]);
@@ -35,6 +42,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     const [missionTypeInput, setMissionTypeInput] = useState('PATROL');
 
     const fetchMissionData = () => {
+        if (localMode) return;
         const token = getToken();
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
         Promise.all([
@@ -120,7 +128,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     const fetchWithTimeout = (url, options = {}, timeoutMs = 5000) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
-        const token = getToken();
+        const token = localMode ? null : getToken();
         const headers = {
             ...(options.headers || {}),
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -157,6 +165,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     };
 
     const fetchRobotStatus = () => {
+        if (localMode) return;
         if (!activeDevice) return;
         fetchWithTimeout(`/api/devices/${activeDevice.id}`)
             .then((res) => {
@@ -179,6 +188,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     };
 
     const fetchGps = () => {
+        if (localMode) return;
         if (!activeDevice) return;
         fetchWithTimeout(`/api/devices/${activeDevice.id}/gps/latest`)
             .then((res) => {
@@ -199,7 +209,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
     };
 
     const fetchCameraStatus = () => (
-        fetchWithTimeout('/api/camera/status')
+        fetchWithTimeout(localMode ? '/robot/camera/status' : '/api/camera/status')
             .then(readJsonResponse)
             .then((data) => setCameraStatus(normalizeCameraStatus(data)))
             .catch((err) => {
@@ -228,7 +238,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
 
     useEffect(() => {
         setSensorData(SENSOR_FALLBACK);
-        if (!activeDevice) return;
+        if (localMode || !activeDevice) return;
         const fetchSensors = () =>
             fetchWithTimeout(`/api/devices/${activeDevice.id}/sensors/latest`)
                 .then((res) => {
@@ -253,7 +263,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
 
     useEffect(() => {
         setFireData(FIRE_FALLBACK);
-        if (!activeDevice) return;
+        if (localMode || !activeDevice) return;
         const fetchFireStatus = () =>
             fetchWithTimeout(`/api/devices/${activeDevice.id}/fire-events/latest`)
                 .then((res) => {
@@ -281,9 +291,46 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
         fetchCameraStatus();
     }, []);
 
+    useEffect(() => {
+        if (!localMode) return;
+        let stopped = false, timer;
+        const controller = new AbortController();
+        const poll = async () => {
+            let timeout;
+            try {
+                const attempt = new AbortController();
+                const abort = () => attempt.abort();
+                controller.signal.addEventListener('abort', abort, { once: true });
+                timeout = setTimeout(abort, 10000);
+                let data;
+                try {
+                    const response = await fetch('/robot/dashboard', { signal: attempt.signal, cache: 'no-store' });
+                    if (!response.ok) throw new Error(`Robot API HTTP ${response.status}`);
+                    data = normalizeLocalDashboard(await response.json());
+                } finally { controller.signal.removeEventListener('abort', abort); clearTimeout(timeout); }
+                if (stopped) return;
+                setRobotStatus(data.status); setGpsData(data.gps); setSensorData(data.sensors);
+                setFireData(data.fire); setLocalHealth(data.health); setLocalLogs(data.logs);
+                setCameraStatus(data.camera); setLocalError('');
+            } catch (error) {
+                if (stopped) return;
+                const empty = normalizeLocalDashboard(null);
+                setRobotStatus({ ...empty.status, online: false }); setGpsData(empty.gps);
+                setSensorData(empty.sensors); setFireData(empty.fire); setLocalHealth({});
+                setLocalLogs([]); setCameraStatus(empty.camera);
+                setLocalError(error.name === 'AbortError' ? 'Robot API timed out' : error.message);
+            } finally {
+                clearTimeout(timeout);
+                if (!stopped) timer = setTimeout(poll, 2000);
+            }
+        };
+        poll();
+        return () => { stopped = true; clearTimeout(timer); controller.abort(); };
+    }, [localMode]);
+
     const sendControlCommand = (command) => {
         setControlError('');
-        fetchWithTimeout('/api/control', {
+        fetchWithTimeout(localMode ? '/robot/control' : '/api/control', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ command }),
@@ -310,7 +357,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
         if (nextMode !== 'AUTO' && nextMode !== 'MANUAL') return;
         setModeCommandError('');
         setModeLoading(true);
-        fetchWithTimeout('/api/mode', {
+        fetchWithTimeout(localMode ? '/robot/mode' : '/api/mode', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode: nextMode }),
@@ -337,7 +384,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
 
     const sendCameraCommand = (command) => {
         setCameraCommandError('');
-        fetchWithTimeout('/api/camera/control', {
+        fetchWithTimeout(localMode ? '/robot/camera/control' : '/api/camera/control', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ command }),
@@ -415,7 +462,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
         };
     }, []);
 
-    const logs = [
+    const logs = localMode ? localLogs : [
         { time: '12:45:02', text: 'SYSTEM INITIALIZED SUCCESSFULLY' },
         { time: '12:45:05', text: 'AUTO MODE ENABLED' },
         { time: '12:45:06', text: 'GPS FIX ACQUIRED - 3D FIX' },
@@ -439,7 +486,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                 <div className="header-status-group">
                     <div className="status-item">
                         <span className="status-label">CONN STATUS:</span>
-                        <span className="status-value text-success">ONLINE</span>
+                        <span className={`status-value ${!localMode || robotStatus.online === true ? 'text-success' : ''}`}>{localMode ? robotStatus.online === true ? 'ONLINE' : robotStatus.online === false ? 'OFFLINE' : 'UNKNOWN' : 'ONLINE'}</span>
                     </div>
                     <div className="status-item">
                         <span className="status-label">MODE:</span>
@@ -450,21 +497,22 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                     </div>
                     <div className="active-device-indicator">
                         <span className="status-label">DEVICE:</span>
-                        {activeDevice ? (
+                        {localMode ? <span className="status-value text-highlight">Local robot</span> : activeDevice ? (
                             <span className="status-value text-highlight active-device-name">{activeDevice.name}</span>
                         ) : (
                             <button className="active-device-none" onClick={onNavigateDevice}>No device selected</button>
                         )}
                     </div>
-                    <button className="nav-btn" onClick={() => onNavigate && onNavigate('/device')}>Devices</button>
-                    <button className="logout-btn" onClick={onLogout}>LOGOUT</button>
+                    {!localMode && <button className="nav-btn" onClick={() => onNavigate && onNavigate('/device')}>Devices</button>}
+                    {!localMode && <button className="logout-btn" onClick={onLogout}>LOGOUT</button>}
                 </div>
             </header>
 
             <main className="dashboard-grid">
 
                 <section className="grid-column col-left">
-                    <div className="panel">
+                    {localMode && <div className="panel"><h2 className="panel-title">Local dashboard</h2><div className="panel-content">Live robot data. Saving and mission history are unavailable.{localError && <p className="text-error" role="alert">{localError}</p>}</div></div>}
+                    {!localMode && <div className="panel">
                         <h2 className="panel-title">Mission Control</h2>
                         <div className="panel-content mission-panel-content">
                             <div className="mission-device-row">
@@ -583,10 +631,11 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                         </div>
                     </div>
 
+                    }
                     <div className="panel animate-border">
                         <h2 className="panel-title">Robot Status</h2>
                         <div className="panel-content status-grid">
-                            {!activeDevice ? (
+                            {!hasSource ? (
                                 <div className="data-row"><span className="label subtext">No device selected</span></div>
                             ) : (
                                 <>
@@ -654,23 +703,23 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                         <h2 className="panel-title">System Health Check</h2>
                         <div className="panel-content health-list">
                             <div className="health-item">
-                                <span className="indicator status-ok"></span>
+                                <span className={`indicator ${!localMode ? 'status-ok' : localHealth.robot === true ? 'status-ok' : localHealth.robot === false ? 'status-unavailable' : 'status-unknown'}`}></span>
                                 <span className="health-label">Robot Core</span>
                             </div>
                             <div className="health-item">
-                                <span className="indicator status-ok"></span>
+                                <span className={`indicator ${!localMode ? 'status-ok' : localHealth.camera === true ? 'status-ok' : localHealth.camera === false ? 'status-unavailable' : 'status-unknown'}`}></span>
                                 <span className="health-label">Camera Module</span>
                             </div>
                             <div className="health-item">
-                                <span className="indicator status-ok"></span>
+                                <span className={`indicator ${!localMode ? 'status-ok' : localHealth.gps === true ? 'status-ok' : localHealth.gps === false ? 'status-unavailable' : 'status-unknown'}`}></span>
                                 <span className="health-label">GPS Receiver</span>
                             </div>
                             <div className="health-item">
-                                <span className="indicator status-ok"></span>
+                                <span className={`indicator ${!localMode ? 'status-ok' : localHealth.lidar === true ? 'status-ok' : localHealth.lidar === false ? 'status-unavailable' : 'status-unknown'}`}></span>
                                 <span className="health-label">LiDAR Scanner</span>
                             </div>
                             <div className="health-item">
-                                <span className="indicator status-ok"></span>
+                                <span className={`indicator ${!localMode ? 'status-ok' : localHealth.sensor === true ? 'status-ok' : localHealth.sensor === false ? 'status-unavailable' : 'status-unknown'}`}></span>
                                 <span className="health-label">Environmental Sensors</span>
                             </div>
                         </div>
@@ -693,12 +742,14 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                                     <div className="error-message-container">
                                         <span className="warning-icon">⚠</span>
                                         <p className="main-msg">CAMERA FEED UNAVAILABLE</p>
-                                        <p className="sub-msg">Hardware pipeline active. Awaiting visual stream data sync...</p>
+                                        <p className="sub-msg">{localMode ? 'No camera stream is available.' : 'Hardware pipeline active. Awaiting visual stream data sync...'}</p>
+                                        <button type="button" onClick={() => { setStreamAttempt(value => value + 1); setStreamError(false); }}>Reconnect camera</button>
                                     </div>
                                 ) : (
                                     <img
                                         ref={imgRef}
-                                        src="/api/camera/stream"
+                                        key={streamAttempt}
+                                        src={`${localMode ? '/robot/camera/stream' : '/api/camera/stream'}?attempt=${streamAttempt}`}
                                         alt="Camera Stream"
                                         className="camera-stream-img"
                                         onError={() => setStreamError(true)}
@@ -709,25 +760,26 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                         </div>
                         <div className="camera-control-inline">
                             <span className="camera-stream-label">
-                                Available: {cameraStatus.available === null ? '...' : cameraStatus.available ? 'YES' : 'NO'}
+                                {localMode ? 'Pan/tilt available' : 'Available'}: {cameraStatus.available === null ? '...' : cameraStatus.available ? 'YES' : 'NO'}
                                 {' | '}Pan: {cameraStatus.pan ?? 'UNKNOWN'}
                                 {' | '}Tilt: {cameraStatus.tilt != null ? `${cameraStatus.tilt}°` : 'N/A'}
                                 {cameraCommandError ? ` | Command: ${cameraCommandError}` : ''}
                             </span>
                             <div className="camera-d-pad">
                                 <div className="camera-d-pad-row">
-                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_UP')}>Up (I)</button>
+                                    <button disabled={localMode && cameraStatus.available !== true} className="camera-btn" onClick={() => sendCameraCommand('CAMERA_UP')}>Up (I)</button>
                                 </div>
                                 <div className="camera-d-pad-row">
-                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_LEFT')}>Left (J)</button>
-                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_CENTER')}>Center (O)</button>
-                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_RIGHT')}>Right (L)</button>
+                                    <button disabled={localMode && cameraStatus.available !== true} className="camera-btn" onClick={() => sendCameraCommand('CAMERA_LEFT')}>Left (J)</button>
+                                    <button disabled={localMode && cameraStatus.available !== true} className="camera-btn" onClick={() => sendCameraCommand('CAMERA_CENTER')}>Center (O)</button>
+                                    <button disabled={localMode && cameraStatus.available !== true} className="camera-btn" onClick={() => sendCameraCommand('CAMERA_RIGHT')}>Right (L)</button>
                                 </div>
                                 <div className="camera-d-pad-row">
-                                    <button className="camera-btn" onClick={() => sendCameraCommand('CAMERA_DOWN')}>Down (K)</button>
+                                    <button disabled={localMode && cameraStatus.available !== true} className="camera-btn" onClick={() => sendCameraCommand('CAMERA_DOWN')}>Down (K)</button>
                                 </div>
                             </div>
-                            <span className="camera-shortcut-hint">Shortcuts: I / J / K / L / O</span>
+                            {localMode && <button className="camera-btn" type="button" disabled={cameraStatus.available !== true} onClick={() => sendCameraCommand('CAMERA_STOP')}>Stop pan</button>}
+                            {!localMode && <span className="camera-shortcut-hint">Shortcuts: I / J / K / L / O</span>}
                         </div>
                     </div>
 
@@ -763,7 +815,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                         <div className="panel fire-status-panel">
                             <h2 className="panel-title">Analysis & Verification Status</h2>
                             <div className="panel-content fire-grid">
-                                {!activeDevice ? (
+                                {!hasSource ? (
                                     <div className="fire-card status-unknown">
                                         <span className="fire-card-label">No device selected</span>
                                         <span className="fire-card-value">—</span>
@@ -779,7 +831,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                                             <span className="fire-card-value">{fireData.confidence !== null ? `${(fireData.confidence * 100).toFixed(0)}%` : '...'}</span>
                                         </div>
                                         <div className="fire-card status-unknown">
-                                            <span className="fire-card-label">Severity</span>
+                                            <span className="fire-card-label">{localMode ? 'State' : 'Severity'}</span>
                                             <span className="fire-card-value">{fireData.severity ?? '...'}</span>
                                         </div>
                                     </>
@@ -787,7 +839,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                             </div>
                         </div>
                     </div>
-                    <PointCloudPanel key={activeDevice?.id ?? "no-device"} deviceId={activeDevice?.id} />
+                    <PointCloudPanel key={localMode ? "local" : activeDevice?.id ?? "no-device"} deviceId={activeDevice?.id} localMode={localMode} />
                 </section>
 
                 <section className="grid-column col-right">
@@ -824,14 +876,14 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                     <div className="panel">
                         <h2 className="panel-title">Geospatial Telemetry (GPS)</h2>
                         <div className="panel-content map-wrapper">
-                            <div className="mock-map-canvas">
+                            {!localMode && <div className="mock-map-canvas">
                                 <div className="map-grid-lines"></div>
-                                <div className="map-robot-marker">
+                                {(!localMode || gpsData.fix === true) && <div className="map-robot-marker">
                                     <span className="ping"></span>
                                     <span className="marker-core"></span>
-                                </div>
+                                </div>}
                                 <span className="map-scale-indicator">50m</span>
-                            </div>
+                            </div>}
                             <div className="map-coordinates">
                                 <div className="coord">
                                     <span className="c-lbl">LAT:</span>
@@ -858,6 +910,7 @@ export default function App({ onLogout, onNavigate, activeDevice, onNavigateDevi
                     <div className="panel log-panel">
                         <h2 className="panel-title">Terminal System Logs</h2>
                         <div className="panel-content log-terminal">
+                            {localMode && logs.length === 0 && <p>No runtime log entries available.</p>}
                             {logs.map((log, index) => (
                                 <div key={index} className="log-line">
                                     <span className="log-time">[{log.time}]</span>

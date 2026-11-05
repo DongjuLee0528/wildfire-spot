@@ -56,10 +56,10 @@ export class PointCloudDecoder {
     }
 }
 
-export function connectPointCloud({ deviceId, getToken, onFrame, onState,
+export function connectPointCloud({ deviceId, getToken, onFrame, onState, localMode = false,
     fetchImpl = globalThis.fetch, retryDelays = [1000, 2000, 4000, 8000, 16000],
     staleMs = 2000, timeoutMs = 6000, stableMs = 10000, rotationMs = 55000 }) {
-    if (!deviceId || typeof getToken !== 'function' || typeof onFrame !== 'function' || typeof onState !== 'function' ||
+    if ((!localMode && !deviceId) || typeof getToken !== 'function' || typeof onFrame !== 'function' || typeof onState !== 'function' ||
         retryDelays.length > 5 || retryDelays.some(value => !Number.isFinite(value) || value < 0) ||
         ![staleMs, timeoutMs, stableMs, rotationMs].every(value => Number.isFinite(value) && value > 0) || timeoutMs <= staleMs)
         throw new TypeError('Invalid point-cloud transport settings');
@@ -145,13 +145,13 @@ export function connectPointCloud({ deviceId, getToken, onFrame, onState,
                 emitState('CONNECTING');
                 if (stopped) break;
                 let token;
-                try { token = getToken(); }
+                try { token = localMode ? null : getToken(); }
                 catch { permanent = true; failure = 'Authentication callback failed'; throw new Error(failure); }
                 if (stopped) break;
-                if (typeof token !== 'string' || !token) { permanent = true; failure = 'Authentication required'; throw new Error(failure); }
+                if (!localMode && (typeof token !== 'string' || !token)) { permanent = true; failure = 'Authentication required'; throw new Error(failure); }
                 const attempt = controller;
-                const response = await timed(Promise.resolve(fetchImpl(`/api/devices/${encodeURIComponent(deviceId)}/point-cloud/stream`, {
-                    headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: 'no-store', redirect: 'error',
+                const response = await timed(Promise.resolve(fetchImpl(localMode ? '/robot/point-cloud/stream' : `/api/devices/${encodeURIComponent(deviceId)}/point-cloud/stream`, {
+                    headers: localMode ? {} : { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: 'no-store', redirect: 'error',
                 })).then(async response => {
                     if (attempt.signal.aborted) {
                         if (response.body) await response.body.cancel();

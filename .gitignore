@@ -68,3 +68,4 @@ config.txt
 sensor_manager.txt
 # Agent Instructions
 AGENTS.md
+web/dist-local/

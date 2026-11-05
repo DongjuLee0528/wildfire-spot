@@ -1761,3 +1761,6 @@ body {
 .point-cloud-view-info strong { color: #d6edf5; }
 .point-cloud-controls button[aria-pressed="true"] { border-color: var(--accent-color); color: var(--accent-color); }
 .point-cloud-accumulation select { background: var(--bg-panel-header); color: var(--text-main); border: 1px solid var(--border-color); min-height: 36px; padding: 4px 8px; }
+
+.status-unavailable { background: #fb6262; }
+.status-unknown { background: #657788; }
