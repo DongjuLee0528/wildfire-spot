@@ -2,7 +2,7 @@ import { createPointCloudRenderer } from './pointCloudRenderer.js';
 import { PointCloudHistory } from './pointCloudHistory.js';
 import { connectPointCloud } from '../transport/pointCloudTransport.js';
 
-export function createPointCloudViewerSession({ container, deviceId, getToken, onUpdate,
+export function createPointCloudViewerSession({ container, deviceId, getToken, onUpdate, localMode = false,
     createRenderer = createPointCloudRenderer, connect = connectPointCloud, accumulate = false,
     historyWindowMs = 500, viewMode = 'sensor',
     now = () => performance.now(), setTimer = setTimeout, clearTimer = clearTimeout }) {
@@ -63,7 +63,7 @@ export function createPointCloudViewerSession({ container, deviceId, getToken, o
         renderer = createRenderer(canvas, fail, { accumulate, historyWindowMs, viewMode, now, onView: view => publish({ view }) });
         if (failed) { renderer.destroy(); renderer = null; }
         else {
-            transport = connect({ deviceId, getToken,
+            transport = connect({ deviceId, getToken, localMode,
                 onFrame(frame) {
                     if (disposed || failed) return;
                     try {
