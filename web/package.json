@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:local": "vite --mode robot-local --host 127.0.0.1 --port 5173 --strictPort",
+    "build:local": "vite build --mode robot-local",
+    "preview:local": "vite preview --mode robot-local --host 127.0.0.1 --port 5173 --strictPort",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "react": "^18.3.1",
