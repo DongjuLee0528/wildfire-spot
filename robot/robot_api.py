@@ -1,7 +1,8 @@
 """
 Wildfire Spot Robot API.
 
-Exposes Robot Core data and control interfaces to the Spring RobotGatewayClient.
+Exposes Robot Core data and control interfaces to the Spring RobotGatewayClient
+and the opt-in loopback local dashboard.
 All endpoints fail gracefully when hardware managers are unavailable.
 
 Run with:
@@ -29,6 +30,8 @@ _mode_control_manager = None
 _patrol_zone_manager = None
 _camera_control_manager = None
 _camera_vision = None
+_point_cloud_manager = None
+_local_dashboard_enabled = False
 
 _CAMERA_COMMANDS = {
     "CAMERA_LEFT",
@@ -59,6 +62,8 @@ def configure(
     patrol_zone_manager=_UNSET,
     camera_control_manager=_UNSET,
     camera_vision=_UNSET,
+    point_cloud_manager=_UNSET,
+    local_dashboard_enabled=_UNSET,
 ):
     """
     Inject runtime dependencies into the API module.
@@ -75,9 +80,12 @@ def configure(
         patrol_zone_manager: PatrolZoneManager for GPS waypoint management.
         camera_control_manager: CameraControlManager for pan-tilt control.
         camera_vision: CameraVision instance for live video streaming.
+        point_cloud_manager: Existing receiver owner, read by local viewers only.
+        local_dashboard_enabled: Enable local snapshot and binary stream routes.
     """
     global _state_machine, _collector, _manual_control_manager
     global _mode_control_manager, _patrol_zone_manager, _camera_control_manager, _camera_vision
+    global _point_cloud_manager, _local_dashboard_enabled
     if state_machine is not _UNSET:
         _state_machine = state_machine
     if collector is not _UNSET:
@@ -92,6 +100,10 @@ def configure(
         _camera_control_manager = camera_control_manager
     if camera_vision is not _UNSET:
         _camera_vision = camera_vision
+    if point_cloud_manager is not _UNSET:
+        _point_cloud_manager = point_cloud_manager
+    if local_dashboard_enabled is not _UNSET:
+        _local_dashboard_enabled = bool(local_dashboard_enabled)
 
 
 @asynccontextmanager
@@ -102,6 +114,16 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Wildfire Spot Robot API", version="0.2.0", lifespan=_lifespan)
+
+
+@app.middleware("http")
+async def local_origin_guard(request: Request, call_next):
+    origin = request.headers.get("origin")
+    allowed = {"http://127.0.0.1:5173", "http://localhost:5173",
+               "http://127.0.0.1:8000", "http://localhost:8000"}
+    if _local_dashboard_enabled and origin is not None and origin not in allowed:
+        return JSONResponse(status_code=403, content={"error": "local_origin_rejected"})
+    return await call_next(request)
 
 
 class ControlRequest(BaseModel):
@@ -473,3 +495,86 @@ async def get_camera_stream():
         _generate(),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+@app.get("/robot/point-cloud/status")
+def get_point_cloud_status():
+    if not _local_dashboard_enabled:
+        return JSONResponse(status_code=404, content={"error": "local_dashboard_disabled"})
+    if _point_cloud_manager is None:
+        return {"state": "UNAVAILABLE", "error": "receiver_unavailable", "age_seconds": None}
+    try:
+        return _point_cloud_manager.get_status()
+    except Exception as error:
+        logger.error("Local point-cloud status failed: %s", type(error).__name__)
+        return JSONResponse(status_code=503, content={"error": "point_cloud_status_unavailable"})
+
+
+@app.get("/robot/point-cloud/stream")
+async def get_point_cloud_stream(request: Request):
+    if not _local_dashboard_enabled:
+        return JSONResponse(status_code=404, content={"error": "local_dashboard_disabled"})
+    manager = _point_cloud_manager
+    try:
+        frame = None if manager is None else manager.get_latest_frame()
+        if frame is None:
+            return JSONResponse(status_code=503, content={"error": "point_cloud_unavailable"})
+    except Exception as error:
+        logger.error("Local point-cloud preflight failed: %s", type(error).__name__)
+        return JSONResponse(status_code=503, content={"error": "point_cloud_unavailable"})
+
+    async def generate():
+        previous = None
+        while _local_dashboard_enabled and manager is _point_cloud_manager:
+            if await request.is_disconnected():
+                return
+            try:
+                current = manager.get_latest_frame()
+                if current is None:
+                    return
+                identity = (current.timestamp, current.cloud_id)
+                if identity != previous:
+                    previous = identity
+                    yield current.data
+            except Exception as error:
+                logger.error("Local point-cloud stream failed: %s", type(error).__name__)
+                return
+            await asyncio.sleep(0.03)
+
+    return StreamingResponse(generate(), media_type="application/octet-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.get("/robot/dashboard")
+def get_local_dashboard():
+    if not _local_dashboard_enabled:
+        return JSONResponse(status_code=404, content={"error": "local_dashboard_disabled"})
+    if _collector is None:
+        return JSONResponse(status_code=503, content={"error": "robot_unavailable"})
+
+    def read(getter):
+        try:
+            result = getter()
+            return None if isinstance(result, JSONResponse) else result
+        except Exception as error:
+            logger.error("Local dashboard read failed: %s", type(error).__name__)
+            return None
+
+    camera = read(get_camera_status)
+    stream_available, vision = None, None
+    if _camera_vision is not None:
+        try:
+            stream_available = _camera_vision.is_camera_available()
+            vision = _camera_vision.get_latest_result()
+        except Exception as error:
+            logger.error("Local camera read failed: %s", type(error).__name__)
+    status, gps, sensors, fire, health, logs = [read(getter) for getter in
+        (get_status, get_gps, get_sensors, get_fire_status, get_health, get_logs)]
+    lidar = read(get_point_cloud_status)
+    if health is not None:
+        health["camera"] = stream_available
+        health["lidar"] = None if lidar is None else lidar.get("state") == "STREAMING"
+        health["sensor"] = None if sensors is None else health.get("sensor")
+    return {"status": status, "gps": gps, "sensors": sensors, "fire": fire,
+            "health": health, "logs": logs, "camera": camera,
+            "cameraStreamAvailable": stream_available, "vision": vision, "lidar": lidar}
