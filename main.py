@@ -415,7 +415,8 @@ def _start_fire_detection_loop(logger, fire_detector, camera_vision, state_machi
 
 def _start_robot_api_server(logger):
     # Read host/port from environment so they can be overridden without code changes
-    host = os.environ.get("ROBOT_API_HOST", "0.0.0.0")
+    from utils.config import LOCAL_DASHBOARD_ENABLED
+    host = "127.0.0.1" if LOCAL_DASHBOARD_ENABLED else os.environ.get("ROBOT_API_HOST", "0.0.0.0")
     port = int(os.environ.get("ROBOT_API_PORT", "8000"))
     try:
         import uvicorn
@@ -752,6 +753,7 @@ def main():
         logger.log_system_state(f"GAIT_LOOP_AVAILABLE={gait_available}")
         print(f"Gait loop available: {gait_available}")
 
+        from utils.config import LOCAL_DASHBOARD_ENABLED
         robot_api.configure(
             state_machine=runtime.state_machine,
             collector=_collector,
@@ -760,6 +762,8 @@ def main():
             patrol_zone_manager=patrol_zone_manager,
             camera_control_manager=camera_control_manager,
             camera_vision=camera_vision,
+            point_cloud_manager=runtime.point_cloud_manager,
+            local_dashboard_enabled=LOCAL_DASHBOARD_ENABLED,
         )
 
         _start_robot_api_server(logger)
@@ -770,7 +774,7 @@ def main():
             state_machine=runtime.state_machine,
         )
 
-        if SPRING_TELEMETRY_ENABLED:
+        if SPRING_TELEMETRY_ENABLED and not LOCAL_DASHBOARD_ENABLED:
             print("SpringTelemetry: enabled")
             try:
                 from robot.spring_api_client import SpringApiClient
@@ -797,9 +801,9 @@ def main():
                 print(f"SpringTelemetry: failed to start — {e}")
                 logger.log_error("Main.spring_telemetry", str(e))
         else:
-            print("SpringTelemetry: disabled (set SPRING_TELEMETRY_ENABLED=true to enable)")
+            print("SpringTelemetry: disabled (local dashboard mode)" if LOCAL_DASHBOARD_ENABLED else "SpringTelemetry: disabled (set SPRING_TELEMETRY_ENABLED=true to enable)")
 
-        if SPRING_TELEMETRY_ENABLED and runtime.point_cloud_manager is not None:
+        if SPRING_TELEMETRY_ENABLED and not LOCAL_DASHBOARD_ENABLED and runtime.point_cloud_manager is not None:
             try:
                 from robot.point_cloud_uploader import start_point_cloud_uploader
                 point_cloud_uploader = start_point_cloud_uploader(

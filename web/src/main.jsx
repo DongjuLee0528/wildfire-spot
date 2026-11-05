@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
+import { LOCAL_MODE } from './dashboardMode.js'
 import LoginPage from './pages/LoginPage.jsx'
 import SignupPage from './pages/SignupPage.jsx'
 import DevicePage from './pages/DevicePage.jsx'
@@ -120,6 +121,6 @@ function Root() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
-        <Root />
+        {LOCAL_MODE ? <App localMode /> : <Root />}
     </React.StrictMode>,
 )
